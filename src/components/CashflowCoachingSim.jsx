@@ -2,6 +2,10 @@
 
 import { useState, useRef, useEffect, useMemo } from "react";
 import "@/lib/storage";
+import { supabase } from "@/lib/supabase";
+import { signOut, getCurrentUser, isAdmin, getDisplayName } from "@/lib/auth";
+import { deletePlayer as deletePlayerFromDB } from "@/lib/storage";
+import AuthScreen from "./AuthScreen";
 
 /* ═══════════════════════════════════════════════════
    24칸 쥐경주 판 배열 (확정)
@@ -780,7 +784,7 @@ function BankLoanUI({ shortage, bankLoan, monthlyCF, currentInterest, onLoan }) 
 /* ═══════════════════════════════════════════════════
    PlayMode 컴포넌트
 ═══════════════════════════════════════════════════ */
-function PlayMode({ version, currentPlayer, onSaveGame }) {
+function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewClickedSessions }) {
   const deck = DECKS[version];
   const [job, setJob] = useState(null);
   const [turnLog, setTurnLog] = useState([]);
@@ -799,6 +803,7 @@ function PlayMode({ version, currentPlayer, onSaveGame }) {
   const [rightsPrice, setRightsPrice] = useState(0);
   const [downsizeRestTurns, setDownsizeRestTurns] = useState(0); // 다운사이즈 이후 남은 휴식 턴 수 (0~2)
   const [gameEnded, setGameEnded] = useState(false); // 쥐경주 탈출 시 true
+  const [playSessionId, setPlaySessionId] = useState(null); // 후기 버튼용 세션 ID
   const [totalCF, setTotalCF] = useState(0);
   const [cash, setCash] = useState(0); // 보유 현금
   const [bankLoan, setBankLoan] = useState(0); // 은행 대출 잔액 ($1,000 단위)
@@ -1194,7 +1199,7 @@ function PlayMode({ version, currentPlayer, onSaveGame }) {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           {JOBS.map(j => (
-            <button key={j.name} onClick={() => { setJob(j.name); setStartTime(timerOn ? Date.now() : null); setCash(j.savings + j.cashflow); }} style={{
+            <button key={j.name} onClick={() => { setJob(j.name); setStartTime(timerOn ? Date.now() : null); setCash(j.savings + j.cashflow); setPlaySessionId(`play-${Date.now()}`); }} style={{
               padding: "14px 12px", borderRadius: 12, border: "1px solid #27272a",
               background: "#111118", cursor: "pointer", textAlign: "left",
             }}>
@@ -2070,11 +2075,141 @@ function PlayMode({ version, currentPlayer, onSaveGame }) {
         width: "100%", marginTop: 8, padding: 12, borderRadius: 10, border: "1px solid #27272a",
         background: "transparent", color: "#52525b", cursor: "pointer", fontSize: 12,
       }}>게임 초기화</button>
+
+      {/* ─── 후기 버튼 (Phase A) — 게임이 어느 정도 진행됐을 때만 표시 ─── */}
+      {playSessionId && turnLog.length >= 3 && (
+        <div style={{
+          marginTop: 16,
+          padding: 16,
+          borderRadius: 12,
+          background: reviewClickedSessions?.has(playSessionId) ? "#14532d20" : "#7c2d1220",
+          border: `1px solid ${reviewClickedSessions?.has(playSessionId) ? "#16a34a40" : "#ea580c40"}`,
+          textAlign: "center",
+        }}>
+          {reviewClickedSessions?.has(playSessionId) ? (
+            <>
+              <div style={{ fontSize: 13, color: "#86efac", fontWeight: 700, marginBottom: 4 }}>
+                ✅ 후기를 작성해주셔서 감사합니다!
+              </div>
+              <div style={{ fontSize: 10, color: "#71717a" }}>
+                소중한 의견은 서비스 개선에 반영됩니다.
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 13, color: "#fafafa", fontWeight: 700, marginBottom: 6 }}>
+                💬 플레이 경험을 나눠주세요
+              </div>
+              <div style={{ fontSize: 11, color: "#a1a1aa", marginBottom: 10 }}>
+                {gameEnded ? "🎉 탈출 축하드립니다! 소감을 들려주세요." : "지금까지의 플레이는 어떠셨나요?"}
+              </div>
+              <button
+                onClick={() => onReviewPrompt?.(playSessionId)}
+                style={{
+                  padding: "10px 20px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: "#ea580c",
+                  color: "#fff",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                📝 후기 작성하기
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 export default function CoachingSimulator() {
+  // ─── 인증 상태 (Phase A) ───
+  const [authUser, setAuthUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [isGuest, setIsGuest] = useState(false);
+  const [userIsAdmin, setUserIsAdmin] = useState(false);
+
+  // 후기 버튼 클릭 추적 (게임 세션 ID 기준)
+  const [reviewClickedSessions, setReviewClickedSessions] = useState(new Set());
+
+  // 초기 세션 확인 + 인증 상태 변화 구독
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const user = await getCurrentUser();
+        if (!mounted) return;
+        if (user) {
+          setAuthUser(user);
+          const admin = await isAdmin(user.id);
+          if (mounted) setUserIsAdmin(admin);
+        }
+      } catch (e) {
+        console.error("세션 확인 실패:", e);
+      } finally {
+        if (mounted) setAuthLoading(false);
+      }
+    })();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        if (!mounted) return;
+        const user = session?.user || null;
+        setAuthUser(user);
+        if (user) {
+          const admin = await isAdmin(user.id);
+          if (mounted) setUserIsAdmin(admin);
+        } else {
+          setUserIsAdmin(false);
+        }
+      }
+    );
+
+    return () => {
+      mounted = false;
+      subscription?.unsubscribe?.();
+    };
+  }, []);
+
+  // 로그아웃 핸들러 (확실한 초기화)
+  const handleSignOut = async () => {
+    try { await signOut(); } catch (e) { console.warn("signOut 에러(무시):", e); }
+    if (typeof window !== "undefined") {
+      try { localStorage.clear(); sessionStorage.clear(); } catch {}
+      window.location.href = "/";
+    }
+  };
+
+  // 게스트 제한 체크 (플레이/플레이어/플레이어게임 탭)
+  const guardAuth = (mode) => {
+    if (isGuest && (mode === "play" || mode === "players" || mode === "playerGames")) {
+      if (typeof window !== "undefined" && window.confirm("이 기능은 로그인이 필요합니다.\n로그인 화면으로 이동하시겠습니까?")) {
+        setIsGuest(false);
+      }
+      return false;
+    }
+    return true;
+  };
+
+  // 후기 폼 열기 (게임당 한 번만)
+  const REVIEW_FORM_URL = "https://naver.me/xCt79F9H";
+  const openReviewForm = (sessionId) => {
+    if (typeof window !== "undefined") {
+      window.open(REVIEW_FORM_URL, "_blank", "noopener,noreferrer");
+    }
+    if (sessionId) {
+      setReviewClickedSessions(prev => {
+        const next = new Set(prev);
+        next.add(sessionId);
+        return next;
+      });
+    }
+  };
+
   const [appMode, setAppMode] = useState("sim"); // "sim" | "players" | "playerGames" | "play"
   const [turns, setTurns] = useState(20);
   const [version, setVersion] = useState("101");
@@ -2089,15 +2224,19 @@ export default function CoachingSimulator() {
   const [newPlayerName, setNewPlayerName] = useState("");
   const [viewingGame, setViewingGame] = useState(null);
 
-  // 플레이어 목록 로드
+  // 플레이어 목록 로드 (로그인 상태에 따라)
   useEffect(() => {
+    if (!authUser) {
+      setPlayers({});
+      return;
+    }
     (async () => {
       try {
         const r = await window.storage?.get("players");
         if (r?.value) setPlayers(JSON.parse(r.value));
       } catch {}
     })();
-  }, []);
+  }, [authUser]);
 
   // 플레이어 저장
   const savePlayers = async (data) => {
@@ -2125,6 +2264,8 @@ export default function CoachingSimulator() {
       const keys = await window.storage?.list(`game:${id}:`);
       if (keys?.keys) { for (const k of keys.keys) { await window.storage?.delete(k); } }
     } catch {}
+    // DB에서 실제 플레이어 레코드 삭제 (Phase A)
+    try { await deletePlayerFromDB(id); } catch {}
     if (currentPlayer?.id === id) { setCurrentPlayer(null); setAppMode("players"); }
   };
 
@@ -2352,10 +2493,15 @@ export default function CoachingSimulator() {
     </div>
   );
 
+  // 현재 게임 세션 ID (후기 버튼 중복 방지용)
+  const [currentSessionId, setCurrentSessionId] = useState(null);
+
   const run = () => {
     const r = simulate(turns, version);
     setResults(r);
     setExpandedTurn(null);
+    // 시뮬레이션마다 새 세션 ID 부여
+    setCurrentSessionId(`sim-${Date.now()}`);
     setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
   };
 
@@ -2379,8 +2525,106 @@ export default function CoachingSimulator() {
     return s;
   }, [results, deck]);
 
+  // ─── 인증 게이트 (Phase A) ───
+  if (authLoading) {
+    return (
+      <div style={{
+        minHeight: "100vh",
+        background: "#080810",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "#71717a",
+        fontSize: 14,
+        fontFamily: "'Pretendard Variable', 'Noto Sans KR', -apple-system, sans-serif",
+      }}>
+        로딩 중...
+      </div>
+    );
+  }
+
+  // 로그인 안 됨 + 게스트 모드 아님 → 로그인 화면
+  if (!authUser && !isGuest) {
+    return (
+      <AuthScreen
+        onGuestMode={() => setIsGuest(true)}
+        onAuthSuccess={() => { /* 구독 콜백이 처리함 */ }}
+      />
+    );
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: "#080810", color: "#d4d4d8", fontFamily: "'Pretendard Variable', 'Noto Sans KR', -apple-system, sans-serif" }}>
+
+      {/* ═══ 상단 사용자 바 (Phase A) ═══ */}
+      <div style={{
+        background: "#111118",
+        borderBottom: "1px solid #27272a",
+        padding: "10px 16px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        maxWidth: 560,
+        margin: "0 auto",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {authUser ? (
+            <>
+              <span style={{ fontSize: 12, color: "#fafafa", fontWeight: 700 }}>
+                {getDisplayName(authUser)}
+              </span>
+              {userIsAdmin && (
+                <span style={{
+                  fontSize: 9,
+                  fontWeight: 800,
+                  padding: "2px 6px",
+                  borderRadius: 4,
+                  background: "#f59e0b",
+                  color: "#000",
+                }}>
+                  🔑 ADMIN
+                </span>
+              )}
+            </>
+          ) : (
+            <span style={{ fontSize: 12, color: "#a1a1aa" }}>
+              🎲 게스트 모드 (기록 저장 안 됨)
+            </span>
+          )}
+        </div>
+        {authUser ? (
+          <button
+            onClick={handleSignOut}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 6,
+              border: "1px solid #27272a",
+              background: "transparent",
+              color: "#a1a1aa",
+              fontSize: 11,
+              cursor: "pointer",
+            }}
+          >
+            로그아웃
+          </button>
+        ) : (
+          <button
+            onClick={() => setIsGuest(false)}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 6,
+              border: "1px solid #f59e0b",
+              background: "#f59e0b20",
+              color: "#f59e0b",
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            로그인
+          </button>
+        )}
+      </div>
 
       {/* ═══ 플레이어 선택 화면 ═══ */}
       {appMode === "players" && renderPlayerSelect()}
@@ -2442,25 +2686,30 @@ export default function CoachingSimulator() {
             color: appMode === "sim" ? "#93c5fd" : "#52525b",
             fontSize: 13, fontWeight: 700,
           }}>🎲 시뮬레이션</button>
-          <button onClick={() => { setAppMode("play"); }} style={{
+          <button onClick={() => { if (guardAuth("play")) setAppMode("play"); }} style={{
             flex: 1, padding: "12px", border: "none", cursor: "pointer",
             background: appMode === "play" ? "#22c55e20" : "#111118",
             borderBottom: appMode === "play" ? "2px solid #22c55e" : "2px solid transparent",
             color: appMode === "play" ? "#86efac" : "#52525b",
             fontSize: 13, fontWeight: 700,
-          }}>🎮 플레이</button>
-          <button onClick={() => { setAppMode("players"); }} style={{
+            opacity: isGuest ? 0.5 : 1,
+          }}>🎮 플레이{isGuest ? " 🔒" : ""}</button>
+          <button onClick={() => { if (guardAuth("players")) setAppMode("players"); }} style={{
             flex: 1, padding: "12px", border: "none", cursor: "pointer",
             background: appMode === "players" ? "#f59e0b20" : "#111118",
             borderBottom: "2px solid transparent",
             color: "#52525b",
             fontSize: 13, fontWeight: 700,
-          }}>👤 플레이어</button>
+            opacity: isGuest ? 0.5 : 1,
+          }}>👤 플레이어{isGuest ? " 🔒" : ""}</button>
         </div>
 
         {/* ═══ 플레이 모드 (항상 렌더링, 숨김 처리로 상태 보존) ═══ */}
         <div style={{ display: appMode === "play" ? "block" : "none" }}>
-          <PlayMode version={version} currentPlayer={currentPlayer} onSaveGame={async (gameData) => {
+          <PlayMode version={version} currentPlayer={currentPlayer} 
+            onReviewPrompt={openReviewForm}
+            reviewClickedSessions={reviewClickedSessions}
+            onSaveGame={async (gameData) => {
             if (!currentPlayer) return;
             try {
               const ts = Date.now();
@@ -2655,6 +2904,53 @@ export default function CoachingSimulator() {
 
             {/* 디브리핑 섹션 */}
             <DebriefSection results={results} version={version} turns={turns} deck={deck} />
+
+            {/* ─── 후기 버튼 (Phase A) ─── */}
+            {currentSessionId && (
+              <div style={{
+                marginTop: 20,
+                padding: 16,
+                borderRadius: 12,
+                background: reviewClickedSessions.has(currentSessionId) ? "#14532d20" : "#7c2d1220",
+                border: `1px solid ${reviewClickedSessions.has(currentSessionId) ? "#16a34a40" : "#ea580c40"}`,
+                textAlign: "center",
+              }}>
+                {reviewClickedSessions.has(currentSessionId) ? (
+                  <>
+                    <div style={{ fontSize: 13, color: "#86efac", fontWeight: 700, marginBottom: 4 }}>
+                      ✅ 후기를 작성해주셔서 감사합니다!
+                    </div>
+                    <div style={{ fontSize: 10, color: "#71717a" }}>
+                      소중한 의견은 서비스 개선에 반영됩니다.
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 13, color: "#fafafa", fontWeight: 700, marginBottom: 6 }}>
+                      💬 시뮬레이션은 어떠셨나요?
+                    </div>
+                    <div style={{ fontSize: 11, color: "#a1a1aa", marginBottom: 10 }}>
+                      짧은 후기로 더 나은 서비스를 만들어주세요!
+                    </div>
+                    <button
+                      onClick={() => openReviewForm(currentSessionId)}
+                      style={{
+                        padding: "10px 20px",
+                        borderRadius: 8,
+                        border: "none",
+                        background: "#ea580c",
+                        color: "#fff",
+                        fontSize: 13,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      📝 후기 작성하기
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
 

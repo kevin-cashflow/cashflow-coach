@@ -3,18 +3,15 @@
 import { supabase } from "./supabase";
 
 /**
- * window.storage 호환 어댑터
+ * window.storage 호환 어댑터 (Phase A 수정판)
  *
- * 기존 코드의 window.storage.get/set/delete/list 호출을
- * 그대로 유지하면서 뒷단을 Supabase로 연결함.
- *
- * 키 패턴 → 테이블 매핑:
- *   "players"                     → players 테이블 전체
- *   "game:{playerId}:{ts}"        → games 테이블 (한 건)
- *   "debrief:{ts}"                → debrief_reports 테이블 (한 건)
+ * 변경사항:
+ * - 모든 저장 작업에 user_id 자동 포함
+ * - RLS가 본인 데이터만 접근하도록 필터링
+ * - Admin은 RLS 정책상 전체 접근 가능 (DB에서 자동 처리)
  */
 
-// ── 키 파싱 ──
+// ─── 키 파싱 ───
 function parseKey(key) {
   if (!key) return { kind: "unknown" };
   if (key === "players") return { kind: "players" };
@@ -28,7 +25,13 @@ function parseKey(key) {
   return { kind: "unknown", key };
 }
 
-// ── DB 행 → 기존 JSON 포맷 변환 ──
+// ─── 현재 로그인된 user_id 조회 ───
+async function getCurrentUserId() {
+  const { data: { user } } = await supabase.auth.getUser();
+  return user?.id || null;
+}
+
+// ─── DB 행 → JSON 포맷 변환 ───
 function gameFromRow(row) {
   const dt = row.date_time ? new Date(row.date_time) : new Date();
   return {
@@ -69,11 +72,12 @@ function reportFromRow(row) {
   };
 }
 
-// ── GET ──
+// ─── GET ───
 async function get(key) {
   const k = parseKey(key);
 
   if (k.kind === "players") {
+    // RLS가 자동으로 본인 데이터만 반환
     const { data, error } = await supabase.from("players").select("*");
     if (error || !data) return null;
     const obj = {};
@@ -110,10 +114,17 @@ async function get(key) {
   return null;
 }
 
-// ── SET ──
+// ─── SET ───
 async function set(key, value) {
   const k = parseKey(key);
   const data = typeof value === "string" ? JSON.parse(value) : value;
+  const userId = await getCurrentUserId();
+
+  // 로그인 안 된 상태에서는 저장 불가 (게스트는 시뮬레이션만)
+  if (!userId) {
+    console.warn("[storage] 로그인이 필요합니다. 저장 스킵:", key);
+    return null;
+  }
 
   if (k.kind === "players") {
     const entries = Object.entries(data);
@@ -122,6 +133,7 @@ async function set(key, value) {
         id,
         name: p.name,
         games_played: p.gamesPlayed || 0,
+        user_id: userId,
       });
     }
     return { key, value, shared: false };
@@ -131,6 +143,7 @@ async function set(key, value) {
     await supabase.from("games").upsert({
       id: k.ts,
       player_id: k.playerId,
+      user_id: userId,
       version: data.version,
       job: data.job,
       turn_count: data.turnCount,
@@ -151,6 +164,7 @@ async function set(key, value) {
   if (k.kind === "debrief") {
     await supabase.from("debrief_reports").upsert({
       id: k.ts,
+      user_id: userId,
       version: data.version,
       turns: data.turns,
       analysis: data.analysis,
@@ -164,18 +178,28 @@ async function set(key, value) {
   return null;
 }
 
-// ── DELETE ──
+// ─── DELETE ───
 async function del(key) {
   const k = parseKey(key);
+
   if (k.kind === "game") {
     await supabase.from("games").delete().eq("id", k.ts);
   } else if (k.kind === "debrief") {
     await supabase.from("debrief_reports").delete().eq("id", k.ts);
+  } else if (k.kind === "players") {
+    // 플레이어 삭제 케이스는 없지만 일관성을 위해 처리
+    // 특정 플레이어 삭제는 다른 로직 사용
   }
   return { key, deleted: true, shared: false };
 }
 
-// ── LIST ──
+// ─── 특정 플레이어 삭제 (기존 코드 호환) ───
+// CashflowCoachingSim.jsx에서 플레이어 삭제 시 직접 호출
+export async function deletePlayer(playerId) {
+  await supabase.from("players").delete().eq("id", playerId);
+}
+
+// ─── LIST ───
 async function list(prefix) {
   if (prefix?.startsWith("game:")) {
     const parts = prefix.split(":");
@@ -207,7 +231,7 @@ async function list(prefix) {
   return { keys: [], prefix, shared: false };
 }
 
-// ── window.storage와 동일한 API 노출 ──
+// ─── window.storage와 동일한 API 노출 ───
 export const storageAdapter = {
   get,
   set,
@@ -215,7 +239,7 @@ export const storageAdapter = {
   list,
 };
 
-// ── 전역에 주입 (기존 window.storage 호출이 그대로 동작) ──
+// ─── 전역에 주입 ───
 if (typeof window !== "undefined") {
   window.storage = storageAdapter;
 }
