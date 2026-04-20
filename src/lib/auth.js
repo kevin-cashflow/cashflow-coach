@@ -36,10 +36,33 @@ export async function signOut() {
   if (error) throw error;
 }
 
-// ─── 현재 사용자 조회 ───
+// ─── 현재 사용자 조회 (자동 복구 포함) ───
 export async function getCurrentUser() {
-  const { data: { user } } = await supabase.auth.getUser();
-  return user;
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error) {
+      // 토큰 만료/손상 시 자동 복구
+      if (error.message?.includes("Refresh Token") ||
+          error.message?.includes("Invalid") ||
+          error.status === 400) {
+        console.warn("토큰 만료 감지, 세션 초기화:", error.message);
+        try { await supabase.auth.signOut(); } catch {}
+        if (typeof window !== "undefined") {
+          try { localStorage.clear(); sessionStorage.clear(); } catch {}
+        }
+        return null;
+      }
+      throw error;
+    }
+    return user;
+  } catch (e) {
+    console.error("getCurrentUser 실패:", e);
+    // 예외 발생 시에도 안전하게 null 반환
+    if (typeof window !== "undefined") {
+      try { localStorage.clear(); sessionStorage.clear(); } catch {}
+    }
+    return null;
+  }
 }
 
 // ─── 현재 사용자가 Admin인지 확인 ───

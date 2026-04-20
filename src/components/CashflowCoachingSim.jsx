@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { signOut, getCurrentUser, isAdmin, getDisplayName } from "@/lib/auth";
 import { deletePlayer as deletePlayerFromDB } from "@/lib/storage";
 import AuthScreen from "./AuthScreen";
+import GatePasswordDialog from "./GatePasswordDialog";
 
 /* ═══════════════════════════════════════════════════
    24칸 쥐경주 판 배열 (확정)
@@ -784,7 +785,7 @@ function BankLoanUI({ shortage, bankLoan, monthlyCF, currentInterest, onLoan }) 
 /* ═══════════════════════════════════════════════════
    PlayMode 컴포넌트
 ═══════════════════════════════════════════════════ */
-function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewClickedSessions }) {
+function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewClickedSessions, isContestMode = false }) {
   const deck = DECKS[version];
   const [job, setJob] = useState(null);
   const [turnLog, setTurnLog] = useState([]);
@@ -1119,7 +1120,8 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     // 이번 턴에 BABY라면 양육비가 늘어나 총지출이 증가함
     const babiesAfter = cellType === "BABY" ? Math.min(babies + 1, 3) : babies;
     const newExpense = (jobData ? jobData.expense : 0) + (jobData ? babiesAfter * jobData.childCost : 0) + loanInterest;
-    if (newTotalCF > newExpense && !gameEnded) {
+    // 대회 모드에서는 자동 탈출 금지 (수동 "탈출 선언" 버튼으로만 탈출)
+    if (newTotalCF > newExpense && !gameEnded && !isContestMode) {
       setGameEnded(true);
     }
   };
@@ -1148,6 +1150,10 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       dice: [0], total: 0, pos: 0,
     }));
     const now = new Date();
+    // Phase B: 대회 모드 및 탈출 관련 정보
+    const passiveIncome = assets
+      .filter(a => a.type !== "주식")
+      .reduce((sum, a) => sum + (a.cf || 0), 0);
     return {
       version, job, turnCount: turnLog.length,
       date: now.toLocaleDateString("ko-KR"),
@@ -1155,6 +1161,12 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       dateTime: now.toISOString(),
       turnLog, assets, cash, totalCF, bankLoan, loanInterest, babies, gameEnded,
       simText: buildPromptText(gameResults, version, turnLog.length),
+      // Phase B 추가 필드
+      isContest: isContestMode,
+      escaped: gameEnded, // 쥐경주 탈출 여부
+      escapeTimeSec: gameEnded ? elapsed : null,
+      passiveIncomeAtEscape: gameEnded ? passiveIncome : null,
+      jobAtEscape: gameEnded ? job : null,
     };
   };
 
@@ -1182,24 +1194,26 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
           <p style={{ fontSize: 12, color: "#71717a", marginTop: 4 }}>게임에서 뽑은 직업 카드를 선택하세요</p>
         </div>
 
-        {/* 타이머 토글 */}
-        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 10, marginBottom: 16, padding: "10px 16px", borderRadius: 10, background: "#111118", border: "1px solid #27272a" }}>
-          <span style={{ fontSize: 12, color: timerOn ? "#f59e0b" : "#52525b" }}>⏱ 시간 측정</span>
-          <button onClick={() => setTimerOn(!timerOn)} style={{
-            width: 44, height: 24, borderRadius: 12, border: "none", cursor: "pointer",
-            background: timerOn ? "#f59e0b" : "#27272a", position: "relative", transition: "background 0.2s",
-          }}>
-            <div style={{
-              width: 18, height: 18, borderRadius: 9, background: "#fff",
-              position: "absolute", top: 3,
-              left: timerOn ? 23 : 3, transition: "left 0.2s",
-            }}></div>
-          </button>
-          <span style={{ fontSize: 10, color: "#71717a" }}>{timerOn ? "켜짐 — 결정 속도 분석 가능" : "꺼짐"}</span>
-        </div>
+        {/* 타이머 토글 — 대회 모드에서는 숨김 + 강제 ON */}
+        {!isContestMode && (
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 10, marginBottom: 16, padding: "10px 16px", borderRadius: 10, background: "#111118", border: "1px solid #27272a" }}>
+            <span style={{ fontSize: 12, color: timerOn ? "#f59e0b" : "#52525b" }}>⏱ 시간 측정</span>
+            <button onClick={() => setTimerOn(!timerOn)} style={{
+              width: 44, height: 24, borderRadius: 12, border: "none", cursor: "pointer",
+              background: timerOn ? "#f59e0b" : "#27272a", position: "relative", transition: "background 0.2s",
+            }}>
+              <div style={{
+                width: 18, height: 18, borderRadius: 9, background: "#fff",
+                position: "absolute", top: 3,
+                left: timerOn ? 23 : 3, transition: "left 0.2s",
+              }}></div>
+            </button>
+            <span style={{ fontSize: 10, color: "#71717a" }}>{timerOn ? "켜짐 — 결정 속도 분석 가능" : "꺼짐"}</span>
+          </div>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           {JOBS.map(j => (
-            <button key={j.name} onClick={() => { setJob(j.name); setStartTime(timerOn ? Date.now() : null); setCash(j.savings + j.cashflow); setPlaySessionId(`play-${Date.now()}`); }} style={{
+            <button key={j.name} onClick={() => { setJob(j.name); setTimerOn(true); setStartTime(Date.now()); setCash(j.savings + j.cashflow); setPlaySessionId(`play-${Date.now()}`); }} style={{
               padding: "14px 12px", borderRadius: 12, border: "1px solid #27272a",
               background: "#111118", cursor: "pointer", textAlign: "left",
             }}>
@@ -2054,6 +2068,44 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         />
       )}
 
+      {/* 🎉 탈출 선언 버튼 (Phase B) — 조건 만족 시 활성화 */}
+      {job && !gameEnded && turnLog.length >= 1 && (() => {
+        const jobData = JOBS.find(x => x.name === job);
+        if (!jobData) return null;
+        const passiveIncome = assets
+          .filter(a => a.type !== "주식")
+          .reduce((sum, a) => sum + (a.cf || 0), 0);
+        const totalExpense = jobData.expense + (babies * jobData.childCost) + loanInterest;
+        const canEscape = passiveIncome > totalExpense;
+        return (
+          <div style={{ marginTop: 12 }}>
+            <button 
+              disabled={!canEscape}
+              onClick={() => {
+                if (!canEscape) return;
+                if (window.confirm(`🎉 쥐경주 탈출을 선언하시겠습니까?\n\n패시브인컴: $${fmtNum(passiveIncome)}/월\n총지출: $${fmtNum(totalExpense)}/월\n\n탈출 후에는 게임이 종료됩니다.`)) {
+                  setGameEnded(true);
+                }
+              }}
+              style={{
+                width: "100%", padding: 14, borderRadius: 12, border: "none", cursor: canEscape ? "pointer" : "not-allowed",
+                background: canEscape ? "linear-gradient(135deg, #eab308, #f59e0b)" : "#27272a",
+                color: canEscape ? "#000" : "#52525b",
+                fontSize: 14, fontWeight: 800,
+              }}>
+              {canEscape 
+                ? `🎉 쥐경주 탈출 선언! (패시브 $${fmtNum(passiveIncome)} > 지출 $${fmtNum(totalExpense)})`
+                : `🔒 탈출 조건 미달 (패시브 $${fmtNum(passiveIncome)} / 지출 $${fmtNum(totalExpense)})`}
+            </button>
+            {!canEscape && (
+              <div style={{ fontSize: 10, color: "#71717a", marginTop: 4, textAlign: "center" }}>
+                빅딜/스몰딜 카드로 자산을 축적하여 패시브인컴이 총지출을 초과하면 탈출할 수 있습니다.
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* 게임 저장 (플레이어 등록 시) */}
       {currentPlayer && turnLog.length >= 3 && (
         <button onClick={() => {
@@ -2132,6 +2184,50 @@ export default function CoachingSimulator() {
   const [authLoading, setAuthLoading] = useState(true);
   const [isGuest, setIsGuest] = useState(false);
   const [userIsAdmin, setUserIsAdmin] = useState(false);
+
+  // ─── 게이트 인증 상태 (Phase B) ───
+  const [contestUnlocked, setContestUnlocked] = useState(false);
+  const [debriefUnlocked, setDebriefUnlocked] = useState(false);
+  const [gateDialog, setGateDialog] = useState(null); // null | "contest" | "debrief"
+  const gateDialogResolveRef = useRef(null);
+
+  // 게이트 검증 함수 (Promise 반환)
+  const requireGate = (gateType) => {
+    if (userIsAdmin) return Promise.resolve(true);
+    if (gateType === "contest" && contestUnlocked) return Promise.resolve(true);
+    if (gateType === "debrief" && debriefUnlocked) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      gateDialogResolveRef.current = resolve;
+      setGateDialog(gateType);
+    });
+  };
+
+  const handleGateSuccess = () => {
+    if (gateDialog === "contest") setContestUnlocked(true);
+    if (gateDialog === "debrief") setDebriefUnlocked(true);
+    gateDialogResolveRef.current?.(true);
+    setGateDialog(null);
+  };
+
+  const handleGateCancel = () => {
+    gateDialogResolveRef.current?.(false);
+    setGateDialog(null);
+  };
+
+  // window에 게이트 함수 노출 (DebriefSection에서 접근용)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.__requireDebriefGate = () => requireGate("debrief");
+    window.__debriefUnlocked = debriefUnlocked;
+    window.__userIsAdmin = userIsAdmin;
+    window.__authUserId = authUser?.id || null;
+    return () => {
+      // cleanup
+    };
+  }, [debriefUnlocked, userIsAdmin, authUser, contestUnlocked]);
+
+  // ─── 대회 모드 플래그 ───
+  const [isContestMode, setIsContestMode] = useState(false);
 
   // 후기 버튼 클릭 추적 (게임 세션 ID 기준)
   const [reviewClickedSessions, setReviewClickedSessions] = useState(new Set());
@@ -2228,6 +2324,10 @@ export default function CoachingSimulator() {
   useEffect(() => {
     if (!authUser) {
       setPlayers({});
+      // 로그아웃 시 게이트 상태도 리셋 (Phase B)
+      setContestUnlocked(false);
+      setDebriefUnlocked(false);
+      setIsContestMode(false);
       return;
     }
     (async () => {
@@ -2556,6 +2656,15 @@ export default function CoachingSimulator() {
   return (
     <div style={{ minHeight: "100vh", background: "#080810", color: "#d4d4d8", fontFamily: "'Pretendard Variable', 'Noto Sans KR', -apple-system, sans-serif" }}>
 
+      {/* ═══ 게이트 비밀번호 팝업 (Phase B) ═══ */}
+      {gateDialog && (
+        <GatePasswordDialog
+          gateType={gateDialog}
+          onSuccess={handleGateSuccess}
+          onCancel={handleGateCancel}
+        />
+      )}
+
       {/* ═══ 상단 사용자 바 (Phase A) ═══ */}
       <div style={{
         background: "#111118",
@@ -2677,23 +2786,38 @@ export default function CoachingSimulator() {
           ))}
         </div>
 
-        {/* 시뮬레이션 / 플레이 / 플레이어 모드 탭 */}
+        {/* 시뮬레이션 / 플레이 / 대회 / 플레이어 모드 탭 */}
         <div style={{ display: "flex", gap: 0, marginBottom: 24, borderRadius: 12, overflow: "hidden", border: "1px solid #27272a" }}>
-          <button onClick={() => { setAppMode("sim"); }} style={{
+          <button onClick={() => { setAppMode("sim"); setIsContestMode(false); }} style={{
             flex: 1, padding: "12px", border: "none", cursor: "pointer",
             background: appMode === "sim" ? "#3b82f620" : "#111118",
             borderBottom: appMode === "sim" ? "2px solid #3b82f6" : "2px solid transparent",
             color: appMode === "sim" ? "#93c5fd" : "#52525b",
             fontSize: 13, fontWeight: 700,
-          }}>🎲 시뮬레이션</button>
-          <button onClick={() => { if (guardAuth("play")) setAppMode("play"); }} style={{
+          }}>🎲 시뮬</button>
+          <button onClick={() => { if (guardAuth("play")) { setAppMode("play"); setIsContestMode(false); } }} style={{
             flex: 1, padding: "12px", border: "none", cursor: "pointer",
-            background: appMode === "play" ? "#22c55e20" : "#111118",
-            borderBottom: appMode === "play" ? "2px solid #22c55e" : "2px solid transparent",
-            color: appMode === "play" ? "#86efac" : "#52525b",
+            background: appMode === "play" && !isContestMode ? "#22c55e20" : "#111118",
+            borderBottom: appMode === "play" && !isContestMode ? "2px solid #22c55e" : "2px solid transparent",
+            color: appMode === "play" && !isContestMode ? "#86efac" : "#52525b",
             fontSize: 13, fontWeight: 700,
             opacity: isGuest ? 0.5 : 1,
           }}>🎮 플레이{isGuest ? " 🔒" : ""}</button>
+          <button onClick={async () => {
+            if (!guardAuth("play")) return;
+            const ok = await requireGate("contest");
+            if (ok) {
+              setAppMode("play");
+              setIsContestMode(true);
+            }
+          }} style={{
+            flex: 1, padding: "12px", border: "none", cursor: "pointer",
+            background: appMode === "play" && isContestMode ? "#dc262620" : "#111118",
+            borderBottom: appMode === "play" && isContestMode ? "2px solid #dc2626" : "2px solid transparent",
+            color: appMode === "play" && isContestMode ? "#fca5a5" : "#52525b",
+            fontSize: 13, fontWeight: 700,
+            opacity: isGuest ? 0.5 : 1,
+          }}>🏆 대회{isGuest ? " 🔒" : (!contestUnlocked && !userIsAdmin ? " 🔒" : "")}</button>
           <button onClick={() => { if (guardAuth("players")) setAppMode("players"); }} style={{
             flex: 1, padding: "12px", border: "none", cursor: "pointer",
             background: appMode === "players" ? "#f59e0b20" : "#111118",
@@ -2704,9 +2828,30 @@ export default function CoachingSimulator() {
           }}>👤 플레이어{isGuest ? " 🔒" : ""}</button>
         </div>
 
+        {/* ═══ 대회 모드 배너 (Phase B) ═══ */}
+        {appMode === "play" && isContestMode && (
+          <div style={{
+            marginBottom: 16,
+            padding: 12,
+            borderRadius: 10,
+            background: "linear-gradient(135deg, #7f1d1d, #dc2626)",
+            border: "1px solid #f87171",
+            textAlign: "center",
+            color: "#fff",
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 2, marginBottom: 2 }}>
+              🏆 CONTEST MODE
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>
+              대회 진행 중 · 기록이 랭킹에 반영됩니다
+            </div>
+          </div>
+        )}
+
         {/* ═══ 플레이 모드 (항상 렌더링, 숨김 처리로 상태 보존) ═══ */}
         <div style={{ display: appMode === "play" ? "block" : "none" }}>
           <PlayMode version={version} currentPlayer={currentPlayer} 
+            isContestMode={isContestMode}
             onReviewPrompt={openReviewForm}
             reviewClickedSessions={reviewClickedSessions}
             onSaveGame={async (gameData) => {
@@ -3200,6 +3345,11 @@ function DebriefSection({ results, version, turns, deck }) {
 
   // ─── 1단계: 디브리핑 분석 (Claude API → JSON) ───
   const runAnalysis = async () => {
+    // Phase B: 디브리핑 게이트 체크 (Admin은 자동 통과)
+    if (typeof window !== "undefined" && window.__requireDebriefGate && !window.__debriefUnlocked && !window.__userIsAdmin) {
+      const ok = await window.__requireDebriefGate();
+      if (!ok) return;
+    }
     setMode("analysis");
     setLoadingAnalysis(true);
     setError("");

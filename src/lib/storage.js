@@ -3,12 +3,14 @@
 import { supabase } from "./supabase";
 
 /**
- * window.storage 호환 어댑터 (Phase A 수정판)
+ * window.storage 호환 어댑터 (Phase B)
  *
- * 변경사항:
- * - 모든 저장 작업에 user_id 자동 포함
- * - RLS가 본인 데이터만 접근하도록 필터링
- * - Admin은 RLS 정책상 전체 접근 가능 (DB에서 자동 처리)
+ * Phase A 기능:
+ * - user_id 자동 포함
+ * - RLS 본인 데이터 필터링
+ *
+ * Phase B 추가:
+ * - is_contest, escaped 등 대회 관련 필드 저장
  */
 
 // ─── 키 파싱 ───
@@ -53,6 +55,12 @@ function gameFromRow(row) {
     simText: row.sim_text,
     debrief: row.debrief,
     playerId: row.player_id,
+    // Phase B 필드
+    isContest: row.is_contest || false,
+    escaped: row.escaped || false,
+    escapeTimeSec: row.escape_time_sec,
+    passiveIncomeAtEscape: row.passive_income_at_escape,
+    jobAtEscape: row.job_at_escape,
   };
 }
 
@@ -69,6 +77,11 @@ function reportFromRow(row) {
     feedback: row.feedback,
     feedbackTier: row.feedback_tier,
     simText: row.sim_text,
+    tier: row.tier,
+    tokenUsage: row.token_usage,
+    modelUsed: row.model_used,
+    gameId: row.game_id,
+    isSimulation: row.is_simulation,
   };
 }
 
@@ -77,7 +90,6 @@ async function get(key) {
   const k = parseKey(key);
 
   if (k.kind === "players") {
-    // RLS가 자동으로 본인 데이터만 반환
     const { data, error } = await supabase.from("players").select("*");
     if (error || !data) return null;
     const obj = {};
@@ -120,7 +132,6 @@ async function set(key, value) {
   const data = typeof value === "string" ? JSON.parse(value) : value;
   const userId = await getCurrentUserId();
 
-  // 로그인 안 된 상태에서는 저장 불가 (게스트는 시뮬레이션만)
   if (!userId) {
     console.warn("[storage] 로그인이 필요합니다. 저장 스킵:", key);
     return null;
@@ -157,6 +168,12 @@ async function set(key, value) {
       game_ended: data.gameEnded,
       sim_text: data.simText,
       debrief: data.debrief || null,
+      // Phase B 필드
+      is_contest: data.isContest || false,
+      escaped: data.escaped || false,
+      escape_time_sec: data.escapeTimeSec || null,
+      passive_income_at_escape: data.passiveIncomeAtEscape || null,
+      job_at_escape: data.jobAtEscape || null,
     });
     return { key, value, shared: false };
   }
@@ -171,6 +188,12 @@ async function set(key, value) {
       feedback: data.feedback,
       feedback_tier: data.feedbackTier,
       sim_text: data.simText,
+      // Phase B 필드
+      tier: data.tier || (data.feedbackTier != null ? (data.feedbackTier === 0 ? 'free' : data.feedbackTier === 1 ? 'detailed' : 'premium') : 'analysis'),
+      token_usage: data.tokenUsage || null,
+      model_used: data.modelUsed || null,
+      game_id: data.gameId || null,
+      is_simulation: data.isSimulation || false,
     });
     return { key, value, shared: false };
   }
@@ -186,15 +209,11 @@ async function del(key) {
     await supabase.from("games").delete().eq("id", k.ts);
   } else if (k.kind === "debrief") {
     await supabase.from("debrief_reports").delete().eq("id", k.ts);
-  } else if (k.kind === "players") {
-    // 플레이어 삭제 케이스는 없지만 일관성을 위해 처리
-    // 특정 플레이어 삭제는 다른 로직 사용
   }
   return { key, deleted: true, shared: false };
 }
 
-// ─── 특정 플레이어 삭제 (기존 코드 호환) ───
-// CashflowCoachingSim.jsx에서 플레이어 삭제 시 직접 호출
+// ─── 특정 플레이어 삭제 ───
 export async function deletePlayer(playerId) {
   await supabase.from("players").delete().eq("id", playerId);
 }
@@ -231,7 +250,7 @@ async function list(prefix) {
   return { keys: [], prefix, shared: false };
 }
 
-// ─── window.storage와 동일한 API 노출 ───
+// ─── window.storage API 노출 ───
 export const storageAdapter = {
   get,
   set,
@@ -239,7 +258,6 @@ export const storageAdapter = {
   list,
 };
 
-// ─── 전역에 주입 ───
 if (typeof window !== "undefined") {
   window.storage = storageAdapter;
 }
