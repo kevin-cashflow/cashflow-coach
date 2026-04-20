@@ -7,6 +7,14 @@ import { signOut, getCurrentUser, isAdmin, getDisplayName } from "@/lib/auth";
 import { deletePlayer as deletePlayerFromDB } from "@/lib/storage";
 import AuthScreen from "./AuthScreen";
 import GatePasswordDialog from "./GatePasswordDialog";
+import TierBadge, { TierProgressCard } from "./TierBadge";
+import TierUpModal from "./TierUpModal";
+import { calculateTier, checkTierUp, getTierByCount } from "@/lib/tier";
+import MyHistoryTab from "./MyHistoryTab";
+import RankingTab from "./RankingTab";
+import AdminPanel from "./AdminPanel";
+import ProfileTab from "./ProfileTab";
+import CoachBadge from "./CoachBadge";
 
 /* ═══════════════════════════════════════════════════
    24칸 쥐경주 판 배열 (확정)
@@ -2106,21 +2114,35 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         );
       })()}
 
-      {/* 게임 저장 (플레이어 등록 시) */}
-      {currentPlayer && turnLog.length >= 3 && (
-        <button onClick={() => {
-          onSaveGame?.(buildGamePayload());
-          alert(`${currentPlayer.name}님의 게임이 저장되었습니다.`);
+      {/* 게임 저장 (로그인 사용자 기준, 플레이어 불필요) */}
+      {turnLog.length >= 3 && (
+        <button onClick={async () => {
+          try {
+            const result = await onSaveGame?.(buildGamePayload());
+            // result가 null이면 저장 실패 (storage.js에서 처리되어 이미 alert 뜸)
+            // result가 존재하면 성공
+            if (result !== null && result !== undefined) {
+              alert("✅ 게임이 저장되었습니다.");
+            }
+            // 성공/실패 구분 없이 storage.js가 이미 alert로 알려줌
+          } catch (e) {
+            console.error("[게임 저장] 예외:", e);
+            alert(`⚠️ 게임 저장 중 오류: ${e.message || "알 수 없는 오류"}`);
+          }
         }} style={{
           width: "100%", marginTop: 12, padding: 14, borderRadius: 12, border: "none", cursor: "pointer",
           background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700,
-        }}>💾 게임 저장 ({currentPlayer.name} #{currentPlayer.id})</button>
+        }}>💾 게임 저장</button>
       )}
 
       {/* 초기화 */}
-      <button onClick={() => {
-        if (currentPlayer && turnLog.length >= 3) {
-          onSaveGame?.(buildGamePayload());
+      <button onClick={async () => {
+        if (turnLog.length >= 3) {
+          try {
+            await onSaveGame?.(buildGamePayload());
+          } catch (e) {
+            console.error("[초기화 중 저장] 예외:", e);
+          }
         }
         resetGame();
       }} style={{
@@ -2229,6 +2251,67 @@ export default function CoachingSimulator() {
   // ─── 대회 모드 플래그 ───
   const [isContestMode, setIsContestMode] = useState(false);
 
+  // ─── 티어 시스템 (Phase B Day 2) ───
+  const [userTotalPlays, setUserTotalPlays] = useState(0);
+  const [tierUpModal, setTierUpModal] = useState(null); // { from, to } | null
+  const prevPlayCountRef = useRef(0);
+  
+  // 코칭딜러 자격 (Phase B Day 2 후반)
+  const [userCredential, setUserCredential] = useState(null); // 'master' | 'dealer' | null
+
+  // 사용자 통계 + 자격 로드 (user_stats 뷰)
+  const loadUserStats = async () => {
+    if (!authUser) {
+      setUserTotalPlays(0);
+      setUserCredential(null);
+      prevPlayCountRef.current = 0;
+      return;
+    }
+    try {
+      const { data } = await supabase
+        .from("user_stats")
+        .select("total_plays, credential")
+        .eq("user_id", authUser.id)
+        .maybeSingle();
+      const count = data?.total_plays || 0;
+      setUserTotalPlays(count);
+      setUserCredential(data?.credential || null);
+      prevPlayCountRef.current = count;
+    } catch (e) {
+      console.warn("user_stats 조회 실패:", e);
+    }
+  };
+
+  // 로그인 시 초기 통계 로드
+  useEffect(() => {
+    if (authUser) loadUserStats();
+  }, [authUser]);
+
+  // 게임 저장 후 승급 체크
+  const checkTierUpAfterGame = async () => {
+    if (!authUser) return;
+    try {
+      const { data } = await supabase
+        .from("user_stats")
+        .select("total_plays")
+        .eq("user_id", authUser.id)
+        .maybeSingle();
+      const newCount = data?.total_plays || 0;
+      const oldCount = prevPlayCountRef.current;
+      
+      if (newCount > oldCount) {
+        const tierUp = checkTierUp(oldCount, newCount);
+        if (tierUp) {
+          setTierUpModal(tierUp);
+        }
+        setUserTotalPlays(newCount);
+        prevPlayCountRef.current = newCount;
+      }
+    } catch (e) {
+      console.warn("승급 체크 실패:", e);
+    }
+  };
+
   // 후기 버튼 클릭 추적 (게임 세션 ID 기준)
   const [reviewClickedSessions, setReviewClickedSessions] = useState(new Set());
 
@@ -2328,6 +2411,11 @@ export default function CoachingSimulator() {
       setContestUnlocked(false);
       setDebriefUnlocked(false);
       setIsContestMode(false);
+      // Phase B Day 2: 티어 상태도 리셋
+      setUserTotalPlays(0);
+      setUserCredential(null);
+      setTierUpModal(null);
+      prevPlayCountRef.current = 0;
       return;
     }
     (async () => {
@@ -2665,6 +2753,14 @@ export default function CoachingSimulator() {
         />
       )}
 
+      {/* ═══ 티어 승급 축하 모달 (Phase B Day 2) ═══ */}
+      {tierUpModal && (
+        <TierUpModal
+          tierUp={tierUpModal}
+          onClose={() => setTierUpModal(null)}
+        />
+      )}
+
       {/* ═══ 상단 사용자 바 (Phase A) ═══ */}
       <div style={{
         background: "#111118",
@@ -2682,6 +2778,8 @@ export default function CoachingSimulator() {
               <span style={{ fontSize: 12, color: "#fafafa", fontWeight: 700 }}>
                 {getDisplayName(authUser)}
               </span>
+              <TierBadge playCount={userTotalPlays} size="sm" showName={true} />
+              {userCredential && <CoachBadge credential={userCredential} size="sm" showName={true} />}
               {userIsAdmin && (
                 <span style={{
                   fontSize: 9,
@@ -2735,11 +2833,88 @@ export default function CoachingSimulator() {
         )}
       </div>
 
-      {/* ═══ 플레이어 선택 화면 ═══ */}
-      {appMode === "players" && renderPlayerSelect()}
+      {/* ═══ 프로필 탭 (Phase B Day 2 후반) ═══ */}
+      {appMode === "profile" && (
+        <div>
+          <div style={{ maxWidth: 560, margin: "0 auto", padding: "14px 16px 0 16px" }}>
+            <button onClick={() => setAppMode("sim")} style={{
+              padding: "6px 12px",
+              borderRadius: 6,
+              border: "1px solid #27272a",
+              background: "transparent",
+              color: "#a1a1aa",
+              fontSize: 11,
+              cursor: "pointer",
+            }}>
+              ← 홈으로
+            </button>
+          </div>
+          <ProfileTab authUser={authUser} />
+        </div>
+      )}
 
-      {/* ═══ 플레이어 게임 목록 화면 ═══ */}
+      {/* ═══ (deprecated) 플레이어 게임 목록 화면 — 직접 접근 불가 ═══ */}
       {appMode === "playerGames" && renderPlayerGames()}
+
+      {/* ═══ 내 이력 탭 (Phase B Day 2) ═══ */}
+      {appMode === "history" && (
+        <div>
+          <div style={{ maxWidth: 560, margin: "0 auto", padding: "14px 16px 0 16px" }}>
+            <button onClick={() => setAppMode("sim")} style={{
+              padding: "6px 12px",
+              borderRadius: 6,
+              border: "1px solid #27272a",
+              background: "transparent",
+              color: "#a1a1aa",
+              fontSize: 11,
+              cursor: "pointer",
+            }}>
+              ← 홈으로
+            </button>
+          </div>
+          <MyHistoryTab authUser={authUser} />
+        </div>
+      )}
+
+      {/* ═══ 랭킹 탭 (Phase B Day 2) ═══ */}
+      {appMode === "ranking" && (
+        <div>
+          <div style={{ maxWidth: 560, margin: "0 auto", padding: "14px 16px 0 16px" }}>
+            <button onClick={() => setAppMode("sim")} style={{
+              padding: "6px 12px",
+              borderRadius: 6,
+              border: "1px solid #27272a",
+              background: "transparent",
+              color: "#a1a1aa",
+              fontSize: 11,
+              cursor: "pointer",
+            }}>
+              ← 홈으로
+            </button>
+          </div>
+          <RankingTab authUser={authUser} />
+        </div>
+      )}
+
+      {/* ═══ Admin 패널 (Phase B Day 2) ═══ */}
+      {appMode === "admin" && userIsAdmin && (
+        <div>
+          <div style={{ maxWidth: 560, margin: "0 auto", padding: "14px 16px 0 16px" }}>
+            <button onClick={() => setAppMode("sim")} style={{
+              padding: "6px 12px",
+              borderRadius: 6,
+              border: "1px solid #27272a",
+              background: "transparent",
+              color: "#a1a1aa",
+              fontSize: 11,
+              cursor: "pointer",
+            }}>
+              ← 홈으로
+            </button>
+          </div>
+          <AdminPanel authUser={authUser} userIsAdmin={userIsAdmin} />
+        </div>
+      )}
 
       {/* ═══ 시뮬레이션 / 플레이 모드 ═══ */}
       {(appMode === "sim" || appMode === "play") && (
@@ -2786,8 +2961,8 @@ export default function CoachingSimulator() {
           ))}
         </div>
 
-        {/* 시뮬레이션 / 플레이 / 대회 / 플레이어 모드 탭 */}
-        <div style={{ display: "flex", gap: 0, marginBottom: 24, borderRadius: 12, overflow: "hidden", border: "1px solid #27272a" }}>
+        {/* 1줄: 시뮬레이션 / 플레이 / 대회 / 플레이어 (게임 모드) */}
+        <div style={{ display: "flex", gap: 0, marginBottom: 8, borderRadius: 12, overflow: "hidden", border: "1px solid #27272a" }}>
           <button onClick={() => { setAppMode("sim"); setIsContestMode(false); }} style={{
             flex: 1, padding: "12px", border: "none", cursor: "pointer",
             background: appMode === "sim" ? "#3b82f620" : "#111118",
@@ -2818,14 +2993,42 @@ export default function CoachingSimulator() {
             fontSize: 13, fontWeight: 700,
             opacity: isGuest ? 0.5 : 1,
           }}>🏆 대회{isGuest ? " 🔒" : (!contestUnlocked && !userIsAdmin ? " 🔒" : "")}</button>
-          <button onClick={() => { if (guardAuth("players")) setAppMode("players"); }} style={{
+          <button onClick={() => { if (guardAuth("play")) setAppMode("profile"); }} style={{
             flex: 1, padding: "12px", border: "none", cursor: "pointer",
-            background: appMode === "players" ? "#f59e0b20" : "#111118",
-            borderBottom: "2px solid transparent",
-            color: "#52525b",
+            background: appMode === "profile" ? "#f59e0b20" : "#111118",
+            borderBottom: appMode === "profile" ? "2px solid #f59e0b" : "2px solid transparent",
+            color: appMode === "profile" ? "#fde68a" : "#52525b",
             fontSize: 13, fontWeight: 700,
             opacity: isGuest ? 0.5 : 1,
-          }}>👤 플레이어{isGuest ? " 🔒" : ""}</button>
+          }}>👤 프로필{isGuest ? " 🔒" : ""}</button>
+        </div>
+
+        {/* 2줄: 내 이력 / 랭킹 / Admin (Phase B Day 2) */}
+        <div style={{ display: "flex", gap: 0, marginBottom: 24, borderRadius: 12, overflow: "hidden", border: "1px solid #27272a" }}>
+          <button onClick={() => { if (guardAuth("play")) setAppMode("history"); }} style={{
+            flex: 1, padding: "10px", border: "none", cursor: "pointer",
+            background: appMode === "history" ? "#a855f720" : "#111118",
+            borderBottom: appMode === "history" ? "2px solid #a855f7" : "2px solid transparent",
+            color: appMode === "history" ? "#c4b5fd" : "#52525b",
+            fontSize: 12, fontWeight: 700,
+            opacity: isGuest ? 0.5 : 1,
+          }}>📊 내이력{isGuest ? " 🔒" : ""}</button>
+          <button onClick={() => { setAppMode("ranking"); }} style={{
+            flex: 1, padding: "10px", border: "none", cursor: "pointer",
+            background: appMode === "ranking" ? "#eab30820" : "#111118",
+            borderBottom: appMode === "ranking" ? "2px solid #eab308" : "2px solid transparent",
+            color: appMode === "ranking" ? "#fde68a" : "#52525b",
+            fontSize: 12, fontWeight: 700,
+          }}>🏅 랭킹</button>
+          {userIsAdmin && (
+            <button onClick={() => setAppMode("admin")} style={{
+              flex: 1, padding: "10px", border: "none", cursor: "pointer",
+              background: appMode === "admin" ? "#ef444420" : "#111118",
+              borderBottom: appMode === "admin" ? "2px solid #ef4444" : "2px solid transparent",
+              color: appMode === "admin" ? "#fca5a5" : "#52525b",
+              fontSize: 12, fontWeight: 700,
+            }}>⚙️ Admin</button>
+          )}
         </div>
 
         {/* ═══ 대회 모드 배너 (Phase B) ═══ */}
@@ -2855,16 +3058,35 @@ export default function CoachingSimulator() {
             onReviewPrompt={openReviewForm}
             reviewClickedSessions={reviewClickedSessions}
             onSaveGame={async (gameData) => {
-            if (!currentPlayer) return;
             try {
               const ts = Date.now();
-              const key = `game:${currentPlayer.id}:${ts}`;
-              await window.storage?.set(key, JSON.stringify({ ...gameData, ts, playerId: currentPlayer.id, playerName: currentPlayer.name }));
-              if (players[currentPlayer.id]) {
+              // 플레이어 있으면 사용, 없으면 "solo" 사용 (user_id 기반으로 저장)
+              const playerId = currentPlayer?.id || "solo";
+              const playerName = currentPlayer?.name || "개인플레이";
+              const key = `game:${playerId}:${ts}`;
+              const result = await window.storage?.set(key, JSON.stringify({ ...gameData, ts, playerId, playerName }));
+              
+              // 저장 실패 시 (storage.js v3에서 null 반환)
+              if (!result) {
+                console.warn("[CashflowCoachingSim] 게임 저장 실패 (storage.set returned null)");
+                return null;
+              }
+              
+              if (currentPlayer && players[currentPlayer.id]) {
                 const updated = { ...players, [currentPlayer.id]: { ...players[currentPlayer.id], gamesPlayed: (players[currentPlayer.id].gamesPlayed || 0) + 1 } };
                 savePlayers(updated);
               }
-            } catch (e) { console.error("게임 저장 실패:", e); }
+              // Phase B Day 2: 게임 저장 후 승급 체크 + 티어 재조회
+              setTimeout(() => {
+                checkTierUpAfterGame();
+                loadUserStats();  // 프로필 탭 통계도 즉시 반영
+              }, 1000);
+              
+              return result;
+            } catch (e) { 
+              console.error("게임 저장 실패:", e);
+              return null;
+            }
           }} />
         </div>
 
