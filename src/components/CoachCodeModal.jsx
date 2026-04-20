@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
 
 /**
  * 🔑 코칭딜러 코드 입력 모달 (Phase B Day 2)
@@ -73,9 +74,22 @@ export default function CoachCodeModal({ authUser, onSuccess, onClose }) {
     setError("");
 
     try {
+      // 사용자 세션 토큰 가져오기
+      const { data: { session } } = await supabase.auth.getSession();
+      const userToken = session?.access_token;
+      
+      if (!userToken) {
+        setError("로그인 세션이 만료되었습니다. 다시 로그인해주세요.");
+        setLoading(false);
+        return;
+      }
+      
       const res = await fetch("/api/coach/redeem-code", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${userToken}`,
+        },
         body: JSON.stringify({
           code,
           userId: authUser?.id,
