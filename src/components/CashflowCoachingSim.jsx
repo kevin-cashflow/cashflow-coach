@@ -15,6 +15,14 @@ import RankingTab from "./RankingTab";
 import AdminPanel from "./AdminPanel";
 import ProfileTab from "./ProfileTab";
 import CoachBadge from "./CoachBadge";
+import { 
+  saveGameSession, 
+  saveGameSessionImmediate,
+  loadGameSession, 
+  deleteGameSession,
+  hasGameSession,
+  clearLocal as clearLocalGameSession,
+} from "@/lib/gameSession";
 
 /* ═══════════════════════════════════════════════════
    24칸 쥐경주 판 배열 (확정)
@@ -793,7 +801,7 @@ function BankLoanUI({ shortage, bankLoan, monthlyCF, currentInterest, onLoan }) 
 /* ═══════════════════════════════════════════════════
    PlayMode 컴포넌트
 ═══════════════════════════════════════════════════ */
-function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewClickedSessions, isContestMode = false }) {
+function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewClickedSessions, isContestMode = false, authUser = null }) {
   const deck = DECKS[version];
   const [job, setJob] = useState(null);
   const [turnLog, setTurnLog] = useState([]);
@@ -1193,7 +1201,270 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     setReSellIdx(0); setReSellPrice(""); setStockSellQty({}); setStockSellPrice({});
   };
 
+  // ═══════════════════════════════════════════════════
+  // 🛡️ 자동 저장 / 복구 (Phase B Day 3)
+  // ═══════════════════════════════════════════════════
+  const [sessionRestored, setSessionRestored] = useState(false);
+  const [showRestorePrompt, setShowRestorePrompt] = useState(false);
+  const [pendingRestoreData, setPendingRestoreData] = useState(null);
+
+  // 게임 시작 시 복구 체크 (job 선택 전) - 로컬 우선, 즉시
+  useEffect(() => {
+    if (sessionRestored || job) return; // 이미 복구했거나 게임 진행 중이면 스킵
+    
+    // 1차: localStorage 즉시 체크 (동기, 매우 빠름)
+    try {
+      const localRaw = typeof window !== "undefined" 
+        ? localStorage.getItem("cashflow_game_session") 
+        : null;
+      
+      if (localRaw) {
+        const local = JSON.parse(localRaw);
+        if (local && local.game_state && local.game_state.turnLog && local.game_state.turnLog.length > 0) {
+          console.log("[복구] localStorage에서 진행 중 게임 발견:", local.game_state.turnLog.length + "턴");
+          setPendingRestoreData(local);
+          setShowRestorePrompt(true);
+          setSessionRestored(true);
+          return; // 로컬 있으면 바로 모달 띄움
+        }
+      }
+    } catch (e) {
+      console.warn("[복구] localStorage 읽기 실패:", e);
+    }
+    
+    // 2차: Supabase 체크 (로컬에 없을 때만, 2초 타임아웃)
+    const checkSupabase = async () => {
+      if (!authUser?.id) {
+        setSessionRestored(true);
+        return;
+      }
+      
+      try {
+        const saved = await loadGameSession(authUser.id);
+        if (saved && saved.game_state && saved.game_state.turnLog && saved.game_state.turnLog.length > 0) {
+          console.log("[복구] Supabase에서 진행 중 게임 발견:", saved.game_state.turnLog.length + "턴");
+          setPendingRestoreData(saved);
+          setShowRestorePrompt(true);
+        }
+      } catch (e) {
+        console.warn("[복구] Supabase 체크 실패:", e);
+      } finally {
+        setSessionRestored(true);
+      }
+    };
+    
+    checkSupabase();
+  }, [authUser, job, sessionRestored]);
+
+  // 복구 실행
+  const handleRestore = () => {
+    if (!pendingRestoreData) return;
+    const state = pendingRestoreData.game_state;
+    
+    try {
+      setJob(state.job || null);
+      setTurnLog(state.turnLog || []);
+      setCurrentTurn((state.turnLog?.length || 0) + 1);
+      setBoardPos(state.boardPos || 0);
+      setCash(state.cash || 0);
+      setTotalCF(state.totalCF || 0);
+      setBankLoan(state.bankLoan || 0);
+      setLoanInterest(state.loanInterest || 0);
+      setAssets(state.assets || []);
+      setBabies(state.babies || 0);
+      setPlaySessionId(state.playSessionId || `play-${Date.now()}`);
+      if (state.timerOn !== undefined) setTimerOn(state.timerOn);
+      if (state.startTime) setStartTime(state.startTime);
+      setCharityTurns(state.charityTurns || 0);
+      setDownsizeRestTurns(state.downsizeRestTurns || 0);
+      setGameEnded(state.gameEnded || false);
+      
+      setShowRestorePrompt(false);
+      setPendingRestoreData(null);
+    } catch (e) {
+      console.error("게임 복구 실패:", e);
+      alert("게임 복구 중 오류가 발생했습니다. 새로 시작해주세요.");
+      setShowRestorePrompt(false);
+      setPendingRestoreData(null);
+      deleteGameSession(authUser?.id);
+    }
+  };
+
+  // 새로 시작
+  const handleStartFresh = () => {
+    setShowRestorePrompt(false);
+    setPendingRestoreData(null);
+    deleteGameSession(authUser?.id);
+  };
+
+  // 게임 상태 변경 시 자동 저장 (turnLog 변경을 트리거로)
+  useEffect(() => {
+    // job이 없거나 턴이 하나도 없으면 저장 안 함
+    if (!job || turnLog.length === 0) return;
+    // 게임이 완료됐으면 저장 안 함 (세션 삭제는 별도에서)
+    if (gameEnded) return;
+    
+    const gameStateToSave = {
+      version,
+      job,
+      turnLog,
+      currentTurn,
+      boardPos,
+      cash,
+      totalCF,
+      bankLoan,
+      loanInterest,
+      assets,
+      babies,
+      playSessionId,
+      timerOn,
+      startTime,
+      charityTurns,
+      downsizeRestTurns,
+      gameEnded,
+    };
+    
+    const sessionId = playSessionId || `play-${Date.now()}`;
+    
+    saveGameSession(
+      authUser?.id,
+      sessionId,
+      gameStateToSave,
+      {
+        isContest: isContestMode,
+        job,
+        turnCount: turnLog.length,
+      }
+    );
+  }, [turnLog, job, isContestMode, authUser]); // turnLog 변경 시마다
+
+  // 페이지 떠날 때 강제 저장
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (job && turnLog.length > 0 && !gameEnded) {
+        const gameStateToSave = {
+          version, job, turnLog, currentTurn, boardPos, cash, totalCF,
+          bankLoan, loanInterest, assets, babies, playSessionId,
+          timerOn, startTime, charityTurns, downsizeRestTurns, gameEnded,
+        };
+        // 동기적으로 localStorage만 저장 (Supabase는 시간 없음)
+        try {
+          localStorage.setItem("cashflow_game_session", JSON.stringify({
+            session_id: playSessionId || `play-${Date.now()}`,
+            user_id: authUser?.id,
+            game_state: gameStateToSave,
+            turnCount: turnLog.length,
+            isContest: isContestMode,
+            job,
+            savedAt: Date.now(),
+          }));
+        } catch {}
+      }
+    };
+    
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [job, turnLog, gameEnded, authUser, isContestMode, version, currentTurn, boardPos, cash, totalCF, bankLoan, loanInterest, assets, babies, playSessionId, timerOn, startTime, charityTurns, downsizeRestTurns]);
+
+  // ═══════════════════════════════════════════════════
+
   if (!job) {
+    // 복구 프롬프트 모달
+    if (showRestorePrompt && pendingRestoreData) {
+      const state = pendingRestoreData.game_state;
+      const savedAt = pendingRestoreData.savedAt 
+        ? new Date(pendingRestoreData.savedAt).toLocaleString("ko-KR")
+        : pendingRestoreData.last_updated 
+          ? new Date(pendingRestoreData.last_updated).toLocaleString("ko-KR")
+          : "";
+      
+      return (
+        <div style={{ maxWidth: 480, margin: "40px auto", padding: 20 }}>
+          <div style={{
+            padding: 28,
+            borderRadius: 16,
+            background: "linear-gradient(135deg, #1e3a8a20, #3b82f620)",
+            border: "2px solid #3b82f6",
+            textAlign: "center",
+          }}>
+            <div style={{ fontSize: 40, marginBottom: 8 }}>🎮</div>
+            <h2 style={{ fontSize: 20, fontWeight: 900, color: "#fafafa", margin: "0 0 8px 0" }}>
+              진행 중인 게임이 있습니다
+            </h2>
+            <p style={{ fontSize: 13, color: "#a1a1aa", margin: "0 0 16px 0", lineHeight: 1.6 }}>
+              이전에 진행하던 게임을 이어서 할 수 있어요.
+            </p>
+            
+            <div style={{ 
+              display: "flex", 
+              flexDirection: "column",
+              gap: 6,
+              padding: 14, 
+              background: "#0a0a0f", 
+              borderRadius: 10,
+              marginBottom: 20,
+              textAlign: "left",
+            }}>
+              <div style={{ fontSize: 12, color: "#71717a" }}>
+                <span style={{ color: "#a1a1aa" }}>직업:</span> {state.job || "미선택"}
+              </div>
+              <div style={{ fontSize: 12, color: "#71717a" }}>
+                <span style={{ color: "#a1a1aa" }}>진행 턴:</span> {state.turnLog?.length || 0}턴
+              </div>
+              <div style={{ fontSize: 12, color: "#71717a" }}>
+                <span style={{ color: "#a1a1aa" }}>현재 현금:</span> ${state.cash?.toLocaleString() || 0}
+              </div>
+              {pendingRestoreData.is_contest && (
+                <div style={{ fontSize: 12, color: "#fca5a5" }}>
+                  🏆 대회 모드
+                </div>
+              )}
+              {savedAt && (
+                <div style={{ fontSize: 10, color: "#52525b", marginTop: 4 }}>
+                  마지막 저장: {savedAt}
+                </div>
+              )}
+            </div>
+            
+            <div style={{ display: "flex", gap: 8 }}>
+              <button 
+                onClick={handleStartFresh}
+                style={{
+                  flex: 1,
+                  padding: "12px",
+                  borderRadius: 10,
+                  border: "1px solid #27272a",
+                  background: "transparent",
+                  color: "#a1a1aa",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                🆕 새로 시작
+              </button>
+              <button 
+                onClick={handleRestore}
+                style={{
+                  flex: 2,
+                  padding: "12px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: "linear-gradient(135deg, #3b82f6, #2563eb)",
+                  color: "#fff",
+                  fontSize: 13,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                }}
+              >
+                ▶️ 이어서 하기
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    
     return (
       <div>
         <div style={{ textAlign: "center", marginBottom: 20 }}>
@@ -2119,12 +2390,11 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         <button onClick={async () => {
           try {
             const result = await onSaveGame?.(buildGamePayload());
-            // result가 null이면 저장 실패 (storage.js에서 처리되어 이미 alert 뜸)
-            // result가 존재하면 성공
             if (result !== null && result !== undefined) {
+              // 성공 시 진행 중 세션 삭제 (게임 완료된 것으로 간주)
+              await deleteGameSession(authUser?.id);
               alert("✅ 게임이 저장되었습니다.");
             }
-            // 성공/실패 구분 없이 storage.js가 이미 alert로 알려줌
           } catch (e) {
             console.error("[게임 저장] 예외:", e);
             alert(`⚠️ 게임 저장 중 오류: ${e.message || "알 수 없는 오류"}`);
@@ -2144,6 +2414,8 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
             console.error("[초기화 중 저장] 예외:", e);
           }
         }
+        // 진행 중 세션도 삭제
+        await deleteGameSession(authUser?.id);
         resetGame();
       }} style={{
         width: "100%", marginTop: 8, padding: 12, borderRadius: 10, border: "1px solid #27272a",
@@ -2315,21 +2587,58 @@ export default function CoachingSimulator() {
   // 후기 버튼 클릭 추적 (게임 세션 ID 기준)
   const [reviewClickedSessions, setReviewClickedSessions] = useState(new Set());
 
-  // 초기 세션 확인 + 인증 상태 변화 구독
+  // 초기 세션 확인 + 인증 상태 변화 구독 (Phase B Day 3: 토큰 만료 자동 처리)
   useEffect(() => {
     let mounted = true;
+    
+    // 5초 안전 타이머 - 어떤 경우든 로딩 무한 대기 방지
+    const safetyTimeout = setTimeout(() => {
+      if (mounted) {
+        console.warn("[Auth] 5초 타임아웃 - 강제 로딩 종료");
+        setAuthLoading(false);
+      }
+    }, 5000);
+    
     (async () => {
       try {
-        const user = await getCurrentUser();
+        // getCurrentUser에 자체 타임아웃 (3초)
+        const userPromise = getCurrentUser();
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("getUser 타임아웃")), 3000)
+        );
+        const user = await Promise.race([userPromise, timeoutPromise]);
+        
         if (!mounted) return;
+        
         if (user) {
           setAuthUser(user);
-          const admin = await isAdmin(user.id);
-          if (mounted) setUserIsAdmin(admin);
+          try {
+            const admin = await isAdmin(user.id);
+            if (mounted) setUserIsAdmin(admin);
+          } catch (e) {
+            console.warn("admin 체크 실패:", e);
+          }
         }
       } catch (e) {
-        console.error("세션 확인 실패:", e);
+        console.warn("[Auth] 세션 확인 실패 - 토큰 만료 가능성:", e.message);
+        // 토큰 만료 시 자동으로 localStorage 정리
+        try {
+          if (typeof window !== "undefined") {
+            // Supabase 관련 토큰만 정리 (다른 데이터는 유지)
+            const keys = Object.keys(localStorage);
+            keys.forEach(key => {
+              if (key.includes('supabase') || key.includes('cashflow-auth') || key.includes('sb-')) {
+                localStorage.removeItem(key);
+              }
+            });
+          }
+        } catch {}
+        if (mounted) {
+          setAuthUser(null);
+          setUserIsAdmin(false);
+        }
       } finally {
+        clearTimeout(safetyTimeout);
         if (mounted) setAuthLoading(false);
       }
     })();
@@ -2340,8 +2649,12 @@ export default function CoachingSimulator() {
         const user = session?.user || null;
         setAuthUser(user);
         if (user) {
-          const admin = await isAdmin(user.id);
-          if (mounted) setUserIsAdmin(admin);
+          try {
+            const admin = await isAdmin(user.id);
+            if (mounted) setUserIsAdmin(admin);
+          } catch (e) {
+            console.warn("admin 체크 실패:", e);
+          }
         } else {
           setUserIsAdmin(false);
         }
@@ -2350,6 +2663,7 @@ export default function CoachingSimulator() {
 
     return () => {
       mounted = false;
+      clearTimeout(safetyTimeout);
       subscription?.unsubscribe?.();
     };
   }, []);
@@ -3054,6 +3368,7 @@ export default function CoachingSimulator() {
         {/* ═══ 플레이 모드 (항상 렌더링, 숨김 처리로 상태 보존) ═══ */}
         <div style={{ display: appMode === "play" ? "block" : "none" }}>
           <PlayMode version={version} currentPlayer={currentPlayer} 
+            authUser={authUser}
             isContestMode={isContestMode}
             onReviewPrompt={openReviewForm}
             reviewClickedSessions={reviewClickedSessions}
