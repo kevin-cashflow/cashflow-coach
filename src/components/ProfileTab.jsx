@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import CoachBadge, { getCredentialConfig } from "./CoachBadge";
 import CoachCodeModal from "./CoachCodeModal";
 import { TierProgressCard } from "./TierBadge";
+import TierGuide from "./TierGuide";
 
 /**
  * 👤 프로필 탭 (Phase B Day 2)
@@ -34,38 +35,145 @@ export default function ProfileTab({ authUser }) {
   const [codeModal, setCodeModal] = useState(false);
   const [message, setMessage] = useState("");
 
+  // 추가 정보 (Phase B Day 3)
+  const [profileInfo, setProfileInfo] = useState(null); // user_profiles 데이터
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [profileForm, setProfileForm] = useState({
+    real_name: "",
+    phone: "",
+    user_type: "",
+    user_type_other: "",
+    school_name: "",
+    organization: "",
+  });
+  const [profileSaving, setProfileSaving] = useState(false);
+
   useEffect(() => {
+    let mounted = true;
+    
     if (!authUser) {
       setLoading(false);
       return;
     }
-    loadProfile();
+    
+    // 5초 안전 타이머 - 어떤 경우든 로딩 무한 대기 방지
+    const safetyTimer = setTimeout(() => {
+      if (mounted) {
+        console.warn("[ProfileTab] 5초 타임아웃 - 강제 로딩 종료");
+        setLoading(false);
+      }
+    }, 5000);
+    
+    loadProfile().finally(() => {
+      clearTimeout(safetyTimer);
+      if (mounted) setLoading(false);
+    });
+    
+    return () => {
+      mounted = false;
+      clearTimeout(safetyTimer);
+    };
   }, [authUser]);
 
   const loadProfile = async () => {
     setLoading(true);
+    setError("");
     try {
-      // user_stats 뷰에서 모든 정보 조회
-      const { data, error: qErr } = await supabase
-        .from("user_stats")
-        .select("*")
-        .eq("user_id", authUser.id)
-        .maybeSingle();
+      // 3초 타임아웃으로 Supabase 호출 (병렬)
+      const queryPromise = Promise.all([
+        supabase.from("user_stats").select("*").eq("user_id", authUser.id).maybeSingle(),
+        supabase.from("user_profiles").select("*").eq("user_id", authUser.id).maybeSingle(),
+      ]);
+      
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Supabase 타임아웃")), 3000)
+      );
+      
+      const [statsResult, profileResult] = await Promise.race([queryPromise, timeoutPromise]);
 
-      if (qErr) throw qErr;
+      if (statsResult.error) throw statsResult.error;
 
-      setStats(data || {
+      setStats(statsResult.data || {
         user_id: authUser.id,
         display_name: authUser.user_metadata?.display_name || authUser.email?.split("@")[0] || "사용자",
         total_plays: 0,
       });
-      setCredential(data?.credential || null);
-      setNewName(data?.display_name || authUser.email?.split("@")[0] || "");
+      setCredential(statsResult.data?.credential || null);
+      setNewName(statsResult.data?.display_name || authUser.email?.split("@")[0] || "");
+
+      // 추가 정보 (user_profiles)
+      if (profileResult.data) {
+        setProfileInfo(profileResult.data);
+        setProfileForm({
+          real_name: profileResult.data.real_name || "",
+          phone: profileResult.data.phone || "",
+          user_type: profileResult.data.user_type || "",
+          user_type_other: profileResult.data.user_type_other || "",
+          school_name: profileResult.data.school_name || "",
+          organization: profileResult.data.organization || "",
+        });
+      }
     } catch (e) {
-      console.error("[ProfileTab] 프로필 로드 실패:", e);
-      setError(e.message || "프로필을 불러올 수 없습니다.");
+      console.warn("[ProfileTab] 프로필 로드 실패:", e.message);
+      // 에러 시에도 기본값으로 세팅하여 UI가 동작하게 함
+      setStats({
+        user_id: authUser.id,
+        display_name: authUser.user_metadata?.display_name || authUser.email?.split("@")[0] || "사용자",
+        total_plays: 0,
+      });
+      setNewName(authUser.user_metadata?.display_name || authUser.email?.split("@")[0] || "");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 추가 정보 저장
+  const saveProfileInfo = async () => {
+    const { real_name, phone, user_type, user_type_other, school_name, organization } = profileForm;
+    
+    // 검증
+    if (real_name && real_name.trim().length < 2) {
+      alert("실명은 2자 이상이어야 합니다.");
+      return;
+    }
+    if (user_type === "teacher" && !school_name.trim()) {
+      alert("교사 선택 시 학교명을 입력해주세요.");
+      return;
+    }
+    if (user_type === "other" && !user_type_other.trim()) {
+      alert("기타 선택 시 유형을 입력해주세요.");
+      return;
+    }
+
+    setProfileSaving(true);
+    try {
+      const { error } = await supabase
+        .from("user_profiles")
+        .upsert({
+          user_id: authUser.id,
+          real_name: real_name.trim() || null,
+          phone: phone.trim() || null,
+          user_type: user_type || null,
+          user_type_other: user_type === "other" ? user_type_other.trim() : null,
+          school_name: user_type === "teacher" ? school_name.trim() : null,
+          organization: organization.trim() || null,
+        });
+      
+      if (error) throw error;
+
+      setProfileInfo({
+        ...profileForm,
+        user_type_other: user_type === "other" ? user_type_other.trim() : null,
+        school_name: user_type === "teacher" ? school_name.trim() : null,
+      });
+      setEditingProfile(false);
+      setMessage("✅ 추가 정보가 저장되었습니다.");
+      setTimeout(() => setMessage(""), 3000);
+    } catch (e) {
+      console.error("추가 정보 저장 실패:", e);
+      alert("저장 실패: " + e.message);
+    } finally {
+      setProfileSaving(false);
     }
   };
 
@@ -268,10 +376,7 @@ export default function ProfileTab({ authUser }) {
         </div>
       </div>
 
-      {/* 티어 진행도 카드 */}
-      <div style={{ marginBottom: 14 }}>
-        <TierProgressCard playCount={stats?.total_plays || 0} />
-      </div>
+      {/* 티어 진행도 + 티어 안내는 코칭딜러 자격 아래로 이동됨 */}
 
       {/* 코칭딜러 자격 섹션 */}
       <div style={{
@@ -334,45 +439,232 @@ export default function ProfileTab({ authUser }) {
         )}
       </div>
 
-      {/* 내 통계 요약 */}
-      {stats && stats.total_plays > 0 && (
+      {/* 📝 추가 정보 섹션 (Phase B Day 3) */}
+      <div style={{
+        padding: 16,
+        borderRadius: 12,
+        background: "#111118",
+        border: "1px solid #27272a",
+        marginBottom: 14,
+      }}>
         <div style={{
-          padding: 16,
-          borderRadius: 12,
-          background: "#111118",
-          border: "1px solid #27272a",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 12,
         }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: "#fafafa", marginBottom: 12 }}>
-            📊 내 통계
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#fafafa" }}>
+            📝 추가 정보
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <div style={{ padding: 10, background: "#18181b", borderRadius: 6 }}>
-              <div style={{ fontSize: 10, color: "#71717a" }}>🎮 총 플레이</div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: "#86efac" }}>{stats.total_plays || 0}회</div>
-            </div>
-            <div style={{ padding: 10, background: "#18181b", borderRadius: 6 }}>
-              <div style={{ fontSize: 10, color: "#71717a" }}>🏆 대회 참가</div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: "#fca5a5" }}>{stats.contest_count || 0}회</div>
-            </div>
-            {stats.contest_best_time && (
-              <div style={{ padding: 10, background: "#18181b", borderRadius: 6 }}>
-                <div style={{ fontSize: 10, color: "#71717a" }}>⚡ 최단 탈출</div>
-                <div style={{ fontSize: 16, fontWeight: 800, color: "#93c5fd" }}>
-                  {Math.floor(stats.contest_best_time / 60)}:{String(stats.contest_best_time % 60).padStart(2, "0")}
-                </div>
-              </div>
-            )}
-            {stats.contest_best_income && (
-              <div style={{ padding: 10, background: "#18181b", borderRadius: 6 }}>
-                <div style={{ fontSize: 10, color: "#71717a" }}>💎 최고 패시브</div>
-                <div style={{ fontSize: 16, fontWeight: 800, color: "#c4b5fd" }}>
-                  ${stats.contest_best_income.toLocaleString()}
-                </div>
-              </div>
-            )}
-          </div>
+          {!editingProfile && (
+            <button
+              onClick={() => setEditingProfile(true)}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 4,
+                border: "1px solid #27272a",
+                background: "transparent",
+                color: "#a1a1aa",
+                fontSize: 11,
+                cursor: "pointer",
+              }}
+            >
+              ✏️ {profileInfo ? "수정" : "입력"}
+            </button>
+          )}
         </div>
-      )}
+
+        {!editingProfile && !profileInfo && (
+          <p style={{ fontSize: 11, color: "#71717a", margin: 0, lineHeight: 1.6 }}>
+            실명과 연락처를 입력하시면 맞춤 안내와 자격 관리에 도움이 됩니다. (선택)
+          </p>
+        )}
+
+        {!editingProfile && profileInfo && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {profileInfo.real_name && (
+              <InfoRow label="실명" value={profileInfo.real_name} />
+            )}
+            {profileInfo.phone && (
+              <InfoRow label="연락처" value={profileInfo.phone} />
+            )}
+            {profileInfo.user_type && (
+              <InfoRow 
+                label="유형" 
+                value={getUserTypeLabel(profileInfo.user_type, profileInfo.user_type_other)} 
+              />
+            )}
+            {profileInfo.school_name && (
+              <InfoRow label="학교" value={profileInfo.school_name} />
+            )}
+            {profileInfo.organization && (
+              <InfoRow label="소속/메모" value={profileInfo.organization} />
+            )}
+          </div>
+        )}
+
+        {editingProfile && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {/* 실명 */}
+            <div>
+              <label style={miniLabelStyle}>실명</label>
+              <input
+                type="text"
+                value={profileForm.real_name}
+                onChange={(e) => setProfileForm({ ...profileForm, real_name: e.target.value })}
+                placeholder="홍길동"
+                style={inputStyle}
+              />
+            </div>
+
+            {/* 연락처 */}
+            <div>
+              <label style={miniLabelStyle}>연락처</label>
+              <input
+                type="tel"
+                value={profileForm.phone}
+                onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
+                placeholder="010-1234-5678"
+                style={inputStyle}
+              />
+            </div>
+
+            {/* 사용자 유형 - 드롭다운 */}
+            <div>
+              <label style={miniLabelStyle}>소속을 선택해주세요.</label>
+              <select
+                value={profileForm.user_type}
+                onChange={(e) => setProfileForm({ ...profileForm, user_type: e.target.value })}
+                style={{
+                  ...inputStyle,
+                  cursor: "pointer",
+                  appearance: "none",
+                  backgroundImage: `url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e")`,
+                  backgroundRepeat: "no-repeat",
+                  backgroundPosition: "right 10px center",
+                  paddingRight: 30,
+                }}
+              >
+                <option value="">선택하세요</option>
+                <option value="general">일반</option>
+                <option value="teacher">교사 (초·중·고)</option>
+                <option value="institution">기관</option>
+                <option value="company">기업</option>
+                <option value="other">기타</option>
+              </select>
+
+              {/* 선택한 유형 설명 */}
+              {profileForm.user_type && (
+                <div style={{
+                  fontSize: 11,
+                  color: "#a1a1aa",
+                  marginTop: 6,
+                  padding: "4px 0",
+                }}>
+                  💡 {getUserTypeDesc(profileForm.user_type)}
+                </div>
+              )}
+
+              {/* 교사 선택 시 학교명 */}
+              {profileForm.user_type === "teacher" && (
+                <input
+                  type="text"
+                  value={profileForm.school_name}
+                  onChange={(e) => setProfileForm({ ...profileForm, school_name: e.target.value })}
+                  placeholder="학교명 입력"
+                  style={{ ...inputStyle, marginTop: 8 }}
+                />
+              )}
+
+              {/* 기타 선택 시 입력란 */}
+              {profileForm.user_type === "other" && (
+                <input
+                  type="text"
+                  value={profileForm.user_type_other}
+                  onChange={(e) => setProfileForm({ ...profileForm, user_type_other: e.target.value })}
+                  placeholder="유형을 입력해주세요"
+                  style={{ ...inputStyle, marginTop: 8 }}
+                />
+              )}
+            </div>
+
+            {/* 소속/메모 */}
+            <div>
+              <label style={miniLabelStyle}>소속/메모 (선택)</label>
+              <textarea
+                value={profileForm.organization}
+                onChange={(e) => setProfileForm({ ...profileForm, organization: e.target.value })}
+                placeholder="예) ○○고등학교 경제 담당 / △△그룹 HR팀"
+                rows={2}
+                style={{ ...inputStyle, resize: "vertical", minHeight: 50 }}
+              />
+            </div>
+
+            {/* 버튼 */}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => setEditingProfile(false)}
+                disabled={profileSaving}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  borderRadius: 6,
+                  border: "1px solid #27272a",
+                  background: "transparent",
+                  color: "#a1a1aa",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: profileSaving ? "not-allowed" : "pointer",
+                }}
+              >
+                취소
+              </button>
+              <button
+                onClick={saveProfileInfo}
+                disabled={profileSaving}
+                style={{
+                  flex: 2,
+                  padding: "10px",
+                  borderRadius: 6,
+                  border: "none",
+                  background: profileSaving ? "#52525b" : "#3b82f6",
+                  color: "#fff",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  cursor: profileSaving ? "not-allowed" : "pointer",
+                }}
+              >
+                {profileSaving ? "저장 중..." : "💾 저장"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {message && (
+          <div style={{
+            marginTop: 10,
+            padding: 8,
+            borderRadius: 6,
+            background: "#10b98120",
+            border: "1px solid #10b98140",
+            fontSize: 11,
+            color: "#86efac",
+            textAlign: "center",
+          }}>
+            {message}
+          </div>
+        )}
+      </div>
+
+      {/* 티어 진행도 카드 (코칭딜러 자격 아래) */}
+      <div style={{ marginBottom: 14 }}>
+        <TierProgressCard playCount={stats?.total_plays || 0} />
+      </div>
+
+      {/* 🏆 티어 안내 (10단계 전체 표) - 내 현황 포함 */}
+      <div style={{ marginBottom: 14 }}>
+        <TierGuide userStats={stats} />
+      </div>
 
       {/* 코드 입력 모달 */}
       {codeModal && (
@@ -385,3 +677,57 @@ export default function ProfileTab({ authUser }) {
     </div>
   );
 }
+
+// ─── 헬퍼 컴포넌트 ───
+function InfoRow({ label, value }) {
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+      <div style={{ fontSize: 10, color: "#71717a", minWidth: 60 }}>{label}</div>
+      <div style={{ fontSize: 12, color: "#d4d4d8" }}>{value}</div>
+    </div>
+  );
+}
+
+// ─── 헬퍼 함수 ───
+function getUserTypeLabel(type, other) {
+  const labels = {
+    general: "일반",
+    teacher: "교사 (초·중·고)",
+    institution: "기관",
+    company: "기업",
+    other: `기타${other ? ` (${other})` : ""}`,
+  };
+  return labels[type] || type;
+}
+
+function getUserTypeDesc(type) {
+  const descs = {
+    general: "개인 학습자 / 일반 성인",
+    teacher: "학교 선생님",
+    institution: "도서관, 청소년센터, 평생학습관, 여성회관 등",
+    company: "B2B 강의, HR, 교육팀",
+    other: "자유롭게 입력해주세요",
+  };
+  return descs[type] || "";
+}
+
+// ─── 공통 스타일 ───
+const inputStyle = {
+  width: "100%",
+  padding: "8px 10px",
+  borderRadius: 6,
+  border: "1px solid #27272a",
+  background: "#0a0a0f",
+  color: "#fafafa",
+  fontSize: 12,
+  outline: "none",
+  fontFamily: "inherit",
+};
+
+const miniLabelStyle = {
+  fontSize: 10,
+  color: "#a1a1aa",
+  marginBottom: 4,
+  display: "block",
+  fontWeight: 600,
+};

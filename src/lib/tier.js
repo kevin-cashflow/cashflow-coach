@@ -1,200 +1,258 @@
-"use client";
-
 /**
- * 티어 시스템 유틸 (Phase B Day 2)
+ * 티어 시스템 (Phase B Day 2/3 - 10단계 확장)
  *
- * 8단계 티어: 🥉 브론즈 → 🥈 실버 → 🥇 골드 → 💎 플래티넘
- *            → 🔷 사파이어 → 💚 에메랄드 → 💠 다이아몬드 → 👑 크라운
+ * 게임 플레이 횟수에 따라 10단계 티어 부여
  */
 
-export const TIER_CONFIGS = {
-  bronze: {
+// ─── 티어 정의 ───
+export const TIERS = [
+  {
     key: "bronze",
-    icon: "🥉",
     name: "브론즈",
-    nameEn: "Bronze",
+    icon: "🥉",
     color: "#CD7F32",
-    bgColor: "#8B450020",
-    borderColor: "#CD7F3240",
-    threshold: 0,
-    description: "입문자",
+    bgColor: "#CD7F3220",
+    minCount: 1,
+    maxCount: 4,
+    description: "캐쉬플로우의 기본 규칙을 익혀가는 단계",
+    learningPoints: [
+      "캐쉬플로우와 자본금의 개념",
+      "급여일/시장/두다드 카드 구분",
+    ],
+    recommendations: [
+      "매 턴 선택을 자유롭게 시도",
+      "디브리핑 꼭 읽기",
+    ],
   },
-  silver: {
+  {
     key: "silver",
-    icon: "🥈",
     name: "실버",
-    nameEn: "Silver",
+    icon: "🥈",
     color: "#C0C0C0",
-    bgColor: "#80808020",
-    borderColor: "#C0C0C040",
-    threshold: 5,
-    description: "경험자",
+    bgColor: "#C0C0C020",
+    minCount: 5,
+    maxCount: 9,
+    description: "반복된 플레이로 패턴을 감지하기 시작",
+    learningPoints: [
+      "실소득과 수동소득의 차이",
+      "부채와 자산의 관계",
+    ],
+    recommendations: [
+      "선택의 결과를 복기",
+      "다양한 직업으로 시도",
+    ],
   },
-  gold: {
+  {
     key: "gold",
-    icon: "🥇",
     name: "골드",
-    nameEn: "Gold",
+    icon: "🥇",
     color: "#FFD700",
-    bgColor: "#B8860B20",
-    borderColor: "#FFD70040",
-    threshold: 15,
-    description: "숙련자",
+    bgColor: "#FFD70020",
+    minCount: 10,
+    maxCount: 19,
+    description: "다양한 전략을 시도해보는 단계",
+    learningPoints: [
+      "투자 타이밍 감각",
+      "현금흐름 관리",
+    ],
+    recommendations: [
+      "큰 거래에 도전",
+      "장기 전략 수립",
+    ],
   },
-  platinum: {
+  {
     key: "platinum",
-    icon: "💎",
     name: "플래티넘",
-    nameEn: "Platinum",
-    color: "#00CED1",
-    bgColor: "#008B8B20",
-    borderColor: "#00CED140",
-    threshold: 30,
-    description: "전문가",
+    icon: "🛡️",
+    color: "#E5E4E2",
+    bgColor: "#E5E4E220",
+    minCount: 20,
+    maxCount: 34,
+    description: "자신만의 투자 원칙이 형성됨",
+    learningPoints: [
+      "레버리지 활용",
+      "리스크 관리",
+    ],
+    recommendations: [
+      "대회 모드 도전",
+      "탈출 시간 단축 시도",
+    ],
   },
-  sapphire: {
-    key: "sapphire",
-    icon: "🔷",
-    name: "사파이어",
-    nameEn: "Sapphire",
-    color: "#3b82f6",
-    bgColor: "#1e40af20",
-    borderColor: "#3b82f640",
-    threshold: 60,
-    description: "마스터 후보",
-  },
-  emerald: {
+  {
     key: "emerald",
-    icon: "💚",
     name: "에메랄드",
-    nameEn: "Emerald",
-    color: "#10b981",
-    bgColor: "#047857 20",
-    borderColor: "#10b98140",
-    threshold: 100,
-    description: "코치 후보",
+    icon: "💚",
+    color: "#50C878",
+    bgColor: "#50C87820",
+    minCount: 35,
+    maxCount: 54,
+    description: "게임의 흐름을 주도하는 단계",
+    learningPoints: [
+      "다각화 포트폴리오",
+      "시장 변동성 대응",
+    ],
+    recommendations: [
+      "다양한 직업 마스터",
+      "최적화 전략 구축",
+    ],
   },
-  diamond: {
+  {
+    key: "sapphire",
+    name: "사파이어",
+    icon: "💙",
+    color: "#0F52BA",
+    bgColor: "#0F52BA20",
+    minCount: 55,
+    maxCount: 79,
+    description: "게임 속 선택이 실생활에 반영되기 시작",
+    learningPoints: [
+      "실생활 연결 시작",
+      "기회와 위기 판별",
+    ],
+    recommendations: [
+      "본인의 투자 원칙 정립",
+      "코칭딜러 과정 검토",
+    ],
+  },
+  {
     key: "diamond",
-    icon: "💠",
     name: "다이아몬드",
-    nameEn: "Diamond",
+    icon: "💎",
     color: "#B9F2FF",
-    bgColor: "#87CEEB20",
-    borderColor: "#B9F2FF40",
-    threshold: 150,
-    description: "마스터",
+    bgColor: "#B9F2FF20",
+    minCount: 80,
+    maxCount: 119,
+    description: "다른 사람을 가르칠 수 있는 수준",
+    learningPoints: [
+      "고급 투자 전략",
+      "복리의 마법 체득",
+    ],
+    recommendations: [
+      "다른 사람 코칭 시도",
+      "협회 프로그램 참여",
+    ],
   },
-  crown: {
-    key: "crown",
+  {
+    key: "master",
+    name: "마스터",
     icon: "👑",
-    name: "크라운",
-    nameEn: "Crown",
-    color: "#FFD700",
-    bgColor: "#FFA50020",
-    borderColor: "#FFD70060",
-    threshold: 250,
-    description: "레전드",
+    color: "#9370DB",
+    bgColor: "#9370DB20",
+    minCount: 120,
+    maxCount: 199,
+    description: "국제캐쉬플로우강사협회의 핵심 멤버 수준",
+    learningPoints: [
+      "전문가 수준 판단력",
+      "교육자적 시각",
+    ],
+    recommendations: [
+      "🎯 코칭딜러 자격 도전",
+      "강의/워크숍 참여",
+    ],
   },
-};
+  {
+    key: "grandmaster",
+    name: "그랜드마스터",
+    icon: "⭐",
+    color: "#FF6B35",
+    bgColor: "#FF6B3520",
+    minCount: 200,
+    maxCount: 499,
+    description: "캐쉬플로우 세계의 최고 경지",
+    learningPoints: [
+      "철학적 이해",
+      "재무 IQ 최고점",
+    ],
+    recommendations: [
+      "🎓 마스터 코칭딜러 도전",
+      "커뮤니티 리더십 발휘",
+    ],
+  },
+  {
+    key: "challenger",
+    name: "챌린저",
+    icon: "🏆",
+    color: "#FFD700",
+    bgColor: "#FFD70030",
+    minCount: 500,
+    maxCount: Infinity,
+    description: "캐쉬플로우를 완전히 체화한 경지",
+    learningPoints: [
+      "캐쉬플로우의 최고 경지",
+      "부의 마인드 완전 체화",
+    ],
+    recommendations: [
+      "후진 양성",
+      "Kiyosaki 철학 전파",
+    ],
+  },
+];
 
-// 티어 순서 (오름차순)
-export const TIER_ORDER = ["bronze", "silver", "gold", "platinum", "sapphire", "emerald", "diamond", "crown"];
-
-/**
- * 플레이 횟수로 현재 티어 계산
- * @param {number} playCount - 총 플레이 횟수 (일반 + 대회)
- * @returns {string} 티어 key (bronze, silver, ...)
- */
+// ─── 플레이 횟수로 티어 계산 ───
 export function calculateTier(playCount) {
-  const count = Math.max(0, parseInt(playCount) || 0);
-  if (count >= 250) return "crown";
-  if (count >= 150) return "diamond";
-  if (count >= 100) return "emerald";
-  if (count >= 60)  return "sapphire";
-  if (count >= 30)  return "platinum";
-  if (count >= 15)  return "gold";
-  if (count >= 5)   return "silver";
-  return "bronze";
-}
-
-/**
- * 티어 정보 가져오기
- * @param {string} tierKey - 티어 key
- * @returns {object} 티어 설정
- */
-export function getTierInfo(tierKey) {
-  return TIER_CONFIGS[tierKey] || TIER_CONFIGS.bronze;
-}
-
-/**
- * 플레이 횟수로 티어 정보 직접 가져오기
- * @param {number} playCount
- * @returns {object} 티어 설정
- */
-export function getTierByCount(playCount) {
-  return getTierInfo(calculateTier(playCount));
-}
-
-/**
- * 다음 티어 정보 + 진행도
- * @param {number} playCount
- * @returns {object} { current, next, remaining, progress }
- */
-export function getTierProgress(playCount) {
-  const count = Math.max(0, parseInt(playCount) || 0);
-  const currentKey = calculateTier(count);
-  const currentIdx = TIER_ORDER.indexOf(currentKey);
-  const nextKey = currentIdx < TIER_ORDER.length - 1 ? TIER_ORDER[currentIdx + 1] : null;
-  
-  const current = getTierInfo(currentKey);
-  const next = nextKey ? getTierInfo(nextKey) : null;
-  
-  const remaining = next ? Math.max(0, next.threshold - count) : 0;
-  
-  // 진행도 계산 (현재 티어 시작 ~ 다음 티어 시작)
-  let progress = 0;
-  if (next) {
-    const span = next.threshold - current.threshold;
-    const done = count - current.threshold;
-    progress = span > 0 ? Math.min(100, Math.max(0, (done / span) * 100)) : 100;
-  } else {
-    progress = 100; // 크라운 달성 시
+  if (!playCount || playCount < 1) return TIERS[0].key;
+  for (const tier of TIERS) {
+    if (playCount >= tier.minCount && playCount <= tier.maxCount) {
+      return tier.key;
+    }
   }
-  
-  return {
-    current,
-    next,
-    remaining,
-    progress: Math.round(progress),
-    count,
-  };
+  return TIERS[TIERS.length - 1].key;
 }
 
-/**
- * 티어 승급 체크
- * @param {number} oldCount - 이전 플레이 횟수
- * @param {number} newCount - 현재 플레이 횟수
- * @returns {object|null} 승급 시 { from, to } | 아니면 null
- */
+// ─── 티어 키로 티어 정보 조회 ───
+export function getTierByKey(key) {
+  return TIERS.find(t => t.key === key) || TIERS[0];
+}
+
+// ─── 플레이 횟수로 티어 정보 조회 ───
+export function getTierByCount(count) {
+  const key = calculateTier(count);
+  return getTierByKey(key);
+}
+
+// ─── 승급 체크 ───
 export function checkTierUp(oldCount, newCount) {
   const oldTier = calculateTier(oldCount);
   const newTier = calculateTier(newCount);
   if (oldTier !== newTier) {
     return {
-      from: getTierInfo(oldTier),
-      to: getTierInfo(newTier),
+      from: getTierByKey(oldTier),
+      to: getTierByKey(newTier),
     };
   }
   return null;
 }
 
-/**
- * 티어 비교 (정렬용)
- * @returns {number} a가 더 높으면 -1, b가 더 높으면 1, 같으면 0
- */
-export function compareTiers(tierKeyA, tierKeyB) {
-  const idxA = TIER_ORDER.indexOf(tierKeyA);
-  const idxB = TIER_ORDER.indexOf(tierKeyB);
-  return idxB - idxA; // 내림차순 (높은 티어 먼저)
+// ─── 다음 티어까지 남은 횟수 ───
+export function getNextTierProgress(playCount) {
+  const currentTier = getTierByCount(playCount);
+  const currentIndex = TIERS.findIndex(t => t.key === currentTier.key);
+  
+  if (currentIndex === TIERS.length - 1) {
+    // 최고 티어 - 다음 없음
+    return {
+      current: currentTier,
+      next: null,
+      remaining: 0,
+      percentInTier: 100,
+    };
+  }
+  
+  const nextTier = TIERS[currentIndex + 1];
+  const remaining = Math.max(0, nextTier.minCount - playCount);
+  const inTierCount = playCount - currentTier.minCount;
+  const tierRange = currentTier.maxCount - currentTier.minCount + 1;
+  const percentInTier = Math.min(100, Math.round((inTierCount / tierRange) * 100));
+  
+  return {
+    current: currentTier,
+    next: nextTier,
+    remaining,
+    percentInTier,
+  };
+}
+
+// ─── 전체 티어 목록 ───
+export function getAllTiers() {
+  return TIERS;
 }

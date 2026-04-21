@@ -29,6 +29,11 @@ export default function AdminPanel({ authUser, userIsAdmin }) {
   const [issueCredential, setIssueCredential] = useState("dealer");
   const [issueLoading, setIssueLoading] = useState(false);
 
+  // 회원 명부 (Phase B Day 3)
+  const [members, setMembers] = useState([]);
+  const [memberSearch, setMemberSearch] = useState("");
+  const [memberTypeFilter, setMemberTypeFilter] = useState("all"); // all/general/teacher/institution/company/other/admin/dealer
+
   useEffect(() => {
     if (!userIsAdmin) {
       setLoading(false);
@@ -142,8 +147,21 @@ export default function AdminPanel({ authUser, userIsAdmin }) {
       console.log("[AdminPanel] coach_codes 로드:", (codeList || []).length, "건");
     } catch (e) {
       console.error("[AdminPanel] coach_codes 실패:", e);
-      // 실패해도 빈 배열로 계속 진행
       setCodes([]);
+    }
+
+    // 5. 회원 명부 조회 (Phase B Day 3)
+    try {
+      const { data: memberList, error } = await supabase
+        .from("admin_members")
+        .select("*")
+        .limit(500);
+      if (error) throw error;
+      setMembers(memberList || []);
+      console.log("[AdminPanel] admin_members 로드:", (memberList || []).length, "명");
+    } catch (e) {
+      console.error("[AdminPanel] admin_members 실패:", e);
+      setMembers([]);
     }
 
     clearTimeout(timeoutId);
@@ -960,6 +978,247 @@ export default function AdminPanel({ authUser, userIsAdmin }) {
           </div>
         </div>
       )}
+
+      {/* ═══ 📋 회원 관리 (Phase B Day 3) ═══ */}
+      {!loading && (
+        <div style={{
+          marginTop: 14,
+          padding: 16,
+          borderRadius: 12,
+          background: "#111118",
+          border: "1px solid #27272a",
+        }}>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 12,
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#fafafa" }}>
+              📋 회원 관리 ({filterMembers(members, memberSearch, memberTypeFilter).length}명 / 총 {members.length}명)
+            </div>
+            <button
+              onClick={() => downloadMembersCSV(members)}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 4,
+                border: "1px solid #10b98140",
+                background: "#10b98120",
+                color: "#86efac",
+                fontSize: 11,
+                cursor: "pointer",
+              }}
+            >
+              📥 CSV 다운로드
+            </button>
+          </div>
+
+          {/* 검색 + 필터 */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+            <input
+              type="text"
+              value={memberSearch}
+              onChange={(e) => setMemberSearch(e.target.value)}
+              placeholder="🔍 이름 / 이메일 / 학교 / 소속 검색"
+              style={{
+                flex: "1 1 200px",
+                padding: "6px 10px",
+                borderRadius: 6,
+                border: "1px solid #27272a",
+                background: "#0a0a0f",
+                color: "#fafafa",
+                fontSize: 12,
+                outline: "none",
+              }}
+            />
+            <select
+              value={memberTypeFilter}
+              onChange={(e) => setMemberTypeFilter(e.target.value)}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 6,
+                border: "1px solid #27272a",
+                background: "#0a0a0f",
+                color: "#fafafa",
+                fontSize: 12,
+                outline: "none",
+                cursor: "pointer",
+              }}
+            >
+              <option value="all">전체</option>
+              <option value="general">일반</option>
+              <option value="teacher">교사</option>
+              <option value="institution">기관</option>
+              <option value="company">기업</option>
+              <option value="other">기타</option>
+              <option value="no_info">정보 미입력</option>
+              <option value="admin">Admin</option>
+              <option value="master">🎓 마스터</option>
+              <option value="dealer">🎯 코칭딜러</option>
+            </select>
+          </div>
+
+          {/* 회원 목록 */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 400, overflowY: "auto" }}>
+            {filterMembers(members, memberSearch, memberTypeFilter).map((m) => (
+              <div key={m.user_id} style={{
+                padding: 10,
+                borderRadius: 6,
+                background: "#0a0a0f",
+                border: "1px solid #27272a",
+              }}>
+                {/* 1행: 닉네임 + 배지들 */}
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#fafafa" }}>
+                    {m.nickname || "이름 없음"}
+                  </div>
+                  {m.is_admin && (
+                    <span style={{
+                      padding: "1px 6px",
+                      borderRadius: 4,
+                      background: "#fbbf24",
+                      color: "#000",
+                      fontSize: 9,
+                      fontWeight: 900,
+                    }}>
+                      ADMIN
+                    </span>
+                  )}
+                  {m.coach_credential === "master" && (
+                    <span style={{ fontSize: 10, color: "#fbbf24" }}>🎓 마스터</span>
+                  )}
+                  {m.coach_credential === "dealer" && (
+                    <span style={{ fontSize: 10, color: "#60a5fa" }}>🎯 코칭딜러</span>
+                  )}
+                </div>
+
+                {/* 2행: 실명 · 이메일 · 연락처 */}
+                <div style={{ fontSize: 11, color: "#d4d4d8", marginBottom: 3 }}>
+                  {m.real_name && <span>{m.real_name} · </span>}
+                  {m.email}
+                  {m.phone && <span> · {m.phone}</span>}
+                </div>
+
+                {/* 3행: 유형 · 학교/소속 */}
+                {m.user_type && (
+                  <div style={{ fontSize: 10, color: "#a1a1aa", marginBottom: 3 }}>
+                    {getUserTypeLabel(m.user_type, m.user_type_other)}
+                    {m.school_name && <span> · {m.school_name}</span>}
+                    {m.organization && <span> · {m.organization}</span>}
+                  </div>
+                )}
+
+                {/* 4행: 통계 */}
+                <div style={{ fontSize: 10, color: "#71717a" }}>
+                  가입: {formatDate(m.joined_at)} · 게임 {m.total_plays || 0}회
+                  {m.contest_count > 0 && <span> · 대회 {m.contest_count}회</span>}
+                </div>
+              </div>
+            ))}
+            
+            {filterMembers(members, memberSearch, memberTypeFilter).length === 0 && (
+              <div style={{ textAlign: "center", padding: 20, color: "#71717a", fontSize: 12 }}>
+                조건에 맞는 회원이 없습니다.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+// ─── 헬퍼 함수 ───
+function getUserTypeLabel(type, other) {
+  const labels = {
+    general: "일반",
+    teacher: "교사",
+    institution: "기관",
+    company: "기업",
+    other: `기타${other ? ` (${other})` : ""}`,
+  };
+  return labels[type] || type;
+}
+
+function filterMembers(members, searchTerm, typeFilter) {
+  if (!members || members.length === 0) return [];
+  
+  let filtered = [...members];
+  
+  // 검색어 필터
+  if (searchTerm && searchTerm.trim()) {
+    const term = searchTerm.trim().toLowerCase();
+    filtered = filtered.filter(m => {
+      return (
+        (m.nickname || "").toLowerCase().includes(term) ||
+        (m.real_name || "").toLowerCase().includes(term) ||
+        (m.email || "").toLowerCase().includes(term) ||
+        (m.phone || "").toLowerCase().includes(term) ||
+        (m.school_name || "").toLowerCase().includes(term) ||
+        (m.organization || "").toLowerCase().includes(term)
+      );
+    });
+  }
+  
+  // 유형 필터
+  if (typeFilter && typeFilter !== "all") {
+    if (typeFilter === "no_info") {
+      filtered = filtered.filter(m => !m.user_type);
+    } else if (typeFilter === "admin") {
+      filtered = filtered.filter(m => m.is_admin);
+    } else if (typeFilter === "master") {
+      filtered = filtered.filter(m => m.coach_credential === "master");
+    } else if (typeFilter === "dealer") {
+      filtered = filtered.filter(m => m.coach_credential === "dealer");
+    } else {
+      filtered = filtered.filter(m => m.user_type === typeFilter);
+    }
+  }
+  
+  return filtered;
+}
+
+function downloadMembersCSV(members) {
+  if (!members || members.length === 0) {
+    alert("다운로드할 데이터가 없습니다.");
+    return;
+  }
+  
+  const headers = [
+    "닉네임", "실명", "이메일", "연락처", 
+    "유형", "학교명", "소속/메모",
+    "가입일", "총 플레이", "대회 참가", "자격",
+  ];
+  
+  const rows = members.map(m => [
+    m.nickname || "",
+    m.real_name || "",
+    m.email || "",
+    m.phone || "",
+    getUserTypeLabel(m.user_type, m.user_type_other) || "",
+    m.school_name || "",
+    m.organization || "",
+    m.joined_at ? new Date(m.joined_at).toLocaleDateString("ko-KR") : "",
+    m.total_plays || 0,
+    m.contest_count || 0,
+    m.coach_credential === "master" ? "마스터" : m.coach_credential === "dealer" ? "코칭딜러" : "",
+  ]);
+  
+  // CSV 변환 (큰따옴표 이스케이프)
+  const csvContent = [
+    headers.join(","),
+    ...rows.map(row => row.map(cell => {
+      const escaped = String(cell).replace(/"/g, '""');
+      return /[,\n"]/.test(escaped) ? `"${escaped}"` : escaped;
+    }).join(",")),
+  ].join("\n");
+  
+  // BOM 추가 (Excel 한글 깨짐 방지)
+  const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `회원명부_${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
