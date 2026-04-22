@@ -820,6 +820,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
   const [rightsPrice, setRightsPrice] = useState(0);
   const [downsizeRestTurns, setDownsizeRestTurns] = useState(0); // 다운사이즈 이후 남은 휴식 턴 수 (0~2)
   const [gameEnded, setGameEnded] = useState(false); // 쥐경주 탈출 시 true
+  const [gameSaved, setGameSaved] = useState(false); // 게임 저장 완료 시 true (디브리핑 버튼 활성화 조건)
   const [playSessionId, setPlaySessionId] = useState(null); // 후기 버튼용 세션 ID
   const [totalCF, setTotalCF] = useState(0);
   const [cash, setCash] = useState(0); // 보유 현금
@@ -1197,7 +1198,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     setSellPriceInput(0); setRightsPrice(0);
     setViewTab("input"); setCellType("");
     setStartTime(null); setElapsed(0); setCardSelectedAt(null);
-    setGameEnded(false); setDownsizeRestTurns(0);
+    setGameEnded(false); setGameSaved(false); setDownsizeRestTurns(0);
     setReSellIdx(0); setReSellPrice(""); setStockSellQty({}); setStockSellPrice({});
   };
 
@@ -2134,17 +2135,31 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
                       <span style={{ fontSize: 9, color: "#71717a" }}>매각가$</span>
-                      <input type="number" min={1}
-                        value={stockSellPrice[i] ?? buyPrice}
+                      <select
+                        value={stockSellPrice[i] ?? ""}
                         onChange={e => setStockSellPrice(prev => ({ ...prev, [i]: e.target.value }))}
-                        style={{ width: 50, padding: "4px 6px", borderRadius: 6, border: "1px solid #27272a", background: "#18181b", color: "#fafafa", fontSize: 11, textAlign: "center", outline: "none" }}
-                      />
+                        style={{ width: 58, padding: "4px 2px", borderRadius: 6, border: "1px solid #27272a", background: "#18181b", color: "#fafafa", fontSize: 11, textAlign: "center", outline: "none" }}
+                      >
+                        <option value="">선택</option>
+                        <option value="10">$10</option>
+                        <option value="20">$20</option>
+                        <option value="30">$30</option>
+                        <option value="40">$40</option>
+                        <option value="50">$50</option>
+                        <option value="60">$60</option>
+                        <option value="70">$70</option>
+                        <option value="80">$80</option>
+                      </select>
                     </div>
                     <button onClick={() => {
                       const qtyRaw = stockSellQty[i] ?? a.shares;
-                      const priceRaw = stockSellPrice[i] ?? buyPrice;
+                      const priceRaw = stockSellPrice[i];
+                      if (!priceRaw) {
+                        alert("매각가를 선택해주세요 ($10~$80)");
+                        return;
+                      }
                       const sellQty = Math.min(a.shares, Math.max(1, parseInt(qtyRaw) || a.shares));
-                      const sellPrice = Math.max(1, parseInt(priceRaw) || buyPrice);
+                      const sellPrice = Math.max(1, parseInt(priceRaw) || 0);
                       const sellTotal = sellPrice * sellQty;
                       const targetId = a.id;
                       setCash(prev => prev + sellTotal);
@@ -2310,6 +2325,20 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                           const badge = ACTION_BADGE[t.action] || ACTION_BADGE.hold;
                           return <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: badge.bg, color: badge.color }}>{badge.label}</span>;
                         })()}
+                        {/* 턴 삭제 버튼 (잘못 입력한 턴 정리용 — 로그만 삭제, 재무 상태는 자동 복원 안됨) */}
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`T${t.turn} 턴을 삭제하시겠습니까?\n\n⚠️ 기록(로그)만 삭제됩니다.\n현금·자산·대출 등 재무 상태는 그대로 유지됩니다.\n(자동 복원은 다음 업데이트에서 제공 예정)\n\n계속하시겠습니까?`)) {
+                              setTurnLog(prev => prev.filter((_, idx) => idx !== i));
+                            }
+                          }}
+                          title="이 턴 기록 삭제"
+                          style={{
+                            padding: "2px 6px", borderRadius: 4, border: "none",
+                            background: "#7f1d1d40", color: "#fca5a5", cursor: "pointer",
+                            fontSize: 10, fontWeight: 700,
+                          }}
+                        >🗑️</button>
                       </div>
                     </div>
                     {/* 거래 내역 + 보유 현금 */}
@@ -2329,8 +2358,25 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         </div>
       )}
 
-      {/* 디브리핑 */}
-      {turnLog.length >= 3 && (
+      {/* 디브리핑 — 게임 저장 완료 후에만 활성화 (실수 클릭 방지) */}
+      {turnLog.length >= 3 && !gameSaved && (
+        <div style={{
+          marginTop: 20,
+          padding: 16,
+          borderRadius: 12,
+          background: "#18181b",
+          border: "1px dashed #3f3f46",
+          textAlign: "center",
+        }}>
+          <div style={{ fontSize: 13, color: "#a1a1aa", fontWeight: 700, marginBottom: 4 }}>
+            🔒 디브리핑 분석
+          </div>
+          <div style={{ fontSize: 11, color: "#71717a" }}>
+            게임을 저장한 후에 디브리핑 분석을 시작할 수 있습니다
+          </div>
+        </div>
+      )}
+      {gameSaved && (
         <DebriefSection
           results={turnLog.map(t => ({
             turn: t.turn,
@@ -2389,12 +2435,23 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       {turnLog.length >= 3 && (
         <button onClick={async () => {
           try {
-            const result = await onSaveGame?.(buildGamePayload());
-            if (result !== null && result !== undefined) {
-              // 성공 시 진행 중 세션 삭제 (게임 완료된 것으로 간주)
-              await deleteGameSession(authUser?.id);
-              alert("✅ 게임이 저장되었습니다.");
+            if (typeof onSaveGame !== "function") {
+              console.error("[게임 저장] onSaveGame 콜백이 없음");
+              alert("⚠️ 저장 기능이 연결되지 않았습니다. 페이지를 새로고침해주세요.");
+              return;
             }
+            const result = await onSaveGame(buildGamePayload());
+            
+            // 저장 성공 판정: 예외 없이 돌아왔고, 명시적으로 null을 반환하지 않았으면 성공
+            if (result === null) {
+              alert("⚠️ 게임 저장에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요.");
+              return;
+            }
+            
+            // 성공 처리 (result가 undefined여도 예외 없이 끝났으면 성공으로 간주)
+            try { await deleteGameSession(authUser?.id); } catch (_) {}
+            setGameSaved(true); // 디브리핑 버튼 활성화
+            alert("✅ 게임이 저장되었습니다.");
           } catch (e) {
             console.error("[게임 저장] 예외:", e);
             alert(`⚠️ 게임 저장 중 오류: ${e.message || "알 수 없는 오류"}`);
@@ -3379,11 +3436,17 @@ export default function CoachingSimulator() {
               const playerId = currentPlayer?.id || "solo";
               const playerName = currentPlayer?.name || "개인플레이";
               const key = `game:${playerId}:${ts}`;
-              const result = await window.storage?.set(key, JSON.stringify({ ...gameData, ts, playerId, playerName }));
+              
+              if (!window.storage || typeof window.storage.set !== "function") {
+                console.error("[onSaveGame] window.storage가 없거나 set 함수가 없음");
+                return null;
+              }
+              
+              const result = await window.storage.set(key, JSON.stringify({ ...gameData, ts, playerId, playerName }));
               
               // 저장 실패 시 (storage.js v3에서 null 반환)
               if (!result) {
-                console.warn("[CashflowCoachingSim] 게임 저장 실패 (storage.set returned null)");
+                console.warn("[CashflowCoachingSim] 게임 저장 실패 (storage.set returned null/falsy):", result);
                 return null;
               }
               
@@ -3584,8 +3647,7 @@ export default function CoachingSimulator() {
               🔄 같은 설정으로 다시 시뮬레이션 ({version} · {turns}턴)
             </button>
 
-            {/* 디브리핑 섹션 */}
-            <DebriefSection results={results} version={version} turns={turns} deck={deck} />
+            {/* 디브리핑 섹션 — 시뮬레이션 모드에서는 제외 (플레이/대회 모드에서만 제공) */}
 
             {/* ─── 후기 버튼 (Phase A) ─── */}
             {currentSessionId && (
