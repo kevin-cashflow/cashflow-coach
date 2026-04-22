@@ -3762,7 +3762,7 @@ const SYSTEM_PROMPT = `캐쉬플로우 보드게임 전문 코칭 딜러(13년/5
 // tier 1 = $9 Sonnet 2000자, tier 2 = $20 Opus 5000자
 const FEEDBACK_DETAIL = {
   1: "2000자. 스토리텔링. 감정→행동(모임참석). 희망적. 현실경제연결. 억지마케팅X.",
-  2: "5000자. 전턴분석+현실매핑+최상최악비교(수치)+전략제안+마인드셋. 스토리텔링. 모임가치를 진심으로. 당신의 최고 수준의 한국어 스토리텔링으로 작성하세요.",
+  2: "5000자. 전턴분석+현실매핑+잘한/아쉬운 선택 비교(수치)+전략제안+마인드셋. 스토리텔링. 모임가치를 진심으로. 당신의 최고 수준의 한국어 스토리텔링으로 작성하세요.",
 };
 const FEEDBACK_MAX_TOKENS = { 1: 2500, 2: 6000 };
 
@@ -3880,6 +3880,495 @@ function DebriefSection({ results, version, turns, deck }) {
     } catch {}
   };
 
+  // ═══════════════════════════════════════════════════
+  // 🎯 잘한 선택 / 아쉬운 선택 경로 계산 (Phase B Day 3)
+  // ═══════════════════════════════════════════════════
+  // 국제캐쉬플로우강사협회 13년 교육 철학 기반 분류:
+  //
+  // 🟢 잘한 선택:
+  //   - 초반 현금 확보 (CF 마이너스여도 OK)
+  //   - 자산 매수 후 단기 매도 (차익 실현)
+  //   - 사업체 선택
+  //   - 기부 선택 (투자 기회 확보)
+  //   - CF 증가 자산 매수
+  //   - 주식 차익 실현
+  //
+  // 🟡 아쉬운 선택 (부드러운 표현, "최악" 아님):
+  //   - 좋은 기회 패스
+  //   - 사업체 기회 놓침 (가중치 ↑)
+  //   - 기부 안 함
+  //   - 후반부 주식 투자 (CF 방해)
+  //   - CF 마이너스 자산을 끝까지 보유
+  //
+  // 🔴 확실히 나쁜 선택:
+  //   - DOODAD (과소비)
+  //
+  // ⚪ 중립 (교육적 평가 불필요):
+  //   - BABY (선택 영역 아님)
+  //   - PAYDAY (자동)
+  const computeBestWorstPaths = (turnLogData, totalTurns) => {
+    if (!turnLogData || turnLogData.length === 0) {
+      return {
+        bestPath: [{ turn: 1, age: 20, cf: 0, asset: 0, note: "기록 없음" }],
+        worstPath: [{ turn: 1, age: 20, cf: 0, asset: 0, note: "기록 없음" }],
+      };
+    }
+
+    // 🔧 results(gameResults) 구조를 turnLog 구조로 변환 (어댑터)
+    // results: { turn, cell:{type}, card:{...,_action,_shares}, decisionSec, ... }
+    // turnLog: { turn, cellType, card:{...}, action, shares, transaction, ... }
+    const normalized = turnLogData.map(t => {
+      // 이미 turnLog 구조면 그대로 사용
+      if (t.cellType && !t.cell) return t;
+      // results 구조면 변환
+      return {
+        turn: t.turn,
+        cellType: t.cell?.type || t.cellType,
+        dealType: t.dealType,
+        card: t.card ? { ...t.card } : null,
+        action: t.card?._action || t.action,
+        shares: t.card?._shares || t.shares,
+        transaction: t.transaction,
+        decisionSec: t.decisionSec,
+      };
+    });
+
+    const yearsPerTurn = Math.round(40 / Math.max(totalTurns, 1) * 10) / 10;
+    const ageAtTurn = (t) => Math.round(20 + (t - 0.5) * yearsPerTurn);
+
+    // 게임 구간 정의 (초반 1/3 / 중반 1/3 / 후반 1/3)
+    const earlyThreshold = Math.max(Math.floor(totalTurns / 3), 3);
+    const lateThreshold = Math.floor(totalTurns * 2 / 3);
+    const isEarly = (turn) => turn <= earlyThreshold;
+    const isLate = (turn) => turn >= lateThreshold;
+
+    // 단기 매도 판단을 위해: 매수/매도 매칭
+    // cardName → { buyTurn, sold, sellTurn } 매핑
+    const assetLifecycle = {};
+    normalized.forEach(t => {
+      const cardName = t.card?.sub || t.card?.desc || "";
+      if (!cardName) return;
+      
+      if ((t.cellType === "DEAL1" || t.cellType === "DEAL2" || t.cellType === "BIG_DEAL" || t.cellType === "SMALL_DEAL" || t.cellType === "MARKET") && t.action === "buy") {
+        if (!assetLifecycle[cardName]) {
+          assetLifecycle[cardName] = { buyTurn: t.turn, sold: false, sellTurn: null };
+        }
+      }
+      if (t.action === "sell" || t.cellType === "EXT_SELL") {
+        if (assetLifecycle[cardName]) {
+          assetLifecycle[cardName].sold = true;
+          assetLifecycle[cardName].sellTurn = t.turn;
+        }
+      }
+    });
+
+    // 단기 매도 판단 (매수 후 3턴 이내)
+    const isShortTermSale = (cardName, sellTurn) => {
+      const info = assetLifecycle[cardName];
+      if (!info) return false;
+      return (sellTurn - info.buyTurn) <= 3;
+    };
+
+    // 사업체 판단
+    const isBusinessCard = (card) => {
+      if (!card) return false;
+      const type = card.type || "";
+      const sub = (card.sub || "").toLowerCase();
+      const desc = (card.desc || "").toLowerCase();
+      return (
+        type.includes("사업") ||
+        type.includes("business") ||
+        sub.includes("사업") ||
+        sub.includes("business") ||
+        sub.includes("startup") ||
+        desc.includes("사업") ||
+        desc.includes("프랜차이즈") ||
+        desc.includes("franchise")
+      );
+    };
+
+    // 매도 여부를 기준으로 CF 마이너스 자산이 "부채"였는지 판단
+    const wasSoldLater = (cardName, buyTurn) => {
+      const info = assetLifecycle[cardName];
+      return info && info.sold && info.sellTurn > buyTurn;
+    };
+
+    // 나이를 턴으로 변환 (40세 기준)
+    const isBeforeFortyTurn = (turn) => {
+      const age = ageAtTurn(turn);
+      return age < 40;
+    };
+
+    // 각 턴을 분류
+    const classifyTurn = (t, idx) => {
+      const action = t.action;
+      const cellType = t.cellType;
+      const card = t.card || {};
+      const cashFlowChange = card.cashflow || 0;
+      const roi = card.roi || 0;
+      const cardName = card.sub || card.desc || "";
+
+      // ─── DEAL / MARKET 카드 매수 ───
+      const isBuyable = ["DEAL1", "DEAL2", "BIG_DEAL", "SMALL_DEAL", "MARKET"].includes(cellType);
+      
+      if (isBuyable && action === "buy") {
+        // 사업체 매수 - 항상 잘한 선택 (+ 가중치)
+        if (isBusinessCard(card)) {
+          return {
+            category: "best",
+            cfChange: cashFlowChange,
+            assetChange: card.cost || card.price || 0,
+            reason: `💼 사업체 ${cardName} 매수 (+$${cashFlowChange}/월) — B사분면 진입`,
+            weight: 1.5,
+          };
+        }
+        // CF 증가 자산 - 잘한 선택
+        if (cashFlowChange > 0) {
+          return {
+            category: "best",
+            cfChange: cashFlowChange,
+            assetChange: card.cost || card.price || 0,
+            reason: `🏠 ${cardName} 매수 (+$${cashFlowChange}/월)`,
+          };
+        }
+        // CF 마이너스 자산 - 매각 여부로 판단 (Kevin님 철학)
+        if (cashFlowChange < 0 || roi < 0) {
+          // 초반이면 현금 확보 전략
+          if (isEarly(t.turn)) {
+            return {
+              category: "best",
+              cfChange: cashFlowChange,
+              assetChange: card.cost || card.price || 0,
+              reason: `💡 초반 ${cardName} 매수 — 현금 확보 전략 (CF ${cashFlowChange}/월이지만 OK)`,
+            };
+          }
+          // 나중에 매각했으면 OK (차익 실현 가능)
+          if (wasSoldLater(cardName, t.turn)) {
+            return {
+              category: "best",
+              cfChange: cashFlowChange,
+              assetChange: card.cost || card.price || 0,
+              reason: `✅ ${cardName} 매수 (CF ${cashFlowChange}) — 이후 매각으로 차익 확보`,
+            };
+          }
+          // 끝까지 보유했다면 진짜 부채
+          const info = assetLifecycle[cardName];
+          const heldToEnd = info && !info.sold;
+          if (heldToEnd) {
+            return {
+              category: "missed",
+              cfChange: cashFlowChange,
+              assetChange: card.cost || card.price || 0,
+              reason: `⚠️ ${cardName} (CF ${cashFlowChange}/월) 끝까지 보유 — 부채를 자산으로 착각`,
+            };
+          }
+          return {
+            category: "neutral",
+            cfChange: 0,
+            assetChange: 0,
+            reason: `${cardName} 매수`,
+          };
+        }
+        // 주식 매수 (CF 변화 없음)
+        if ((card.type || "").includes("주식") || cardName.toLowerCase().includes("stock")) {
+          // 후반부(40세 이후) 주식 투자 - 아쉬운 선택
+          if (isLate(t.turn) || !isBeforeFortyTurn(t.turn)) {
+            return {
+              category: "missed",
+              cfChange: 0,
+              assetChange: (card.cost || card.price || 0) * (t.shares || 1),
+              reason: `📉 ${cardName} 주식 매수 — 현금흐름 형성 시기에 차익 추구`,
+            };
+          }
+          return {
+            category: "neutral",
+            cfChange: 0,
+            assetChange: (card.cost || card.price || 0) * (t.shares || 1),
+            reason: `주식 ${cardName} 매수`,
+          };
+        }
+        return { category: "neutral", cfChange: 0, assetChange: 0, reason: `${cardName} 매수` };
+      }
+
+      // ─── 주식/자산 매도 ───
+      if (action === "sell" || cellType === "EXT_SELL") {
+        const transaction = t.transaction || "";
+        const profitMatch = transaction.match(/\+\$?([\d,]+)/);
+        const lossMatch = transaction.match(/-\$?([\d,]+)/);
+        
+        // 40세 이전 매각은 차익 여부 무관하게 긍정적 (Kevin님 철학)
+        if (isBeforeFortyTurn(t.turn)) {
+          if (profitMatch) {
+            const profit = parseInt(profitMatch[1].replace(/,/g, ""), 10);
+            return {
+              category: "best",
+              cfChange: 0,
+              assetChange: profit,
+              reason: `💰 ${cardName} 매각 +$${profit} — 40세 이전 차익 실현 (더 큰 CF 만들 원금)`,
+            };
+          }
+          if (lossMatch) {
+            const loss = parseInt(lossMatch[1].replace(/,/g, ""), 10);
+            return {
+              category: "best",
+              cfChange: 0,
+              assetChange: -loss,
+              reason: `⚡ ${cardName} 매각 -$${loss} — 빠른 손절, 다음 기회로`,
+            };
+          }
+          return { category: "best", cfChange: 0, assetChange: 0, reason: `${cardName} 매각 — 유연한 의사결정` };
+        }
+        
+        // 단기 매도 (매수 후 3턴 이내) - 차익/손절 무관하게 좋은 선택
+        if (isShortTermSale(cardName, t.turn)) {
+          if (profitMatch) {
+            const profit = parseInt(profitMatch[1].replace(/,/g, ""), 10);
+            return {
+              category: "best",
+              cfChange: 0,
+              assetChange: profit,
+              reason: `⚡ ${cardName} 단기 매도 +$${profit} — 빠른 차익실현`,
+            };
+          }
+          if (lossMatch) {
+            const loss = parseInt(lossMatch[1].replace(/,/g, ""), 10);
+            return {
+              category: "best",
+              cfChange: 0,
+              assetChange: -loss,
+              reason: `⚡ ${cardName} 단기 정리 -$${loss} — 빠른 의사결정`,
+            };
+          }
+        }
+        
+        // 40세 이후 일반 매도
+        if (profitMatch) {
+          const profit = parseInt(profitMatch[1].replace(/,/g, ""), 10);
+          return {
+            category: "best",
+            cfChange: 0,
+            assetChange: profit,
+            reason: `💰 ${cardName} 매각 +$${profit} 차익`,
+          };
+        }
+        if (lossMatch) {
+          const loss = parseInt(lossMatch[1].replace(/,/g, ""), 10);
+          return {
+            category: "missed",
+            cfChange: 0,
+            assetChange: -loss,
+            reason: `${cardName} 매각 -$${loss} 손실`,
+          };
+        }
+        return { category: "neutral", cfChange: 0, assetChange: 0, reason: `매도` };
+      }
+
+      // ─── DOODAD (과소비) - 확실히 나쁜 선택 ───
+      if (cellType === "DOODAD") {
+        const amount = card.amount || 0;
+        return {
+          category: "worst",
+          cfChange: 0,
+          assetChange: -amount,
+          reason: `🛒 ${card.desc || "지출"} -$${amount} — 과소비`,
+        };
+      }
+
+      // ─── CHARITY (기부) - 잘한 선택 ───
+      if (cellType === "CHARITY") {
+        if (action === "charity_yes") {
+          return {
+            category: "best",
+            cfChange: 0,
+            assetChange: -(card.cost || 160),
+            reason: `❤️ 기부 선택 — 부자 마인드셋 (주사위 2개 × 3턴)`,
+          };
+        }
+        if (action === "charity_no" || action === "na") {
+          return {
+            category: "missed",
+            cfChange: 0,
+            assetChange: 0,
+            reason: `기부 기회 패스 — 투자 현금 확보 기회 놓침`,
+          };
+        }
+        return { category: "neutral", cfChange: 0, assetChange: 0, reason: "CHARITY" };
+      }
+
+      // ─── DOWNSIZED ───
+      if (cellType === "DOWNSIZED" || cellType === "DOWNSIZED_REST") {
+        return { category: "neutral", cfChange: 0, assetChange: 0, reason: "다운사이즈 (운)" };
+      }
+
+      // ─── BABY ───
+      if (cellType === "BABY") {
+        return { category: "neutral", cfChange: 0, assetChange: 0, reason: "자녀 (선택 영역 아님)" };
+      }
+
+      // ─── PAYDAY (월급) - Kevin님 철학: 저축은 자산 형성의 전 단계 ───
+      if (cellType === "PAYDAY") {
+        // 초반(20대)의 PAYDAY는 저축 기회로 긍정적 평가
+        if (isEarly(t.turn)) {
+          return {
+            category: "best",
+            cfChange: 0,
+            assetChange: 500, // 저축 효과 상징적 표현
+            reason: `💵 월급 수령 — 20대 저축은 자산 형성의 씨앗 (과소평가된 습관)`,
+          };
+        }
+        return { category: "neutral", cfChange: 0, assetChange: 0, reason: "PAYDAY" };
+      }
+
+      // ─── 기회 패스 ───
+      if (isBuyable && (action === "pass" || action === "na" || !action)) {
+        const weight = isBusinessCard(card) ? 1.5 : 1.0;
+        if (isBusinessCard(card)) {
+          return {
+            category: "missed",
+            cfChange: 0,
+            assetChange: 0,
+            reason: `💼 ${cardName} 사업체 기회 패스 — B사분면 입장권 포기`,
+            weight,
+          };
+        }
+        if (cashFlowChange > 0 || roi > 10) {
+          return {
+            category: "missed",
+            cfChange: 0,
+            assetChange: 0,
+            reason: `${cardName} 기회 패스 — 좋은 조건이었음`,
+            weight,
+          };
+        }
+        // 20대의 기회 패스는 현실적 (돈 없어서) - 저축 단계
+        if (isEarly(t.turn)) {
+          return {
+            category: "neutral",
+            cfChange: 0,
+            assetChange: 0,
+            reason: `${cardName} 패스 — 20대는 저축 단계`,
+          };
+        }
+        return { category: "neutral", cfChange: 0, assetChange: 0, reason: "패스" };
+      }
+
+      return { category: "neutral", cfChange: 0, assetChange: 0, reason: "" };
+    };
+
+    // 모든 턴 분류
+    const classifiedTurns = normalized.map((t, idx) => ({ ...t, ...classifyTurn(t, idx) }));
+
+    // Best Path: "잘한 선택"만 누적 (+ 가중치 반영)
+    // Worst Path: "아쉬운 선택" + "나쁜 선택" 누적
+    let bestCF = 0, bestAsset = 0;
+    let worstCF = 0, worstAsset = 0;
+
+    const bestPath = [];
+    const worstPath = [];
+
+    classifiedTurns.forEach((t) => {
+      const weight = t.weight || 1.0;
+      
+      if (t.category === "best") {
+        bestCF += t.cfChange * weight;
+        bestAsset += t.assetChange * weight;
+        bestPath.push({
+          turn: t.turn,
+          age: ageAtTurn(t.turn),
+          cf: Math.round(bestCF),
+          asset: Math.round(bestAsset),
+          note: t.reason,
+        });
+      } else if (t.category === "missed" || t.category === "worst") {
+        worstCF += t.cfChange * weight;
+        worstAsset += t.assetChange * weight;
+        worstPath.push({
+          turn: t.turn,
+          age: ageAtTurn(t.turn),
+          cf: Math.round(worstCF),
+          asset: Math.round(worstAsset),
+          note: t.reason,
+        });
+      }
+    });
+
+    // 경로가 없으면 기본값 (시작점 추가)
+    const addStartPoint = (path) => {
+      if (path.length === 0 || path[0].turn > 1) {
+        path.unshift({ turn: 1, age: 20, cf: 0, asset: 0, note: "출발 (20세)" });
+      }
+      return path;
+    };
+
+    // 종료점 추가 (마지막 턴까지 이어지도록)
+    const addEndPoint = (path, lastCF, lastAsset) => {
+      if (path.length > 0 && path[path.length - 1].turn < totalTurns) {
+        path.push({
+          turn: totalTurns,
+          age: ageAtTurn(totalTurns),
+          cf: Math.round(lastCF),
+          asset: Math.round(lastAsset),
+          note: `${ageAtTurn(totalTurns)}세 — 누적 결과`,
+        });
+      }
+      return path;
+    };
+
+    addStartPoint(bestPath);
+    addStartPoint(worstPath);
+    addEndPoint(bestPath, bestCF, bestAsset);
+    addEndPoint(worstPath, worstCF, worstAsset);
+
+    // 모두 중립이면 기본 값 (교육적 메시지)
+    if (bestPath.length <= 2 && worstPath.length <= 2 && bestCF === 0 && worstCF === 0 && bestAsset === 0 && worstAsset === 0) {
+      return {
+        bestPath: [
+          { turn: 1, age: 20, cf: 0, asset: 0, note: "출발 (20세)" },
+          { turn: Math.floor(totalTurns / 3), age: ageAtTurn(Math.floor(totalTurns / 3)), cf: 100, asset: 5000, note: "저축 + 첫 자산 매수" },
+          { turn: Math.floor(totalTurns / 2), age: ageAtTurn(Math.floor(totalTurns / 2)), cf: 300, asset: 15000, note: "현금흐름 자산 확장" },
+          { turn: Math.floor(totalTurns * 2 / 3), age: ageAtTurn(Math.floor(totalTurns * 2 / 3)), cf: 600, asset: 35000, note: "사업체 매수 (B사분면)" },
+          { turn: totalTurns, age: ageAtTurn(totalTurns), cf: 1000, asset: 60000, note: "다양한 행동이 있었다면" },
+        ],
+        worstPath: [
+          { turn: 1, age: 20, cf: 0, asset: 0, note: "출발 (20세)" },
+          { turn: Math.floor(totalTurns / 3), age: ageAtTurn(Math.floor(totalTurns / 3)), cf: 0, asset: 0, note: "저축도 투자도 없음" },
+          { turn: Math.floor(totalTurns / 2), age: ageAtTurn(Math.floor(totalTurns / 2)), cf: 0, asset: 0, note: "기회 계속 패스" },
+          { turn: totalTurns, age: ageAtTurn(totalTurns), cf: 0, asset: 0, note: "행동 없이 시간만 흘렀다면" },
+        ],
+      };
+    }
+
+    // 경로 압축: 의미있는 turning points 유지하며 6-7개로
+    const compressPath = (path) => {
+      if (path.length <= 7) return path;
+      
+      // 첫 점, 마지막 점은 보존
+      const first = path[0];
+      const last = path[path.length - 1];
+      const middle = path.slice(1, -1);
+      
+      // 중간 점 중 "변화량이 큰" 순으로 5개 선택
+      const withDelta = middle.map((p, i) => {
+        const prev = i === 0 ? first : middle[i - 1];
+        const delta = Math.abs((p.cf - prev.cf) * 100) + Math.abs(p.asset - prev.asset);
+        return { ...p, _delta: delta };
+      });
+      
+      // 변화량 top 5 선택 후 턴 순서로 재정렬
+      const topChanges = withDelta
+        .sort((a, b) => b._delta - a._delta)
+        .slice(0, 5)
+        .sort((a, b) => a.turn - b.turn);
+      
+      return [first, ...topChanges.map(({ _delta, ...p }) => p), last];
+    };
+
+    return {
+      bestPath: compressPath(bestPath),
+      worstPath: compressPath(worstPath),
+    };
+  };
+
   // ─── 1단계: 디브리핑 분석 (Claude API → JSON) ───
   const runAnalysis = async () => {
     // Phase B: 디브리핑 게이트 체크 (Admin은 자동 통과)
@@ -3902,13 +4391,323 @@ function DebriefSection({ results, version, turns, deck }) {
         body: JSON.stringify({
           model: MODEL_SONNET,
           max_tokens: 8192,
-          system: `You are a CashFlow board game coaching expert (13 years, 5000+ sessions). Respond with ONLY valid JSON. No markdown, no code blocks, no text before or after. Start with { end with }. No trailing commas. Korean content.
+          system: `You are a CashFlow board game coaching expert (13 years, 5000+ sessions), deeply grounded in Robert Kiyosaki's teachings and Kevin's Korean educational experience. Respond with ONLY valid JSON. No markdown, no code blocks, no text before or after. Start with { end with }. No trailing commas. Korean content.
 
 CRITICAL INTERPRETATION RULES:
 - [이벤트] tag = event card (stock split/reverse split). Card appearance does NOT mean asset ownership.
 - [미보유→해당없음] = player did NOT own the stock, so event did NOT apply. Do NOT count as asset.
 - [보유중→적용됨] = player DID own the stock, so share count changed.
-- Asset ownership is determined ONLY by [구매] tag on deal cards (SMALL DEAL/BIG DEAL/Capital Gain/CashFlow Deal).`,
+- Asset ownership is determined ONLY by [구매] tag on deal cards (SMALL DEAL/BIG DEAL/Capital Gain/CashFlow Deal).
+
+═══════════════════════════════════════════════════
+🎓 KIYOSAKI PHILOSOPHY (내재화하여 분석에 자연스럽게 녹일 것):
+
+이것은 프롬프트에 인용하거나 "기요사키가 말했다"라고 표현하는 것이 아닙니다.
+이 철학을 "당신의 관점"으로 완전히 내재화하여, 모든 분석과 조언에 자연스럽게 배어들게 하세요.
+
+### 기본 10대 철학
+
+1. **ESBI 사분면**
+   - E(직장인): 안정 추구, 돈을 위해 일함 → "월급의 함정"
+   - S(자영업): 독립적이나 여전히 시간을 팔고 있음
+   - B(사업체 소유): 시스템을 가짐, 돈이 일하게 함 → 진정한 자유의 시작
+   - I(투자자): 돈이 돈을 낳게 함 → 부의 완성
+   → 사업체 카드는 단순한 게임 요소가 아니라 "B사분면으로 건너가는 다리"
+
+2. **자산 vs 부채의 정의**
+   - 자산 = 주머니에 돈을 넣어주는 것 (CF +)
+   - 부채 = 주머니에서 돈을 빼가는 것 (CF -)
+   - 많은 사람이 "자산"이라 믿는 집/차가 실은 부채
+   → CF 증가 매수 = 진짜 자산 획득의 순간
+
+3. **현금흐름이 왕**
+   - 자본이익(시세차익)은 일회성, 현금흐름은 지속
+   - 진짜 부 = passive income이 지출을 넘어서는 순간
+   - 주식 매매 차익보다 부동산/사업체의 월 현금흐름이 우선
+   → 후반부 주식 매수는 "현금흐름 구축 기회"를 놓친 것
+
+4. **부자는 덜 일하고 더 번다** — 돈의 방향을 바꾸는 것이 핵심
+
+5. **기부의 역설**
+   - "주면 돌아온다"는 단순 미덕이 아닌 부의 기술
+   - 기부는 현금흐름을 막지 않음 → 오히려 기회를 확장
+   - 움츠러드는 사고방식 vs 풍요의 사고방식
+   → 기부 선택 = 부자 마인드셋의 증거
+
+6. **실수는 교육** — 빠른 실패 > 느린 성공
+
+7. **두려움과 기회** — 두려움 때문에 기회를 놓친다 → 패스는 굴복
+
+8. **좋은 빚 vs 나쁜 빚**
+   - 나쁜 빚: 소비(DOODAD)를 위한 빚
+   - 좋은 빚: 자산 매수를 위한 빚 → 다른 사람이 내 빚을 갚아줌
+
+9. **금융 교육의 부재** — 캐쉬플로우 게임 = 자기 자신을 가르치는 가장 좋은 도구
+
+10. **행동이 전부** — "다음 게임에서 어떻게 다르게 할 것인가"가 진짜 학습
+
+═══════════════════════════════════════════════════
+💼 핵심 영역 1: 사업가 정신 / 기업가 사고
+
+### 사업 vs 직업의 근본적 차이
+- 직업: 내가 없으면 돈이 안 들어옴 (시간-돈 교환)
+- 사업: 내가 없어도 돈이 들어옴 (시스템이 일함)
+- 캐쉬플로우 게임의 사업체 카드 = "시스템 소유"의 시작
+
+### 기업가의 핵심 사고방식
+- **문제 = 기회**: 남들이 불평할 때, 기업가는 해결책을 만든다
+- **실패 = 데이터**: 실패는 끝이 아니라 배움의 시작
+- **리스크는 계산되는 것**: 무모함이 아닌 계산된 도전
+- **다른 사람의 돈(OPM)**: 내 돈이 아닌, 시스템과 레버리지
+- **다른 사람의 시간(OPT)**: 고용과 협업의 힘
+
+### 사업체를 평가하는 기준
+- 현금흐름 크기보다 "시스템이 얼마나 자동화되어 있는가"
+- ROI도 중요하지만 "내 시간이 얼마나 필요한가"가 더 중요
+- 시장의 방향성 vs 반짝 트렌드 구분
+
+### 게임에서의 적용
+- 사업체 매수 = B사분면 입장권 = 가장 가치 있는 선택
+- 사업체 패스 = "나는 아직 준비 안 됐어"의 두려움 표현
+- 첫 번째 사업체 = 가장 큰 심리적 장벽
+
+═══════════════════════════════════════════════════
+🎮 핵심 영역 2: 보드게임과 인생의 연결
+
+### 캐쉬플로우 게임의 진짜 목적
+- 이기기 위함이 아니라 "자신의 금융 사고방식을 발견하기 위함"
+- 게임판 위에서의 선택 = 실제 삶의 선택 패턴의 거울
+- 승리보다 "왜 그 선택을 했는가"가 중요
+
+### 매 게임이 "인생 예행연습"
+- 20대의 선택을 60대에 복기할 수는 없다
+- 하지만 게임에서는 40년을 2시간에 압축해서 살아볼 수 있음
+- 한 판 = 한 번의 인생 시뮬레이션
+
+### 실패해도 안전한 배움
+- 실제 돈 잃지 않고 금융 근육 훈련
+- 실수할수록 더 가치 있는 게임
+- "진짜 돈"을 잃기 전에 "게임 돈"으로 배우기
+
+### 반복의 힘
+- 한 번 하면 재미, 열 번 하면 통찰, 백 번 하면 체득
+- 매번 다른 카드 조합 → 매번 새로운 교훈
+- 반복할수록 나오는 "나만의 패턴" 인식
+
+### 디브리핑의 가치
+- 게임 자체보다 게임 후 성찰이 더 큰 배움
+- "내가 왜 그 순간 패스했지?" 같은 질문
+- 무의식적 패턴의 의식화
+
+═══════════════════════════════════════════════════
+🤝 핵심 영역 3: 공동체 / 팀 / 네트워크
+
+### 혼자 vs 함께의 차이
+- 혼자 공부 = 지식
+- 함께 공부 = 변화 + 지식
+- 부자들은 반드시 네트워크 안에서 자란다
+
+### 부자들의 인맥 특성
+- 같은 방향으로 성장하려는 사람들
+- 서로 기회를 공유하는 관계
+- "끌어올리는" 관계 vs "끌어내리는" 관계
+
+### 코칭딜러/모임의 가치
+- 혼자 게임해도 배움이 있지만, 함께하면 10배
+- 다른 사람의 선택을 보며 배우기
+- 자신의 사각지대 발견
+- 가르치면서 배우는 원리 (가장 깊은 학습)
+
+### 한국적 맥락
+- 한국인은 공동체 학습에 강함
+- 단 "비교"가 아닌 "동행"이 되어야 함
+- Kevin의 캐쉬플로우 모임 = 금융 공동체 선언
+
+### 왜 혼자 하면 안 되는가
+- 자기 관점에 갇힘
+- 지속성 떨어짐
+- 동기 부여 한계
+→ 진짜 변화는 공동체 안에서
+
+═══════════════════════════════════════════════════
+💰 핵심 영역 4: 패시브 인컴 구축 단계
+
+### 쥐 레이스 탈출의 수학
+- 단순 공식: **패시브 인컴 > 총 지출**
+- 하지만 실행은 복잡: 자산 구축 + 지출 관리 + 시간
+
+### 패시브 인컴 구축 단계 (0 → 10)
+**0단계**: 월급 의존 (대부분의 직장인)
+**1단계**: 지출 < 수입 (저축 시작)
+**2단계**: 첫 자산 매수 (소액 부동산/주식)
+**3단계**: 다수 자산 확보 (분산)
+**4단계**: 월 $100 패시브 인컴
+**5단계**: 월 $500 패시브 인컴
+**6단계**: 월 $1,000 패시브 인컴 (의미있는 전환점)
+**7단계**: 패시브 인컴이 지출의 50% (쥐 레이스 중반 탈출)
+**8단계**: 패시브 인컴 = 지출 (쥐 레이스 탈출!)
+**9단계**: 패시브 인컴 > 지출 (자유 + 저축)
+**10단계**: 패시브 인컴이 지출의 10배 (완전한 자유)
+
+### 각 단계의 핵심 과제
+- 0→1: 지출 통제 (DOODAD 피하기)
+- 1→2: 첫 투자의 두려움 극복
+- 2→4: 반복 + 확장 (매월 저축 → 매년 자산)
+- 4→6: 레버리지 사용 (부동산/대출)
+- 6→8: 사업체 매수 (B사분면 진입)
+- 8→10: 투자가로 전환 (I사분면)
+
+### 게임에서의 매핑
+- 초반 몇 턴: 0→2단계 (기초 쌓기)
+- 중반: 3→5단계 (자산 확대)
+- 후반: 6→8단계 (쥐 레이스 탈출 시도)
+- 쥐 레이스 탈출 = 8단계 완성
+
+### 시간의 중요성
+- 단계 건너뛰기 불가능
+- 하지만 단계 밟는 속도는 선택 가능
+- 평균 수십 년 → 전략적으로 10~15년 가능
+
+═══════════════════════════════════════════════════
+🏠 기타 영역: 부동산 투자 원칙
+- 현금흐름이 주, 시세차익은 보너스
+- 레버리지의 현명한 사용 (본인 자본 적게, 은행 자본 많이)
+- 입지 + 임대 수요 평가
+- 한국: "전세 신화"의 함정 — 진짜 자산은 월세가 꾸준히 들어오는 것
+
+📈 기타 영역: 주식 투자 원칙
+- 트레이딩(단기) vs 인베스팅(장기)
+- 차익 실현 매도 = 단기 자본이익
+- 배당주 = 소액 패시브 인컴
+- 주식은 "자산"이 되기 어려움 — 현금흐름이 약함
+- 후반부 주식 투자 = 현금흐름 구축 기회 상실
+
+💸 기타 영역: 세금과 법인
+- 개인 소득세 vs 법인세
+- 부자들의 "합법적 절세" 전략
+- 한국: 종합소득세와 양도세 이해
+- 법인 설립 타이밍
+
+🙏 기타 영역: 멘토링 / 교육자
+- 혼자 배우기의 한계
+- 좋은 멘토는 10년 단축
+- 가르치면서 배우는 원리 (강사가 더 배움)
+- Kevin의 13년 코칭 경험 반영
+
+⏰ 기타 영역: 시간 vs 돈의 관계
+- 시간은 유한, 돈은 무한
+- 복리의 힘 (일찍 시작 > 많이 투자)
+- 40년이라는 프레임: 20세 시작 vs 30세 시작의 차이
+- 시간을 줄이는 것 = 집중 + 레버리지
+
+📊 기타 영역: 인플레이션과 통화
+- 현금 보유의 숨은 비용 (매년 가치 감소)
+- 인플레이션 방어: 부동산, 금, 우량 주식
+- 한국의 부동산 집중 = 인플레이션 직관적 대응
+
+═══════════════════════════════════════════════════
+🇰🇷 한국 맥락 (Kevin의 13년 교육 경험):
+
+### Kevin의 핵심 통찰 (13년, 5,000회 강의)
+- 한국 직장인의 금융 사각지대
+- 부동산 과신 vs 현금흐름 무지
+- "월급 = 안정"이라는 신화
+- 창업 두려움이 강한 문화적 배경
+- 평범한 사람도 가능한 현실적 전략
+
+### 한국인 특유의 함정
+- 강남 아파트 신화 (자본이익 중독)
+- "공무원이 최고" 사고방식
+- 금융 = 어렵고 위험하다는 선입견
+- 돈 이야기의 터부시 (가정/친구 사이에서)
+- 빠른 결과 기대 (복리 이해 부족)
+
+### 공동체 학습의 힘
+- Kevin의 5,000회 강의 = 공동체 기반
+- 혼자 가면 빨리, 함께 가면 멀리
+- 서로의 선택을 보며 배우기
+- 비교가 아닌 동행
+
+### 행동 우선 철학
+- "완벽한 계획 세우다 평생 간다"
+- "먼저 시작하고 배워라"
+- 작은 실행이 모든 변화의 시작
+
+═══════════════════════════════════════════════════
+🎯 SELECTION EVALUATION GUIDE (국제캐쉬플로우강사협회 13년):
+
+### Kevin의 핵심 교육 원칙 (13년 현장에서 정립)
+
+1. **20대 초반의 저축은 자산 형성의 씨앗**
+   - 20대에는 좋은 기회가 와도 현금이 없어 잡을 수 없음
+   - 저축은 과소평가되지만 자산 축적의 직전 단계
+   - 20대의 PAYDAY/월급 = "씨앗 모으는 시간"
+   - 기회를 패스하는 것도 돈 없으면 어쩔 수 없는 선택 (자책 X)
+
+2. **40대 이전 매각은 CF 감소여도 잘한 선택**
+   - 젊을 때는 시세차익으로 원금 확보가 더 중요
+   - 차익으로 더 큰 CF 자산을 살 수 있기 때문
+   - "현금흐름만이 답"은 아님 — 시기별 전략 다름
+   - 차익 실현 = 다음 도약을 위한 발판
+
+3. **CF 마이너스 자산의 재평가**
+   - CF 마이너스 = 항상 나쁜 것이 아님
+   - 매각 가능성이 있다면 투자 기회
+   - 끝까지 보유만 "진짜 부채" (20년 CF-$100 = -$24,000)
+   - 매각 타이밍이 핵심
+
+### 분류 기준
+
+1. 잘한 선택 (encourage, celebrate):
+   - 사업체(Business/Startup/프랜차이즈) 매수 → B사분면 진입 (가중치 ↑)
+   - 기부 선택 → 부자 마인드셋
+   - CF 증가 자산 매수 → 진짜 자산 획득
+   - 🆕 40세 이전 자산 매각 → 차익 실현 (더 큰 CF 만들 원금)
+   - 🆕 CF 마이너스 자산 매수 후 나중에 매각 → 유연한 전략
+   - 초반 CF 마이너스 자산 매수 → 현금 확보 전략
+   - 매수 후 단기 매도 (3턴 이내) → 빠른 의사결정
+   - 🆕 20대 PAYDAY = 저축 (자산 형성의 씨앗)
+
+2. 아쉬운 선택 (gentle, educational — "최악" 사용 금지):
+   - 좋은 기회를 패스 → 두려움에 굴복
+   - 사업체 기회 놓침 (가중치 ↑)
+   - 기부 기회 패스
+   - 후반부(40세+) 주식 투자 → 현금흐름 구축 기회 상실
+   - 🆕 CF 마이너스 자산을 "끝까지" 보유 → 부채를 자산으로 착각
+
+3. 확실히 나쁜 선택:
+   - DOODAD 과소비 → "나쁜 빚"의 씨앗
+
+4. 중립:
+   - 자녀 추가 (BABY) → 선택 영역 아님
+   - 다운사이즈 (DOWNSIZED) → 운의 영역
+   - 🆕 20대 기회 패스 → 현실적 한계 (저축 단계)
+
+TONE: 따뜻하고 격려하는. "최악" 금지. "아쉬운 선택", "놓친 기회" 사용.
+
+교육 목적: 
+- 자책이 아닌 "다음엔 어떻게 할까"
+- 20대의 저축도 인정
+- 유연한 전략 (CF vs 차익)
+- 시기별 다른 관점
+
+WRITING STYLE:
+- 기요사키 철학을 "당신의 시선"으로 녹여내세요 (인용 표현 금지)
+- "기요사키가 말했다" / "책에서 배웠듯" 같은 표현 사용 X
+- 대신 그 철학이 분석 자체에 배어있게
+- 한국 맥락과 Kevin의 교육 관점을 자연스럽게 반영
+- 구체적 게임 데이터와 철학을 연결
+- Kevin의 강의장에서 수강생에게 직접 들려주는 것처럼
+
+예시:
+  ❌ "기요사키는 B사분면이 부의 시작이라 말했다"
+  ✅ "35세, 당신은 월급이라는 파이프를 타던 시기에서 
+      직접 파이프를 만드는 사람으로 건너간 순간입니다"
+  ✅ "20대의 저축은 눈에 띄지 않지만, 
+      30대에 첫 자산을 살 수 있게 해주는 씨앗입니다"
+  ✅ "32세에 매각하며 CF+$130을 놓친 것처럼 보이지만,
+      그 차익으로 더 큰 기회를 노릴 수 있다면 좋은 선택입니다"
+═══════════════════════════════════════════════════`,
           messages: [{
             role: "user",
             content: `Analyze this CashFlow ${version} game (${turns} turns). 
@@ -3948,7 +4747,7 @@ ${turns <= 8 ? `    {"title": "출발과 탐색", "age": "20~30세", "turns": "T
 
 RULES:
 - phases: distribute ALL turns across phases proportionally. Empty phases should note "이 시기에는 행동이 없었다 — 기회를 놓치고 있었다" as verdict
-- bestPath/worstPath: KEY turning points only (3~6 entries), cf/asset as numbers
+- bestPath/worstPath: 간단히 placeholder만 넣으세요 (코드에서 실제 데이터로 대체됨). 3~4개 entry로 충분.
 - lessons: 5 insights. For short games, emphasize: "다양한 전략 탐색", "행동의 중요성", "관점을 넓히는 것이 진짜 게임의 시작"
 - finalQuestion: thought-provoking, encourage action and broader perspective
 - timeAnalysis.timeMessage: emphasize that assets need TIME, and that the real wealth comes from taking action and exploring diverse approaches`
@@ -4009,6 +4808,15 @@ RULES:
         try {
           const parsed = JSON.parse(jsonStr);
           if (parsed.phases && parsed.lessons) {
+            // 🎯 Best/Worst 경로를 코드 계산값으로 덮어쓰기 (AI 추측 대신 실제 데이터)
+            const computed = computeBestWorstPaths(results, turns);
+            parsed.bestPath = computed.bestPath;
+            parsed.worstPath = computed.worstPath;
+            console.log("[디브리핑] Best/Worst 경로 재계산 완료:", {
+              bestFinal: computed.bestPath[computed.bestPath.length - 1],
+              worstFinal: computed.worstPath[computed.worstPath.length - 1],
+            });
+            
             setAnalysis(parsed);
             setMode("analysis-done");
             saveReport(parsed, "", null);
@@ -4106,14 +4914,14 @@ RULES:
     });
 
     r += `${line}\n\n`;
-    r += `■ 2. 최상의 선택 vs 최악의 선택\n\n`;
+    r += `■ 2. 잘한 선택 vs 아쉬운 선택\n\n`;
     if (bp.length > 0) {
-      r += `  ▲ 최상의 선택 경로\n`;
+      r += `  ▲ 잘한 선택 경로\n`;
       bp.forEach(b => r += `    T${b.turn}(${b.age}세) CF:$${b.cf} 투자:$${b.asset} — ${b.note}\n`);
       r += `\n`;
     }
     if (wp.length > 0) {
-      r += `  ▼ 최악의 선택 경로\n`;
+      r += `  ▼ 아쉬운 선택 경로\n`;
       wp.forEach(w => r += `    T${w.turn}(${w.age}세) CF:$${w.cf} 투자:$${w.asset} — ${w.note}\n`);
       r += `\n`;
     }
@@ -4201,7 +5009,7 @@ RULES:
         <div style={{ fontSize: 32, marginBottom: 12, animation: "spin 1s linear infinite" }}>🎲</div>
         <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
         <p style={{ fontSize: 14, color: "#a1a1aa" }}>AI가 {turns}턴의 인생을 분석하고 있습니다...</p>
-        <p style={{ fontSize: 12, color: "#52525b" }}>5단계 자산흐름 + 최상/최악 비교 + 5가지 교훈 생성 중</p>
+        <p style={{ fontSize: 12, color: "#52525b" }}>5단계 자산흐름 + 잘한/아쉬운 선택 비교 + 5가지 교훈 생성 중</p>
         <button onClick={() => {
           if (abortRef.current) abortRef.current.abort();
           setLoadingAnalysis(false);
@@ -4256,9 +5064,9 @@ RULES:
           ))}
         </div>
 
-        {/* ── 2. 최상 vs 최악 비교 그래프 ── */}
+        {/* ── 2. 잘한 선택 vs 아쉬운 선택 비교 그래프 ── */}
         <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #27272a", marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 800, color: "#fafafa", marginBottom: 14 }}>📈 최상의 선택 vs 최악의 선택</div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "#fafafa", marginBottom: 14 }}>📈 잘한 선택 vs 아쉬운 선택</div>
           {hasPaths ? (<>
           <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
             {[{ key:"cf", label:"월 현금흐름" }, { key:"asset", label:"누적 투자원금" }].map(t => (
@@ -4271,8 +5079,8 @@ RULES:
             ))}
           </div>
           <div style={{ display: "flex", gap: 8, marginBottom: 12, fontSize: 11 }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: "#22c55e" }}></span><span style={{ color: "#a1a1aa" }}>최상</span></span>
-            <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: "#ef4444" }}></span><span style={{ color: "#a1a1aa" }}>최악</span></span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: "#22c55e" }}></span><span style={{ color: "#a1a1aa" }}>잘한 선택</span></span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: "#ef4444" }}></span><span style={{ color: "#a1a1aa" }}>아쉬운 선택</span></span>
           </div>
           <div>
             {bp.map((b, i) => {
@@ -4307,14 +5115,14 @@ RULES:
           {/* 격차 요약 */}
           <div style={{ marginTop: 14, padding: 14, borderRadius: 10, background: "#18181b", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 9, color: "#86efac", fontWeight: 700 }}>최상</div>
+              <div style={{ fontSize: 9, color: "#86efac", fontWeight: 700 }}>잘한 선택</div>
               <div style={{ fontSize: 18, fontWeight: 900, color: "#22c55e" }}>
                 {bestWorstTab === "cf" ? `+$${fmtNum(Math.round(lastBest.cf))}/월` : `$${fmtNum(Math.round(lastBest.asset))}`}
               </div>
             </div>
             <div style={{ fontSize: 20, color: "#52525b" }}>vs</div>
             <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 9, color: "#fca5a5", fontWeight: 700 }}>최악</div>
+              <div style={{ fontSize: 9, color: "#fca5a5", fontWeight: 700 }}>아쉬운 선택</div>
               <div style={{ fontSize: 18, fontWeight: 900, color: "#ef4444" }}>
                 {bestWorstTab === "cf" ? `${lastWorst.cf >= 0 ? "+" : ""}$${fmtNum(Math.round(lastWorst.cf))}/월` : `$${fmtNum(Math.round(lastWorst.asset))}`}
               </div>
