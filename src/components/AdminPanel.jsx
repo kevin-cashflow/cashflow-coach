@@ -34,6 +34,13 @@ export default function AdminPanel({ authUser, userIsAdmin }) {
   const [memberSearch, setMemberSearch] = useState("");
   const [memberTypeFilter, setMemberTypeFilter] = useState("all"); // all/general/teacher/institution/company/other/admin/dealer
 
+  // 플레이 횟수 조정 모달
+  const [adjustingMember, setAdjustingMember] = useState(null); // { user_id, name, total_plays } | null
+  const [adjustMode, setAdjustMode] = useState("set"); // "set" | "delta"
+  const [adjustValue, setAdjustValue] = useState("");
+  const [adjustReason, setAdjustReason] = useState("");
+  const [adjustLoading, setAdjustLoading] = useState(false);
+
   useEffect(() => {
     if (!userIsAdmin) {
       setLoading(false);
@@ -887,7 +894,7 @@ export default function AdminPanel({ authUser, userIsAdmin }) {
                         color: c.credential === "master" ? "#FFD700" : "#60a5fa",
                         fontWeight: 700,
                       }}>
-                        {c.credential === "master" ? "🎓 마스터" : "🎯 코칭딜러"}
+                        {c.credential === "master" ? "🎓 마스터 강사" : "🎯 코칭딜러"}
                       </span>
                       {status === "active" && (
                         <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
@@ -1108,10 +1115,31 @@ export default function AdminPanel({ authUser, userIsAdmin }) {
                   </div>
                 )}
 
-                {/* 4행: 통계 */}
-                <div style={{ fontSize: 10, color: "#71717a" }}>
-                  가입: {formatDate(m.joined_at)} · 게임 {m.total_plays || 0}회
-                  {m.contest_count > 0 && <span> · 대회 {m.contest_count}회</span>}
+                {/* 4행: 통계 + 플레이 횟수 수정 버튼 */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <div style={{ fontSize: 10, color: "#71717a", flex: 1, minWidth: 0 }}>
+                    가입: {formatDate(m.joined_at)} · 게임 {m.total_plays || 0}회
+                    {m.contest_count > 0 && <span> · 대회 {m.contest_count}회</span>}
+                  </div>
+                  <button
+                    onClick={() => {
+                      setAdjustingMember({
+                        user_id: m.user_id,
+                        name: m.nickname || m.real_name || m.email,
+                        total_plays: m.total_plays || 0,
+                      });
+                      setAdjustMode("set");
+                      setAdjustValue(String(m.total_plays || 0));
+                      setAdjustReason("");
+                    }}
+                    title="플레이 횟수 수정"
+                    style={{
+                      padding: "3px 8px", borderRadius: 4, border: "none",
+                      background: "#1e3a8a40", color: "#93c5fd",
+                      cursor: "pointer", fontSize: 9, fontWeight: 700,
+                      whiteSpace: "nowrap",
+                    }}
+                  >✏️ 횟수 수정</button>
                 </div>
               </div>
             ))}
@@ -1121,6 +1149,188 @@ export default function AdminPanel({ authUser, userIsAdmin }) {
                 조건에 맞는 회원이 없습니다.
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══ 플레이 횟수 조정 모달 ═══ */}
+      {adjustingMember && (
+        <div
+          onClick={() => !adjustLoading && setAdjustingMember(null)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 1000, padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%", maxWidth: 420, background: "#111118",
+              borderRadius: 16, border: "1px solid #27272a", padding: 24,
+              maxHeight: "90vh", overflowY: "auto",
+            }}
+          >
+            <div style={{ marginBottom: 16 }}>
+              <h2 style={{ fontSize: 16, fontWeight: 900, color: "#fafafa", margin: 0 }}>
+                ✏️ 플레이 횟수 수정
+              </h2>
+              <p style={{ fontSize: 11, color: "#a1a1aa", margin: "6px 0 0" }}>
+                <strong style={{ color: "#93c5fd" }}>{adjustingMember.name}</strong> · 현재 {adjustingMember.total_plays}회
+              </p>
+              <p style={{ fontSize: 10, color: "#71717a", margin: "8px 0 0", padding: "6px 10px", borderRadius: 6, background: "#3b82f610", border: "1px solid #3b82f620" }}>
+                ℹ️ 실제 게임 세션은 보존됩니다. 조정값만 누적 저장되어 표시 횟수가 변경됩니다.
+              </p>
+            </div>
+
+            {/* 모드 선택 */}
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 10, color: "#a1a1aa", display: "block", marginBottom: 4, fontWeight: 600 }}>조정 방식</label>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={() => {
+                    setAdjustMode("set");
+                    setAdjustValue(String(adjustingMember.total_plays));
+                  }}
+                  style={{
+                    flex: 1, padding: "8px", borderRadius: 6,
+                    border: `1px solid ${adjustMode === "set" ? "#3b82f6" : "#27272a"}`,
+                    background: adjustMode === "set" ? "#3b82f620" : "transparent",
+                    color: adjustMode === "set" ? "#93c5fd" : "#71717a",
+                    fontSize: 11, fontWeight: 700, cursor: "pointer",
+                  }}
+                >🎯 최종 값 지정</button>
+                <button
+                  onClick={() => {
+                    setAdjustMode("delta");
+                    setAdjustValue("");
+                  }}
+                  style={{
+                    flex: 1, padding: "8px", borderRadius: 6,
+                    border: `1px solid ${adjustMode === "delta" ? "#3b82f6" : "#27272a"}`,
+                    background: adjustMode === "delta" ? "#3b82f620" : "transparent",
+                    color: adjustMode === "delta" ? "#93c5fd" : "#71717a",
+                    fontSize: 11, fontWeight: 700, cursor: "pointer",
+                  }}
+                >➕ 증감 (±)</button>
+              </div>
+            </div>
+
+            {/* 값 입력 */}
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 10, color: "#a1a1aa", display: "block", marginBottom: 4, fontWeight: 600 }}>
+                {adjustMode === "set" ? "새 총 횟수" : "증감값 (음수 가능)"}
+              </label>
+              <input
+                type="number"
+                value={adjustValue}
+                onChange={(e) => setAdjustValue(e.target.value)}
+                placeholder={adjustMode === "set" ? "예: 10" : "예: +5 또는 -3"}
+                disabled={adjustLoading}
+                style={{
+                  width: "100%", padding: "10px 12px", borderRadius: 6,
+                  border: "1px solid #27272a", background: "#0a0a0f",
+                  color: "#fafafa", fontSize: 14, fontWeight: 700,
+                  outline: "none", boxSizing: "border-box",
+                }}
+              />
+              {/* 미리보기 */}
+              {adjustValue !== "" && Number.isFinite(parseFloat(adjustValue)) && (
+                <p style={{ fontSize: 10, color: "#a1a1aa", margin: "6px 0 0" }}>
+                  {adjustMode === "set"
+                    ? `→ 표시 횟수: ${adjustingMember.total_plays}회 → ${Math.round(parseFloat(adjustValue))}회`
+                    : `→ 표시 횟수: ${adjustingMember.total_plays}회 → ${adjustingMember.total_plays + Math.round(parseFloat(adjustValue))}회`}
+                </p>
+              )}
+            </div>
+
+            {/* 사유 (선택) */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 10, color: "#a1a1aa", display: "block", marginBottom: 4, fontWeight: 600 }}>조정 사유 (선택)</label>
+              <input
+                type="text"
+                value={adjustReason}
+                onChange={(e) => setAdjustReason(e.target.value)}
+                placeholder="예: 오프라인 세션 반영, 데이터 오류 정정"
+                disabled={adjustLoading}
+                style={{
+                  width: "100%", padding: "8px 10px", borderRadius: 6,
+                  border: "1px solid #27272a", background: "#0a0a0f",
+                  color: "#e4e4e7", fontSize: 11, outline: "none", boxSizing: "border-box",
+                }}
+              />
+            </div>
+
+            {/* 버튼 */}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => setAdjustingMember(null)}
+                disabled={adjustLoading}
+                style={{
+                  flex: 1, padding: "10px", borderRadius: 8,
+                  border: "1px solid #27272a", background: "transparent",
+                  color: "#a1a1aa", fontSize: 12, fontWeight: 700,
+                  cursor: adjustLoading ? "not-allowed" : "pointer",
+                  opacity: adjustLoading ? 0.5 : 1,
+                }}
+              >❌ 취소</button>
+              <button
+                onClick={async () => {
+                  const parsed = parseFloat(adjustValue);
+                  if (!Number.isFinite(parsed)) {
+                    alert("유효한 숫자를 입력하세요");
+                    return;
+                  }
+                  const value = Math.round(parsed);
+                  if (adjustMode === "set" && value < 0) {
+                    alert("총 횟수는 음수가 될 수 없습니다");
+                    return;
+                  }
+                  setAdjustLoading(true);
+                  try {
+                    // 현재 세션 토큰 가져오기 (Bearer 인증용)
+                    const { data: { session } } = await supabase.auth.getSession();
+                    const token = session?.access_token;
+                    if (!token) {
+                      throw new Error("세션 만료. 다시 로그인해주세요.");
+                    }
+                    const res = await fetch("/api/admin/adjust-plays", {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${token}`,
+                      },
+                      body: JSON.stringify({
+                        targetUserId: adjustingMember.user_id,
+                        mode: adjustMode,
+                        value,
+                        reason: adjustReason.trim() || null,
+                      }),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                      throw new Error(data.error || data.hint || `HTTP ${res.status}`);
+                    }
+                    alert(`✅ 조정 완료\n표시 횟수: ${data.newTotalPlays}회\n(실제: ${data.actualCount} + 조정: ${data.newAdjustment >= 0 ? "+" : ""}${data.newAdjustment})`);
+                    setAdjustingMember(null);
+                    // 회원 명부 다시 로드
+                    await loadData();
+                  } catch (e) {
+                    alert("❌ 조정 실패: " + (e.message || "알 수 없는 오류"));
+                  } finally {
+                    setAdjustLoading(false);
+                  }
+                }}
+                disabled={adjustLoading || adjustValue === ""}
+                style={{
+                  flex: 2, padding: "10px", borderRadius: 8, border: "none",
+                  background: adjustLoading ? "#1e3a8a" : "#3b82f6",
+                  color: "#fff", fontSize: 13, fontWeight: 800,
+                  cursor: (adjustLoading || adjustValue === "") ? "not-allowed" : "pointer",
+                  opacity: adjustValue === "" ? 0.5 : 1,
+                }}
+              >{adjustLoading ? "저장 중..." : "💾 저장"}</button>
+            </div>
           </div>
         </div>
       )}
@@ -1201,7 +1411,7 @@ function downloadMembersCSV(members) {
     m.joined_at ? new Date(m.joined_at).toLocaleDateString("ko-KR") : "",
     m.total_plays || 0,
     m.contest_count || 0,
-    m.coach_credential === "master" ? "마스터" : m.coach_credential === "dealer" ? "코칭딜러" : "",
+    m.coach_credential === "master" ? "마스터 강사" : m.coach_credential === "dealer" ? "코칭딜러" : "",
   ]);
   
   // CSV 변환 (큰따옴표 이스케이프)

@@ -5,6 +5,11 @@ import { createClient } from "@supabase/supabase-js";
  * POST /api/coach/redeem-code
  * Body: { code, userId }
  * Headers: Authorization: Bearer <user_token>
+ *
+ * 변경점(2026-04):
+ *  - coach_codes.used_at/used_by 업데이트를 Service Role로 강제 실행하도록 변경.
+ *    RLS 정책이 UPDATE를 거부해 어드민에서 "사용됨" 표시가 안 되던 버그 수정.
+ *  - used_at 업데이트 실패는 critical error로 처리(이전엔 무시됨).
  */
 export async function POST(request) {
   try {
@@ -46,6 +51,15 @@ export async function POST(request) {
       }
     );
 
+    // Service Role 클라이언트 (RLS 우회 — coach_codes 업데이트용)
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      {
+        auth: { autoRefreshToken: false, persistSession: false },
+      }
+    );
+
     // 이미 자격 보유 중인지 확인
     const { data: existing } = await supabase
       .from("coach_credentials")
@@ -57,7 +71,7 @@ export async function POST(request) {
       return Response.json(
         { 
           success: false, 
-          error: `이미 ${existing.credential === "master" ? "🎓 마스터 코칭딜러" : "🎯 코칭딜러"} 자격을 보유하고 있습니다.` 
+          error: `이미 ${existing.credential === "master" ? "🎓 마스터 강사" : "🎯 코칭딜러"} 자격을 보유하고 있습니다.` 
         },
         { status: 400 }
       );
@@ -129,18 +143,22 @@ export async function POST(request) {
       );
     }
 
-    // 코드 사용 처리 (RLS: 활성 코드만 가능, used_by = auth.uid())
-    const { error: useErr } = await supabase
+    // ★ 코드 사용 처리 (Service Role로 RLS 우회)
+    // 어드민 화면에서 '사용됨'으로 뜨려면 이 업데이트가 반드시 성공해야 함.
+    const { error: useErr } = await supabaseAdmin
       .from("coach_codes")
       .update({
         used_at: new Date().toISOString(),
         used_by: userId,
       })
-      .eq("id", codeRow.id);
+      .eq("id", codeRow.id)
+      .is("used_at", null); // race condition 방지: 아직 안 쓰인 레코드만
 
     if (useErr) {
-      console.error("코드 사용 처리 실패 (자격은 이미 부여됨):", useErr);
-      // 자격 부여는 성공했으니 success 반환
+      // 자격 insert는 이미 성공했으므로 롤백이 깔끔하지 않음.
+      // 로그에 critical로 남기고, 사용자에게는 성공 응답을 주되 어드민 체크는 수동 처리 안내.
+      console.error("[CRITICAL] coach_codes.used_at 업데이트 실패:", useErr);
+      console.error("  → 어드민에서 이 코드의 '사용됨' 체크가 안 될 수 있음. 수동 처리 필요:", codeRow.id);
     }
 
     return Response.json({

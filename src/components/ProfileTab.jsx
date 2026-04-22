@@ -47,6 +47,8 @@ export default function ProfileTab({ authUser }) {
     organization: "",
   });
   const [profileSaving, setProfileSaving] = useState(false);
+  // 추가 정보 섹션 펼침 여부 (기본 접힘)
+  const [profileExpanded, setProfileExpanded] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -209,7 +211,7 @@ export default function ProfileTab({ authUser }) {
   const handleCoachCodeSuccess = async (newCredential) => {
     setCodeModal(false);
     setCredential(newCredential);
-    setMessage(`🎉 ${newCredential === "master" ? "🎓 마스터 코칭딜러" : "🎯 코칭딜러"} 자격이 활성화되었습니다!`);
+    setMessage(`🎉 ${newCredential === "master" ? "🎓 마스터 강사" : "🎯 코칭딜러"} 자격이 활성화되었습니다!`);
     setTimeout(() => setMessage(""), 5000);
     await loadProfile();
   };
@@ -374,6 +376,255 @@ export default function ProfileTab({ authUser }) {
           <div style={{ fontSize: 10, color: "#71717a", marginBottom: 4 }}>가입일</div>
           <div style={{ fontSize: 13, color: "#d4d4d8" }}>{formatDate(authUser?.created_at)}</div>
         </div>
+
+        {/* ── 추가 정보 토글 (접힘/펼침) ── */}
+        <div style={{
+          marginTop: 14,
+          paddingTop: 14,
+          borderTop: "1px solid #27272a",
+        }}>
+          <button
+            onClick={() => setProfileExpanded(!profileExpanded)}
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "8px 0",
+              border: "none",
+              background: "transparent",
+              color: "#a1a1aa",
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            <span>📝 추가 정보 {profileInfo && <span style={{ fontSize: 10, color: "#71717a", fontWeight: 500 }}>(입력됨)</span>}</span>
+            <span style={{
+              fontSize: 10,
+              color: "#71717a",
+              transition: "transform 0.2s",
+              transform: profileExpanded ? "rotate(180deg)" : "rotate(0deg)",
+              display: "inline-block",
+            }}>▼</span>
+          </button>
+
+          {profileExpanded && (
+            <div style={{ marginTop: 10 }}>
+              {/* 펼쳐졌을 때 안내 + 수정 버튼 */}
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 10,
+              }}>
+                <div style={{ fontSize: 10, color: "#71717a" }}>
+                  {profileInfo ? "저장된 추가 정보" : "실명과 연락처 (선택)"}
+                </div>
+                {!editingProfile && (
+                  <button
+                    onClick={() => setEditingProfile(true)}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 4,
+                      border: "1px solid #27272a",
+                      background: "transparent",
+                      color: "#a1a1aa",
+                      fontSize: 11,
+                      cursor: "pointer",
+                    }}
+                  >
+                    ✏️ {profileInfo ? "수정" : "입력"}
+                  </button>
+                )}
+              </div>
+
+              {!editingProfile && !profileInfo && (
+                <p style={{ fontSize: 11, color: "#71717a", margin: 0, lineHeight: 1.6 }}>
+                  실명과 연락처를 입력하시면 맞춤 안내와 자격 관리에 도움이 됩니다.
+                </p>
+              )}
+
+              {!editingProfile && profileInfo && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {profileInfo.real_name && (
+                    <InfoRow label="실명" value={profileInfo.real_name} />
+                  )}
+                  {profileInfo.phone && (
+                    <InfoRow label="연락처" value={profileInfo.phone} />
+                  )}
+                  {profileInfo.user_type && (
+                    <InfoRow
+                      label="유형"
+                      value={getUserTypeLabel(profileInfo.user_type, profileInfo.user_type_other)}
+                    />
+                  )}
+                  {profileInfo.school_name && (
+                    <InfoRow label="학교" value={profileInfo.school_name} />
+                  )}
+                  {profileInfo.organization && (
+                    <InfoRow label="소속/메모" value={profileInfo.organization} />
+                  )}
+                </div>
+              )}
+
+              {editingProfile && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {/* 실명 */}
+                  <div>
+                    <label style={miniLabelStyle}>실명</label>
+                    <input
+                      type="text"
+                      value={profileForm.real_name}
+                      onChange={(e) => setProfileForm({ ...profileForm, real_name: e.target.value })}
+                      placeholder="홍길동"
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  {/* 연락처 */}
+                  <div>
+                    <label style={miniLabelStyle}>연락처</label>
+                    <input
+                      type="tel"
+                      value={profileForm.phone}
+                      onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
+                      placeholder="010-1234-5678"
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  {/* 유형 */}
+                  <div>
+                    <label style={miniLabelStyle}>유형</label>
+                    <select
+                      value={profileForm.user_type}
+                      onChange={(e) => setProfileForm({ ...profileForm, user_type: e.target.value })}
+                      style={inputStyle}
+                    >
+                      <option value="">선택하지 않음</option>
+                      <option value="general">일반 (개인 학습자)</option>
+                      <option value="teacher">교사 (초·중·고)</option>
+                      <option value="institution">기관 (도서관, 청소년센터 등)</option>
+                      <option value="company">기업 (B2B, HR, 교육팀)</option>
+                      <option value="other">기타</option>
+                    </select>
+                    {profileForm.user_type && (
+                      <p style={{ fontSize: 10, color: "#71717a", margin: "4px 0 0" }}>
+                        {getUserTypeDesc(profileForm.user_type)}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* 기타 입력 */}
+                  {profileForm.user_type === "other" && (
+                    <div>
+                      <label style={miniLabelStyle}>기타 유형 (직접 입력)</label>
+                      <input
+                        type="text"
+                        value={profileForm.user_type_other}
+                        onChange={(e) => setProfileForm({ ...profileForm, user_type_other: e.target.value })}
+                        placeholder="예: 프리랜서, 자영업자 등"
+                        style={inputStyle}
+                      />
+                    </div>
+                  )}
+
+                  {/* 학교명 (교사일 때만) */}
+                  {profileForm.user_type === "teacher" && (
+                    <div>
+                      <label style={miniLabelStyle}>학교명</label>
+                      <input
+                        type="text"
+                        value={profileForm.school_name}
+                        onChange={(e) => setProfileForm({ ...profileForm, school_name: e.target.value })}
+                        placeholder="○○고등학교"
+                        style={inputStyle}
+                      />
+                    </div>
+                  )}
+
+                  {/* 소속 / 메모 */}
+                  <div>
+                    <label style={miniLabelStyle}>소속 / 메모 (선택)</label>
+                    <input
+                      type="text"
+                      value={profileForm.organization}
+                      onChange={(e) => setProfileForm({ ...profileForm, organization: e.target.value })}
+                      placeholder="회사명, 동아리명, 개인 메모 등"
+                      style={inputStyle}
+                    />
+                  </div>
+
+                  {/* 저장/취소 버튼 */}
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button
+                      onClick={() => {
+                        setEditingProfile(false);
+                        // 폼 초기화
+                        if (profileInfo) {
+                          setProfileForm({
+                            real_name: profileInfo.real_name || "",
+                            phone: profileInfo.phone || "",
+                            user_type: profileInfo.user_type || "",
+                            user_type_other: profileInfo.user_type_other || "",
+                            school_name: profileInfo.school_name || "",
+                            organization: profileInfo.organization || "",
+                          });
+                        }
+                      }}
+                      disabled={profileSaving}
+                      style={{
+                        flex: 1,
+                        padding: "10px",
+                        borderRadius: 6,
+                        border: "1px solid #27272a",
+                        background: "transparent",
+                        color: "#a1a1aa",
+                        fontSize: 12,
+                        cursor: "pointer",
+                      }}
+                    >
+                      취소
+                    </button>
+                    <button
+                      onClick={saveProfileInfo}
+                      disabled={profileSaving}
+                      style={{
+                        flex: 2,
+                        padding: "10px",
+                        borderRadius: 6,
+                        border: "none",
+                        background: profileSaving ? "#52525b" : "#3b82f6",
+                        color: "#fff",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: profileSaving ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {profileSaving ? "저장 중..." : "💾 저장"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {message && (
+                <div style={{
+                  marginTop: 10,
+                  padding: 8,
+                  borderRadius: 6,
+                  background: "#10b98120",
+                  border: "1px solid #10b98140",
+                  fontSize: 11,
+                  color: "#86efac",
+                  textAlign: "center",
+                }}>
+                  {message}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 티어 진행도 + 티어 안내는 코칭딜러 자격 아래로 이동됨 */}
@@ -439,222 +690,6 @@ export default function ProfileTab({ authUser }) {
         )}
       </div>
 
-      {/* 📝 추가 정보 섹션 (Phase B Day 3) */}
-      <div style={{
-        padding: 16,
-        borderRadius: 12,
-        background: "#111118",
-        border: "1px solid #27272a",
-        marginBottom: 14,
-      }}>
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 12,
-        }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: "#fafafa" }}>
-            📝 추가 정보
-          </div>
-          {!editingProfile && (
-            <button
-              onClick={() => setEditingProfile(true)}
-              style={{
-                padding: "4px 10px",
-                borderRadius: 4,
-                border: "1px solid #27272a",
-                background: "transparent",
-                color: "#a1a1aa",
-                fontSize: 11,
-                cursor: "pointer",
-              }}
-            >
-              ✏️ {profileInfo ? "수정" : "입력"}
-            </button>
-          )}
-        </div>
-
-        {!editingProfile && !profileInfo && (
-          <p style={{ fontSize: 11, color: "#71717a", margin: 0, lineHeight: 1.6 }}>
-            실명과 연락처를 입력하시면 맞춤 안내와 자격 관리에 도움이 됩니다. (선택)
-          </p>
-        )}
-
-        {!editingProfile && profileInfo && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {profileInfo.real_name && (
-              <InfoRow label="실명" value={profileInfo.real_name} />
-            )}
-            {profileInfo.phone && (
-              <InfoRow label="연락처" value={profileInfo.phone} />
-            )}
-            {profileInfo.user_type && (
-              <InfoRow 
-                label="유형" 
-                value={getUserTypeLabel(profileInfo.user_type, profileInfo.user_type_other)} 
-              />
-            )}
-            {profileInfo.school_name && (
-              <InfoRow label="학교" value={profileInfo.school_name} />
-            )}
-            {profileInfo.organization && (
-              <InfoRow label="소속/메모" value={profileInfo.organization} />
-            )}
-          </div>
-        )}
-
-        {editingProfile && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {/* 실명 */}
-            <div>
-              <label style={miniLabelStyle}>실명</label>
-              <input
-                type="text"
-                value={profileForm.real_name}
-                onChange={(e) => setProfileForm({ ...profileForm, real_name: e.target.value })}
-                placeholder="홍길동"
-                style={inputStyle}
-              />
-            </div>
-
-            {/* 연락처 */}
-            <div>
-              <label style={miniLabelStyle}>연락처</label>
-              <input
-                type="tel"
-                value={profileForm.phone}
-                onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
-                placeholder="010-1234-5678"
-                style={inputStyle}
-              />
-            </div>
-
-            {/* 사용자 유형 - 드롭다운 */}
-            <div>
-              <label style={miniLabelStyle}>소속을 선택해주세요.</label>
-              <select
-                value={profileForm.user_type}
-                onChange={(e) => setProfileForm({ ...profileForm, user_type: e.target.value })}
-                style={{
-                  ...inputStyle,
-                  cursor: "pointer",
-                  appearance: "none",
-                  backgroundImage: `url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e")`,
-                  backgroundRepeat: "no-repeat",
-                  backgroundPosition: "right 10px center",
-                  paddingRight: 30,
-                }}
-              >
-                <option value="">선택하세요</option>
-                <option value="general">일반</option>
-                <option value="teacher">교사 (초·중·고)</option>
-                <option value="institution">기관</option>
-                <option value="company">기업</option>
-                <option value="other">기타</option>
-              </select>
-
-              {/* 선택한 유형 설명 */}
-              {profileForm.user_type && (
-                <div style={{
-                  fontSize: 11,
-                  color: "#a1a1aa",
-                  marginTop: 6,
-                  padding: "4px 0",
-                }}>
-                  💡 {getUserTypeDesc(profileForm.user_type)}
-                </div>
-              )}
-
-              {/* 교사 선택 시 학교명 */}
-              {profileForm.user_type === "teacher" && (
-                <input
-                  type="text"
-                  value={profileForm.school_name}
-                  onChange={(e) => setProfileForm({ ...profileForm, school_name: e.target.value })}
-                  placeholder="학교명 입력"
-                  style={{ ...inputStyle, marginTop: 8 }}
-                />
-              )}
-
-              {/* 기타 선택 시 입력란 */}
-              {profileForm.user_type === "other" && (
-                <input
-                  type="text"
-                  value={profileForm.user_type_other}
-                  onChange={(e) => setProfileForm({ ...profileForm, user_type_other: e.target.value })}
-                  placeholder="유형을 입력해주세요"
-                  style={{ ...inputStyle, marginTop: 8 }}
-                />
-              )}
-            </div>
-
-            {/* 소속/메모 */}
-            <div>
-              <label style={miniLabelStyle}>소속/메모 (선택)</label>
-              <textarea
-                value={profileForm.organization}
-                onChange={(e) => setProfileForm({ ...profileForm, organization: e.target.value })}
-                placeholder="예) ○○고등학교 경제 담당 / △△그룹 HR팀"
-                rows={2}
-                style={{ ...inputStyle, resize: "vertical", minHeight: 50 }}
-              />
-            </div>
-
-            {/* 버튼 */}
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={() => setEditingProfile(false)}
-                disabled={profileSaving}
-                style={{
-                  flex: 1,
-                  padding: "10px",
-                  borderRadius: 6,
-                  border: "1px solid #27272a",
-                  background: "transparent",
-                  color: "#a1a1aa",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: profileSaving ? "not-allowed" : "pointer",
-                }}
-              >
-                취소
-              </button>
-              <button
-                onClick={saveProfileInfo}
-                disabled={profileSaving}
-                style={{
-                  flex: 2,
-                  padding: "10px",
-                  borderRadius: 6,
-                  border: "none",
-                  background: profileSaving ? "#52525b" : "#3b82f6",
-                  color: "#fff",
-                  fontSize: 12,
-                  fontWeight: 800,
-                  cursor: profileSaving ? "not-allowed" : "pointer",
-                }}
-              >
-                {profileSaving ? "저장 중..." : "💾 저장"}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {message && (
-          <div style={{
-            marginTop: 10,
-            padding: 8,
-            borderRadius: 6,
-            background: "#10b98120",
-            border: "1px solid #10b98140",
-            fontSize: 11,
-            color: "#86efac",
-            textAlign: "center",
-          }}>
-            {message}
-          </div>
-        )}
-      </div>
 
       {/* 티어 진행도 카드 (코칭딜러 자격 아래) */}
       <div style={{ marginBottom: 14 }}>

@@ -18,7 +18,7 @@ export default function CoachBadge({ credential, size = "sm", showName = true })
   const configs = {
     master: {
       icon: "🎓",
-      name: "마스터",
+      name: "마스터 강사",
       color: "#FFD700",
       bgColor: "#B8860B20",
       borderColor: "#FFD70060",
@@ -67,13 +67,13 @@ export default function CoachBadge({ credential, size = "sm", showName = true })
 
 // 자격 이름 (외부에서 사용)
 export const CREDENTIAL_NAMES = {
-  master: "🎓 마스터 코칭딜러",
+  master: "🎓 마스터 강사",
   dealer: "🎯 코칭딜러",
 };
 
 export function getCredentialConfig(credential) {
   const configs = {
-    master: { icon: "🎓", name: "마스터 코칭딜러", color: "#FFD700" },
+    master: { icon: "🎓", name: "마스터 강사", color: "#FFD700" },
     dealer: { icon: "🎯", name: "코칭딜러", color: "#60a5fa" },
   };
   return configs[credential] || null;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback, memo } from "react";
 import "@/lib/storage";
 import { supabase } from "@/lib/supabase";
 import { signOut, getCurrentUser, isAdmin, getDisplayName } from "@/lib/auth";
@@ -23,6 +23,28 @@ import {
   hasGameSession,
   clearLocal as clearLocalGameSession,
 } from "@/lib/gameSession";
+import {
+  SCHEMA_VERSION,
+  computeGameState,
+  isLegacyTurnLog,
+  getAssetUnits,
+  createBuyTurn,
+  createSellStockTurn,
+  createMarketSellTurn,
+  createDoodadTurn,
+  createPaydayTurn,
+  createPaydayPassTurn,
+  createCharityTurn,
+  createBabyTurn,
+  createDownsizedTurn,
+  createStockSellTurn,
+  createExtraSplitTurn,
+  createExtraWipeTurn,
+  createExtraBuyTurn,
+  createExtraLoanTurn,
+  createExtraCashTurn,
+  createDebtRepayTurn,
+} from "@/lib/gameStateEngine";
 
 /* ═══════════════════════════════════════════════════
    24칸 쥐경주 판 배열 (확정)
@@ -37,13 +59,13 @@ import {
 
 const BOARD = [];
 for (let i = 1; i <= 24; i++) {
-  if (i % 2 === 1) BOARD.push({ pos: i, type: "OPPORTUNITY", label: "기회", icon: "🎯", color: "#3b82f6" });
-  else if (i === 2 || i === 10 || i === 18) BOARD.push({ pos: i, type: "DOODAD", label: "두대드", icon: "🛍️", color: "#f59e0b" });
-  else if (i === 4) BOARD.push({ pos: i, type: "CHARITY", label: "기부", icon: "🤝", color: "#a855f7" });
-  else if (i === 12) BOARD.push({ pos: i, type: "BABY", label: "베이비", icon: "👶", color: "#ec4899" });
+  if (i % 2 === 1) BOARD.push({ pos: i, type: "OPPORTUNITY", label: "기회", icon: "🎯", color: "#22c55e" });
+  else if (i === 2 || i === 10 || i === 18) BOARD.push({ pos: i, type: "DOODAD", label: "두대드", icon: "🛍️", color: "#ec4899" });
+  else if (i === 4) BOARD.push({ pos: i, type: "CHARITY", label: "기부", icon: "🤝", color: "#8b5cf6" });
+  else if (i === 12) BOARD.push({ pos: i, type: "BABY", label: "베이비", icon: "👶", color: "#0ea5e9" });
   else if (i === 20) BOARD.push({ pos: i, type: "DOWNSIZED", label: "다운사이즈", icon: "⬇️", color: "#ef4444" });
-  else if (i === 8 || i === 16 || i === 24) BOARD.push({ pos: i, type: "MARKET", label: "마켓", icon: "📊", color: "#8b5cf6" });
-  else if (i === 6 || i === 14 || i === 22) BOARD.push({ pos: i, type: "PAYDAY", label: "페이데이", icon: "💰", color: "#22c55e" });
+  else if (i === 8 || i === 16 || i === 24) BOARD.push({ pos: i, type: "MARKET", label: "마켓", icon: "📊", color: "#3b82f6" });
+  else if (i === 6 || i === 14 || i === 22) BOARD.push({ pos: i, type: "PAYDAY", label: "페이데이", icon: "💰", color: "#eab308" });
 }
 
 /* ═══════════════════════════════════════════════════
@@ -434,10 +456,12 @@ const MODEL_OPUS = "claude-opus-4-5";
 const RE_STOCK = /주식|테슬라|디즈니|머크|모더나|애플|MRNA|AAPL/i;
 const RE_NOT_STOCK = /부동산|주택|콘도|아파트|땅/;
 const RE_REALESTATE = /주택|콘도|아파트|가구|단지|Starter|땅|부동산/;
-const RE_BIZ = /사업|게임방|세탁소|문구|빨래방|프랜차이즈|도넛|세차|피자|모텔|쇼핑몰|마케팅|NW|채권|신탁|로열티|프로그램|원고|히트곡/;
+const RE_BIZ = /사업|게임방|세탁소|문구|빨래방|프랜차이즈|도넛|세차|피자|모텔|쇼핑몰|마케팅|NW|채권|신탁|로열티|프로그램|원고|히트곡|동업/;
 const RE_CHILD_DOODAD = /자녀|아이|아들|딸|장난감|생일|치아교정|대학|결혼|강아지|과외|코딩|중고차/;
 const RE_STOCK_SPLIT = /무상증자|분할/;
 const RE_STOCK_REVERSE = /감자|1\/2|1\/4/;
+const RE_DAMAGE = /임차인.*손상|자산.*손상|손상.*지불/;
+const RE_DAMAGE_AMOUNT = /\$?([0-9,]+)\s*(?:지불|손실)?/;
 const RE_NUM = /[^0-9]/g;
 const RE_NUM_NEG = /[^0-9-]/g;
 
@@ -481,12 +505,162 @@ const getAssetType = (card) => {
   return "기타";
 };
 
+// ── 기회 카드 드릴다운 분류 ──
+// 카테고리(Step 1) → 서브타입(Step 2) → 개별 카드(Step 3)
+//
+// classifyCardCategory(card) → "주식" | "부동산" | "사업" | "기타"
+// getCardSubtype(card) → 카테고리 내부의 서브그룹 이름
+//                        (예: 주식 "테슬라" / 부동산 "3/2 주택" / 사업 "작은 사업")
+const classifyCardCategory = (card) => {
+  if (!card) return "기타";
+  if (isStock(card)) return "주식";
+  return getAssetType(card); // 부동산 / 사업 / 기타
+};
+
+// 주식 종목명 추출 (sub에서 직접 — 대부분 sub가 종목명)
+const getStockTicker = (card) => {
+  if (!card) return "";
+  return (card.sub || "").trim();
+};
+
+// 부동산 서브타입 그룹핑 (sub 패턴 기반)
+const getRealEstateSubtype = (card) => {
+  if (!card) return "기타";
+  const s = (card.sub || "") + " " + (card.desc || "");
+  if (/콘도/.test(s)) return "콘도 2/1";
+  if (/3\/2|방3|욕실2/.test(s)) return "주택 3/2";
+  if (/2가구/.test(s)) return "2가구 주택";
+  if (/4가구/.test(s)) return "4가구 주택";
+  if (/8가구/.test(s)) return "8가구 주택";
+  if (/아파트.*단지|단지.*아파트|채.*아파트|아파트.*채/.test(s)) return "아파트 단지";
+  if (/땅|평/.test(s)) return "땅";
+  if (/Starter/i.test(s)) return "Starter House";
+  return "기타 부동산";
+};
+
+// 사업 서브타입 (dealType 기반으로 "작은/큰 사업" 구분)
+// cardDealType: "deal1" = SMALL, "deal2" = BIG
+const getBusinessSubtype = (card, cardDealType) => {
+  if (cardDealType === "deal1") return "작은 사업 (SMALL)";
+  if (cardDealType === "deal2") return "큰 사업 (BIG)";
+  return "사업";
+};
+
+// 주식 서브타입 (종목명 + 증자/감자는 같은 종목 그룹에 묶음 별도 표시)
+const getStockSubtype = (card) => {
+  return getStockTicker(card);
+};
+
+// 통합 서브타입 추출 함수
+const getCardSubtype = (card, cardDealType) => {
+  const cat = classifyCardCategory(card);
+  if (cat === "주식") return getStockSubtype(card);
+  if (cat === "부동산") return getRealEstateSubtype(card);
+  if (cat === "사업") return getBusinessSubtype(card, cardDealType);
+  return "기타";
+};
+
+// ── MARKET 카드 드릴다운 분류 ──
+// 카테고리: 부동산 매수제안 / 사업 매수제안 / 이벤트
+// 이벤트 = 임차인 손상, 몰수, 금융위기, 금리 변동, 사업 CF 변화, 수리비 등
+const RE_MK_EVENT_DAMAGE   = /임차인.*손상|자산.*손상/;
+const RE_MK_EVENT_SEIZURE  = /몰수|권리 상실|대출.*모든/;
+const RE_MK_EVENT_CRISIS   = /금융 위기|상장 폐지|상장폐지/;
+const RE_MK_EVENT_RATE     = /이자율|인플레이션/;
+const RE_MK_EVENT_CFCHANGE = /현금흐름.*\+|매출 증가/;
+const RE_MK_EVENT_REPAIR   = /배관|수리|고장|지불/;
+
+const classifyMarketCategory = (card) => {
+  if (!card) return "이벤트";
+  const s = (card.desc || "") + " " + (card.special || "");
+  // 이벤트 먼저 잡기 (특수 카드들)
+  if (RE_MK_EVENT_DAMAGE.test(s) || RE_MK_EVENT_SEIZURE.test(s)
+      || RE_MK_EVENT_CRISIS.test(s) || RE_MK_EVENT_RATE.test(s)
+      || RE_MK_EVENT_CFCHANGE.test(s)) return "이벤트";
+  // sell 없고 special만 있는 것도 이벤트로 간주 (수리비 등)
+  if (!card.sell && card.special) return "이벤트";
+  // 부동산/사업 매수제안 분기
+  if (RE_REALESTATE.test(s)) return "부동산";
+  if (/동업|파트너|소프트웨어|상품.*회사|세차|쇼핑몰|B&B|모텔|사업체/.test(s)) return "사업";
+  return "이벤트"; // 그 외는 이벤트
+};
+
+// MARKET 서브타입 — 부동산
+const getMarketRealEstateSubtype = (card) => {
+  const s = (card.desc || "") + " " + (card.special || "");
+  if (/콘도/.test(s)) return "콘도 2/1";
+  if (/3\/2|주택 3\/2/.test(s)) return "주택 3/2";
+  if (/다가구|가구당/.test(s)) return "다가구 주택";
+  if (/아파트|1채당|세대당/.test(s)) return "아파트 단지";
+  if (/땅|평/.test(s)) return "땅";
+  return "기타 부동산";
+};
+
+// MARKET 서브타입 — 사업
+const getMarketBusinessSubtype = (card) => {
+  const s = (card.desc || "") + " " + (card.special || "");
+  if (/동업|파트너|지분/.test(s)) return "동업 지분";
+  if (/소프트웨어/.test(s)) return "소프트웨어";
+  if (/상품.*회사|상품 판매/.test(s)) return "상품 회사";
+  if (/세차/.test(s)) return "세차장";
+  if (/쇼핑몰/.test(s)) return "쇼핑몰";
+  if (/B&B|모텔/.test(s)) return "B&B / 모텔";
+  return "기타 사업";
+};
+
+// MARKET 서브타입 — 이벤트
+const getMarketEventSubtype = (card) => {
+  const s = (card.desc || "") + " " + (card.special || "");
+  if (RE_MK_EVENT_DAMAGE.test(s)) return "임차인 손상";
+  if (RE_MK_EVENT_SEIZURE.test(s)) return "자산 몰수";
+  if (RE_MK_EVENT_CRISIS.test(s)) return "금융 위기";
+  if (RE_MK_EVENT_RATE.test(s)) return "금리/인플레이션";
+  if (RE_MK_EVENT_CFCHANGE.test(s)) return "사업 CF 변화";
+  if (RE_MK_EVENT_REPAIR.test(s)) return "수리/지출";
+  return "기타 이벤트";
+};
+
+// MARKET 통합 서브타입 추출
+const getMarketSubtype = (card) => {
+  const cat = classifyMarketCategory(card);
+  if (cat === "부동산") return getMarketRealEstateSubtype(card);
+  if (cat === "사업") return getMarketBusinessSubtype(card);
+  return getMarketEventSubtype(card);
+};
+
 const parseNum = (str) => parseInt(String(str || "0").replace(RE_NUM, "")) || 0;
 const parseNumNeg = (str) => parseInt(String(str || "0").replace(RE_NUM_NEG, "")) || 0;
 
 // ── 캐시된 숫자 포맷터 (toLocaleString 97회 → fmtNum 호출로 대체) ──
 const _numFmt = new Intl.NumberFormat("en-US");
 const fmtNum = (n) => _numFmt.format(n || 0);
+
+// ── 카드 드롭다운 option 라벨 생성 (일관된 형식) ──
+// 순서: 설명(최대 35자) → 💰총가격 → 🏦은행대출 → 💵착수금 → 📊현금흐름
+// 빅딜/스몰딜 공통 적용
+const buildCardOptionLabel = (c, maxDescLen = 35) => {
+  if (!c) return "";
+  const desc = (c.desc || "").substring(0, maxDescLen).trim();
+  const priceNum = parseInt(String(c.price || "0").replace(/[^0-9-]/g, "")) || 0;
+  const downNum = (() => {
+    const d = c.down || "";
+    const m = d.replace(/[^0-9]/g, "");
+    if (d.includes("K")) return (parseInt(m) || 0) * 1000;
+    return parseInt(m) || 0;
+  })();
+  const loanNum = (priceNum > 0 && downNum > 0) ? priceNum - downNum : 0;
+  const parts = [desc];
+  // 이모지 + 수치 (있는 것만)
+  if (priceNum > 0) parts.push(`💰${_numFmt.format(priceNum)}`);
+  if (loanNum > 0) parts.push(`🏦${_numFmt.format(loanNum)}`);
+  if (downNum > 0) parts.push(`💵${_numFmt.format(downNum)}`);
+  if (c.cf) parts.push(`📊${c.cf}`);
+  if (c.roi) parts.push(`📈${c.roi}`);
+  if (c.sell) parts.push(`매각:${c.sell}`);
+  if (c.special) parts.push(`[${c.special}]`);
+  if (c.amount) parts.push(c.amount);
+  return parts.filter(Boolean).join(" · ");
+};
 
 // ── MARKET 매칭 검증 테이블 (컴포넌트 외부, 렌더마다 재생성 방지) ──
 const SELL_RULES = [
@@ -685,13 +859,13 @@ function simulate(totalTurns, deckKey) {
 }
 
 const CELL_COLORS = {
-  OPPORTUNITY: { bg: "#1e3a5f", border: "#3b82f6", text: "#93c5fd" },
-  PAYDAY: { bg: "#14532d", border: "#22c55e", text: "#86efac" },
-  MARKET: { bg: "#3b0764", border: "#8b5cf6", text: "#c4b5fd" },
-  DOODAD: { bg: "#451a03", border: "#f59e0b", text: "#fde68a" },
-  CHARITY: { bg: "#581c87", border: "#a855f7", text: "#d8b4fe" },
-  BABY: { bg: "#831843", border: "#ec4899", text: "#f9a8d4" },
-  DOWNSIZED: { bg: "#7f1d1d", border: "#ef4444", text: "#fca5a5" },
+  OPPORTUNITY: { bg: "#14532d", border: "#22c55e", text: "#86efac" }, // 녹색 — 실제 기회 카드 색
+  PAYDAY:      { bg: "#713f12", border: "#eab308", text: "#fde68a" }, // 노랑 — 월급 느낌
+  MARKET:      { bg: "#1e3a5f", border: "#3b82f6", text: "#93c5fd" }, // 파랑 — 실제 마켓 카드 색
+  DOODAD:      { bg: "#831843", border: "#ec4899", text: "#f9a8d4" }, // 분홍 — Kevin 지시
+  CHARITY:     { bg: "#4c1d95", border: "#8b5cf6", text: "#c4b5fd" }, // 진한 보라
+  BABY:        { bg: "#0c4a6e", border: "#0ea5e9", text: "#7dd3fc" }, // 하늘색 — 출산 축하
+  DOWNSIZED:   { bg: "#7f1d1d", border: "#ef4444", text: "#fca5a5" }, // 빨강 — 유지
 };
 
 // 한국어 라벨 맵 (삼항 체인 제거)
@@ -707,25 +881,190 @@ const CELL_LABELS = {
 
 /* ═══════════════════════════════════════════════════
    직업 카드 데이터 (15장) — Kevin 제공 실데이터
-   salary=월급, cashflow=월현금흐름, expense=총지출, childCost=아이1명당양육비
+   기본 필드:
+     salary=월급, cashflow=월현금흐름, expense=총지출, childCost=자녀 1명당 양육비, savings=초기 저축
+   부채 필드 (신규): Kevin 제공 국제캐쉬플로우강사협회 한국어판 카드
+     liabilities.{homeMortgage|schoolLoan|carLoan|creditCard}: { principal, payment }
+     - principal: 대출 원금 (상환 시 차감)
+     - payment: 월 이자/상환액 (expense에 포함되어 있음. 상환하면 차감)
 ═══════════════════════════════════════════════════ */
 const JOBS = [
-  { name:"관리인", salary:1600, cashflow:600, expense:1000, childCost:100, savings:600 },
-  { name:"비서", salary:2500, cashflow:800, expense:1700, childCost:100, savings:700 },
-  { name:"정비공", salary:2000, cashflow:700, expense:1300, childCost:100, savings:700 },
-  { name:"트럭운전사", salary:2500, cashflow:800, expense:1700, childCost:200, savings:800 },
-  { name:"배송기사", salary:2900, cashflow:720, expense:2180, childCost:200, savings:400 },
-  { name:"경찰관", salary:3000, cashflow:1100, expense:1900, childCost:200, savings:500 },
-  { name:"간호사", salary:3100, cashflow:1100, expense:2000, childCost:200, savings:500 },
-  { name:"교사", salary:3300, cashflow:1200, expense:2100, childCost:200, savings:1200 },
-  { name:"비즈니스 매니저", salary:4600, cashflow:1600, expense:3000, childCost:300, savings:400 },
-  { name:"공학자", salary:4900, cashflow:1700, expense:3200, childCost:200, savings:400 },
-  { name:"요리사", salary:5300, cashflow:1800, expense:3500, childCost:450, savings:600 },
-  { name:"변호사", salary:7500, cashflow:2400, expense:5100, childCost:400, savings:2000 },
-  { name:"비행기 조종사", salary:9500, cashflow:3500, expense:6000, childCost:400, savings:2500 },
-  { name:"의사", salary:13200, cashflow:4900, expense:8300, childCost:700, savings:3500 },
-  { name:"운동선수", salary:23000, cashflow:7200, expense:15800, childCost:1500, savings:4000 },
+  {
+    name:"관리인", salary:1600, cashflow:600, expense:1000, childCost:100, savings:600,
+    liabilities: {
+      homeMortgage: { principal: 20000, payment: 200 },
+      schoolLoan:   { principal: 0,     payment: 0 },
+      carLoan:      { principal: 4000,  payment: 100 },
+      creditCard:   { principal: 3000,  payment: 100 },
+    },
+  },
+  {
+    name:"비서", salary:2500, cashflow:800, expense:1700, childCost:100, savings:700,
+    liabilities: {
+      homeMortgage: { principal: 38000, payment: 400 },
+      schoolLoan:   { principal: 0,     payment: 0 },
+      carLoan:      { principal: 4000,  payment: 100 },
+      creditCard:   { principal: 3000,  payment: 100 },
+    },
+  },
+  {
+    name:"정비공", salary:2000, cashflow:700, expense:1300, childCost:100, savings:700,
+    liabilities: {
+      homeMortgage: { principal: 31000, payment: 300 },
+      schoolLoan:   { principal: 0,     payment: 0 },
+      carLoan:      { principal: 3000,  payment: 100 },
+      creditCard:   { principal: 3000,  payment: 100 },
+    },
+  },
+  {
+    name:"트럭운전사", salary:2500, cashflow:800, expense:1700, childCost:200, savings:800,
+    liabilities: {
+      homeMortgage: { principal: 38000, payment: 400 },
+      schoolLoan:   { principal: 0,     payment: 0 },
+      carLoan:      { principal: 4000,  payment: 100 },
+      creditCard:   { principal: 3000,  payment: 100 },
+    },
+  },
+  {
+    name:"배송기사", salary:2900, cashflow:720, expense:2180, childCost:200, savings:400,
+    liabilities: {
+      homeMortgage: { principal: 40000, payment: 420 },
+      schoolLoan:   { principal: 0,     payment: 0 },
+      carLoan:      { principal: 15000, payment: 300 },
+      creditCard:   { principal: 8000,  payment: 260 },
+    },
+  },
+  {
+    name:"경찰관", salary:3000, cashflow:1100, expense:1900, childCost:200, savings:500,
+    liabilities: {
+      homeMortgage: { principal: 46000, payment: 400 },
+      schoolLoan:   { principal: 0,     payment: 0 },
+      carLoan:      { principal: 5000,  payment: 100 },
+      creditCard:   { principal: 3000,  payment: 100 },
+    },
+  },
+  {
+    name:"간호사", salary:3100, cashflow:1100, expense:2000, childCost:200, savings:500,
+    liabilities: {
+      homeMortgage: { principal: 47000, payment: 400 },
+      schoolLoan:   { principal: 6000,  payment: 100 },
+      carLoan:      { principal: 5000,  payment: 100 },
+      creditCard:   { principal: 4000,  payment: 200 },
+    },
+  },
+  {
+    name:"교사", salary:3300, cashflow:1200, expense:2100, childCost:200, savings:400,
+    liabilities: {
+      homeMortgage: { principal: 50000, payment: 500 },
+      schoolLoan:   { principal: 12000, payment: 100 },
+      carLoan:      { principal: 5000,  payment: 100 },
+      creditCard:   { principal: 4000,  payment: 200 },
+    },
+  },
+  {
+    name:"비즈니스 매니저", salary:4600, cashflow:1600, expense:3000, childCost:300, savings:400,
+    liabilities: {
+      homeMortgage: { principal: 75000, payment: 700 },
+      schoolLoan:   { principal: 12000, payment: 100 },
+      carLoan:      { principal: 6000,  payment: 100 },
+      creditCard:   { principal: 4000,  payment: 200 },
+    },
+  },
+  {
+    name:"공학자", salary:4900, cashflow:1700, expense:3200, childCost:200, savings:400,
+    liabilities: {
+      homeMortgage: { principal: 75000, payment: 700 },
+      schoolLoan:   { principal: 12000, payment: 100 },
+      carLoan:      { principal: 7000,  payment: 200 },
+      creditCard:   { principal: 5000,  payment: 200 },
+    },
+  },
+  {
+    name:"요리사", salary:5300, cashflow:1800, expense:3500, childCost:450, savings:600,
+    liabilities: {
+      homeMortgage: { principal: 65000, payment: 600 },
+      schoolLoan:   { principal: 18000, payment: 150 },
+      carLoan:      { principal: 12000, payment: 200 },
+      creditCard:   { principal: 8000,  payment: 250 },
+    },
+  },
+  {
+    name:"변호사", salary:7500, cashflow:2400, expense:5100, childCost:400, savings:2000,
+    liabilities: {
+      homeMortgage: { principal: 115000, payment: 1100 },
+      schoolLoan:   { principal: 78000,  payment: 300 },
+      carLoan:      { principal: 11000,  payment: 200 },
+      creditCard:   { principal: 7000,   payment: 200 },
+    },
+  },
+  {
+    name:"비행기 조종사", salary:9500, cashflow:3500, expense:6000, childCost:400, savings:2500,
+    liabilities: {
+      homeMortgage: { principal: 90000, payment: 1000 },
+      schoolLoan:   { principal: 0,     payment: 0 },
+      carLoan:      { principal: 15000, payment: 300 },
+      creditCard:   { principal: 22000, payment: 700 },
+    },
+  },
+  {
+    name:"의사", salary:13200, cashflow:4900, expense:8300, childCost:700, savings:3500,
+    liabilities: {
+      homeMortgage: { principal: 202000, payment: 1900 },
+      schoolLoan:   { principal: 150000, payment: 700 },
+      carLoan:      { principal: 19000,  payment: 300 },
+      creditCard:   { principal: 10000,  payment: 200 },
+    },
+  },
+  {
+    name:"운동선수", salary:23000, cashflow:7200, expense:15800, childCost:1500, savings:4000,
+    liabilities: {
+      homeMortgage: { principal: 300000, payment: 2700 },
+      schoolLoan:   { principal: 0,      payment: 0 },
+      carLoan:      { principal: 80000,  payment: 1100 },
+      creditCard:   { principal: 12000,  payment: 300 },
+    },
+  },
 ];
+
+/* ═══════════════════════════════════════════════════
+   공용 로딩 스피너 (주사위 회전 애니메이션)
+   사용처: 인증 로딩, 디브리핑 분석, AI 코칭, 게임 저장/복구 등
+═══════════════════════════════════════════════════ */
+function DiceSpinner({ message = "로딩 중...", subMessage = null, size = "md", fullScreen = false }) {
+  const iconSize = size === "lg" ? 48 : size === "sm" ? 20 : 32;
+  const msgSize = size === "lg" ? 15 : size === "sm" ? 11 : 13;
+  const content = (
+    <>
+      <div style={{
+        fontSize: iconSize,
+        marginBottom: size === "sm" ? 6 : 10,
+        display: "inline-block",
+        animation: "cfSpin 1s linear infinite",
+      }}>🎲</div>
+      <style>{`@keyframes cfSpin { to { transform: rotate(360deg) } }`}</style>
+      <p style={{ fontSize: msgSize, color: "#a1a1aa", margin: 0 }}>{message}</p>
+      {subMessage && <p style={{ fontSize: msgSize - 2, color: "#52525b", margin: "4px 0 0" }}>{subMessage}</p>}
+    </>
+  );
+  if (fullScreen) {
+    return (
+      <div style={{
+        minHeight: "100vh",
+        background: "#080810",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "'Pretendard Variable', 'Noto Sans KR', -apple-system, sans-serif",
+      }}>{content}</div>
+    );
+  }
+  return (
+    <div style={{ textAlign: "center", padding: size === "lg" ? "40px 20px" : size === "sm" ? "14px 10px" : "30px 20px" }}>
+      {content}
+    </div>
+  );
+}
 
 /* ═══════════════════════════════════════════════════
    은행 대출 UI 컴포넌트
@@ -779,9 +1118,16 @@ function BankLoanUI({ shortage, bankLoan, monthlyCF, currentInterest, onLoan }) 
               <span style={{ fontSize: 10, color: "#fca5a5" }}>${fmtNum(bankLoan)}</span>
             </div>
           )}
-          <button onClick={() => onLoan(loanAmount)} disabled={loanAmount < 1000} style={{
-            width: "100%", padding: "10px", borderRadius: 8, border: "none", cursor: loanAmount >= 1000 ? "pointer" : "default",
-            background: loanAmount >= 1000 ? "#f59e0b" : "#27272a", color: loanAmount >= 1000 ? "#000" : "#52525b", fontSize: 12, fontWeight: 800,
+          <button onClick={() => {
+            // 방어적 가드: 한도 초과·최소 금액 미달 시 실행 차단
+            if (loanAmount < 1000 || loanAmount > maxLoan) {
+              alert(`대출 불가: 한도(${fmtNum(maxLoan)})를 초과했거나 금액이 부족합니다.`);
+              return;
+            }
+            onLoan(loanAmount);
+          }} disabled={loanAmount < 1000 || loanAmount > maxLoan} style={{
+            width: "100%", padding: "10px", borderRadius: 8, border: "none", cursor: (loanAmount >= 1000 && loanAmount <= maxLoan) ? "pointer" : "default",
+            background: (loanAmount >= 1000 && loanAmount <= maxLoan) ? "#f59e0b" : "#27272a", color: (loanAmount >= 1000 && loanAmount <= maxLoan) ? "#000" : "#52525b", fontSize: 12, fontWeight: 800,
           }}>
             🏦 ${fmtNum(loanAmount)} 대출 실행 (월 −${fmtNum(monthlyInterest)})
           </button>
@@ -799,6 +1145,348 @@ function BankLoanUI({ shortage, bankLoan, monthlyCF, currentInterest, onLoan }) 
 }
 
 /* ═══════════════════════════════════════════════════
+   턴 row 컴포넌트 — React.memo로 리렌더 최소화
+   props가 바뀌지 않으면 재계산 안 함. 100턴 중 1개만 바뀌어도
+   변경된 row 1개만 재렌더.
+═══════════════════════════════════════════════════ */
+const TurnRow = memo(function TurnRow({ t, i, isSub, onEdit, onDelete }) {
+  const isPaydayPass = t.cellType === "PAYDAY_PASS";
+  const isDownRest = t.cellType === "DOWNSIZED_REST";
+  const isStockSell = t.cellType === "STOCK_SELL";
+  const isExtSell = t.cellType === "EXT_SELL";
+  const isExtraLoan = t.cellType === "EXTRA_LOAN";
+  const isExtraSplit = t.cellType === "EXTRA_SPLIT";
+  const isExtraWipe = t.cellType === "EXTRA_WIPE";
+  const isExtraBuy = t.cellType === "EXTRA_BUY";
+  const isExtraCash = t.cellType === "EXTRA_CASH";
+  const isDebtRepay = t.cellType === "DEBT_REPAY";
+  const colorKey = isPaydayPass ? "PAYDAY"
+    : isDownRest ? "DOWNSIZED"
+    : isStockSell ? "OPPORTUNITY"
+    : isExtSell ? "MARKET"
+    : isExtraLoan ? "PAYDAY"
+    : isExtraSplit ? "OPPORTUNITY"
+    : isExtraWipe ? "MARKET"
+    : isExtraBuy ? "OPPORTUNITY"
+    : isExtraCash ? "PAYDAY"
+    : isDebtRepay ? "PAYDAY"
+    : t.cellType;
+  const cc = CELL_COLORS[colorKey] || CELL_COLORS.OPPORTUNITY;
+  const specialLabel = isPaydayPass ? "💰 PayDay 통과"
+    : isDownRest ? "⬇️ 다운사이즈 휴식"
+    : isStockSell ? `📈 주식 매각 — ${t.card?.sub || ""}`
+    : isExtSell ? `🏠 외부 매도 — ${t.card?.sub || ""}`
+    : isExtraLoan ? (t.action === "repay" ? "🏦 은행 대출 상환" : "🏦 은행 대출 받기")
+    : isExtraSplit ? `📈 증자/감자 (타인카드) — ${t.card?.sub || ""}`
+    : isExtraWipe ? "📉 전 주식 상장폐지"
+    : isExtraBuy ? (t._forfeited || t.action === "forfeit"
+        ? `💸 권리금 포기 — ${t._assetName || t.card?.sub || ""} (권리금만 지불)`
+        : `💼 권리금 인수 — ${t._assetName || t.card?.sub || ""}`)
+    : isExtraCash ? `💵 현금 보정 — ${t.card?.sub || ""}`
+    : isDebtRepay ? `💵 직업 부채 상환 — ${t._debtLabel || t.card?.sub || ""}`
+    : null;
+  const isSpecial = isPaydayPass || isDownRest;
+  const isExtraType = isExtraLoan || isExtraSplit || isExtraWipe || isExtraBuy || isExtraCash || isDebtRepay;
+  const padding = isSub ? "6px 10px" : "10px 12px";
+  const radius = isSub ? 8 : 10;
+  const bg = isPaydayPass ? "#713f1220"
+    : isDownRest ? "#7f1d1d10"
+    : isStockSell ? "#14532d18"
+    : isExtSell ? "#1e3a5f20"
+    : cc.bg;
+  const opacity = isSub ? 0.78 : 1;
+  return (
+    <div style={{ padding, borderRadius: radius, background: bg, border: `1px solid ${cc.border}30`, opacity }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          {!isSub ? (
+            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: cc.border + "30", color: cc.text }}>
+              T{t.turn}
+            </span>
+          ) : (
+            <span style={{ fontSize: 11, color: "#52525b", marginRight: 2 }}>↳</span>
+          )}
+          {!isSpecial && !isStockSell && !isExtSell && !isExtraType && t.dice > 0 && t.boardPos > 0 && (() => {
+            const fromPos = ((t.boardPos - t.dice - 1 + 24) % 24) + 1;
+            const fromLabel = BOARD[fromPos - 1]?.label || "";
+            const toLabel = BOARD[t.boardPos - 1]?.label || "";
+            return (
+              <span style={{ fontSize: 9, color: "#52525b", fontFamily: "monospace" }}>
+                {fromLabel}(칸{fromPos})<span style={{ color: "#3f3f46" }}>→</span>🎲{t.dice}<span style={{ color: "#3f3f46" }}>→</span>{toLabel}(칸{t.boardPos})
+              </span>
+            );
+          })()}
+          {!isSpecial && !isStockSell && !isExtSell && !isExtraType && t.boardPos > 0 && !(t.dice > 0) && (
+            <span style={{ fontSize: 9, color: "#52525b" }}>
+              {BOARD[t.boardPos - 1]?.label || ""}(칸{t.boardPos})
+            </span>
+          )}
+          <span style={{ fontSize: isSub ? 10 : 11, color: cc.text }}>
+            {specialLabel || (t.card?.sub || t.cellType)}
+          </span>
+          {t.shares > 0 && <span style={{ fontSize: 9, color: "#71717a" }}>{t.shares}주</span>}
+          {t.time != null && <span style={{ fontSize: 9, color: "#f59e0b", marginLeft: 4 }}>⏱{fmtTime(t.time)}</span>}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {t.decisionSec != null && <span style={{ fontSize: 9, color: "#a78bfa" }}>{t.decisionSec}초</span>}
+          {t.action && (() => {
+            const badge = ACTION_BADGE[t.action] || ACTION_BADGE.hold;
+            return <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: badge.bg, color: badge.color }}>{badge.label}</span>;
+          })()}
+          <button
+            onClick={() => onEdit(i, t)}
+            title="이 항목 편집"
+            style={{
+              padding: "2px 6px", borderRadius: 4, border: "none",
+              background: "#1e3a8a40", color: "#93c5fd", cursor: "pointer",
+              fontSize: 10, fontWeight: 700,
+            }}
+          >✏️</button>
+          <button
+            onClick={() => onDelete(i, isSub, t.turn)}
+            title="이 항목 삭제"
+            style={{
+              padding: "2px 6px", borderRadius: 4, border: "none",
+              background: "#7f1d1d40", color: "#fca5a5", cursor: "pointer",
+              fontSize: 10, fontWeight: 700,
+            }}
+          >🗑️</button>
+        </div>
+      </div>
+      {(t.transaction || t.cashSnapshot != null) && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4, paddingTop: 4, borderTop: `1px solid ${cc.border}15` }}>
+          {t.transaction && <span style={{ fontSize: 9, color: "#a1a1aa", flex: 1 }}>{t.transaction}</span>}
+          {t.cashSnapshot != null && <span style={{ fontSize: 10, fontWeight: 700, color: t.cashSnapshot >= 0 ? "#fde68a" : "#fca5a5" }}>💰${fmtNum(t.cashSnapshot)}</span>}
+        </div>
+      )}
+    </div>
+  );
+});
+
+/* ═══════════════════════════════════════════════════
+   턴 편집 모달 — 각 turn entry의 주요 필드를 수정
+═══════════════════════════════════════════════════ */
+function TurnEditModal({ turnIndex, turn, onSave, onClose }) {
+  // 편집 가능한 필드만 state로 관리. 미편집 필드는 원본 그대로 유지.
+  const [transaction, setTransaction] = useState(turn.transaction || "");
+  // 숫자 필드들 — 턴 타입별로 다르게 사용
+  const [buyCost, setBuyCost] = useState(turn._buyCost ?? "");
+  const [loan, setLoan] = useState(turn._loan ?? "");
+  const [cf, setCf] = useState(turn._cf ?? "");
+  const [deposit, setDeposit] = useState(turn._deposit ?? "");
+  const [shares, setShares] = useState(turn.shares ?? "");
+  const [pricePerShare, setPricePerShare] = useState(turn._pricePerShare ?? "");
+  const [sellPrice, setSellPrice] = useState(turn._sellPrice ?? "");
+  const [cost, setCost] = useState(turn._cost ?? "");
+  const [loanAmount, setLoanAmount] = useState(turn._loanAmount ?? "");
+  const [cashAmount, setCashAmount] = useState(turn._cashAmount ?? "");
+  const [multiplier, setMultiplier] = useState(turn._multiplier ?? "");
+  const [damageAmount, setDamageAmount] = useState(turn._damageAmount ?? "");
+
+  const ct = turn.cellType;
+  const action = turn.action;
+
+  // 숫자 파싱 헬퍼
+  const parseNumField = (v) => {
+    if (v === "" || v == null) return null;
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const handleSave = () => {
+    // 원본을 복제해서 편집한 필드만 덮어씀
+    const updated = { ...turn, transaction: transaction.trim() };
+
+    const setIfNum = (key, value) => {
+      const n = parseNumField(value);
+      if (n != null) updated[key] = n;
+    };
+
+    // 턴 타입별 필드 반영
+    if (ct === "OPPORTUNITY" && action === "buy") {
+      setIfNum("_buyCost", buyCost);
+      setIfNum("_loan", loan);
+      setIfNum("_cf", cf);
+      setIfNum("shares", shares);
+      setIfNum("_pricePerShare", pricePerShare);
+    } else if (ct === "OPPORTUNITY" && action === "sell") {
+      setIfNum("shares", shares);
+      setIfNum("_sellPrice", sellPrice);
+    } else if (ct === "STOCK_SELL") {
+      setIfNum("shares", shares);
+      setIfNum("_sellPrice", sellPrice);
+    } else if (ct === "EXT_SELL") {
+      setIfNum("_sellPrice", sellPrice);
+    } else if (ct === "MARKET") {
+      if (action === "sell") setIfNum("_sellPrice", sellPrice);
+      if (action === "damage") setIfNum("_damageAmount", damageAmount);
+    } else if (ct === "DOODAD") {
+      setIfNum("_cost", cost);
+    } else if (ct === "EXTRA_LOAN") {
+      setIfNum("_loanAmount", loanAmount);
+    } else if (ct === "EXTRA_CASH") {
+      setIfNum("_cashAmount", cashAmount);
+    } else if (ct === "EXTRA_SPLIT") {
+      setIfNum("_multiplier", multiplier);
+    } else if (ct === "EXTRA_BUY") {
+      setIfNum("_deposit", deposit);
+      setIfNum("_buyCost", buyCost);
+      setIfNum("_cf", cf);
+      setIfNum("_loan", loan);
+    }
+
+    onSave(updated);
+  };
+
+  // 편집 가능 필드 렌더링
+  const renderFields = () => {
+    const inputStyle = {
+      width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #27272a",
+      background: "#0a0a0f", color: "#fafafa", fontSize: 12, outline: "none", boxSizing: "border-box",
+    };
+    const labelStyle = { fontSize: 10, color: "#a1a1aa", display: "block", marginBottom: 4, fontWeight: 600 };
+    const numField = (label, value, setter, emoji = "") => (
+      <div style={{ marginBottom: 10 }}>
+        <label style={labelStyle}>{emoji} {label}</label>
+        <input type="number" value={value} onChange={e => setter(e.target.value)} style={inputStyle} />
+      </div>
+    );
+
+    if (ct === "OPPORTUNITY" && action === "buy") {
+      const isStockBuy = turn.card && (turn.card.sub || "").length > 0 && !turn.card.cf;
+      return (
+        <>
+          {isStockBuy ? (
+            <>
+              {numField("매수 주식 수량", shares, setShares, "📊")}
+              {numField("주당 가격 ($)", pricePerShare, setPricePerShare, "💵")}
+            </>
+          ) : (
+            <>
+              {numField("착수금 ($)", buyCost, setBuyCost, "💵")}
+              {numField("은행 대출 ($)", loan, setLoan, "🏦")}
+              {numField("월 현금흐름 ($)", cf, setCf, "📊")}
+            </>
+          )}
+        </>
+      );
+    }
+    if (ct === "OPPORTUNITY" && action === "sell") {
+      return (
+        <>
+          {numField("매각 수량", shares, setShares, "📊")}
+          {numField("매각가 ($/주)", sellPrice, setSellPrice, "💵")}
+        </>
+      );
+    }
+    if (ct === "STOCK_SELL") {
+      return (
+        <>
+          {numField("매각 수량", shares, setShares, "📊")}
+          {numField("매각가 ($/주)", sellPrice, setSellPrice, "💵")}
+        </>
+      );
+    }
+    if (ct === "EXT_SELL") {
+      return numField("매각가 ($)", sellPrice, setSellPrice, "💵");
+    }
+    if (ct === "MARKET" && action === "sell") {
+      return numField("매각가 ($)", sellPrice, setSellPrice, "💵");
+    }
+    if (ct === "MARKET" && action === "damage") {
+      return numField("손상 지불액 ($)", damageAmount, setDamageAmount, "💥");
+    }
+    if (ct === "DOODAD") {
+      return numField("지출 금액 ($)", cost, setCost, "💸");
+    }
+    if (ct === "EXTRA_LOAN") {
+      return numField(turn.action === "repay" ? "상환 금액 ($)" : "대출 금액 ($)", loanAmount, setLoanAmount, "🏦");
+    }
+    if (ct === "EXTRA_CASH") {
+      return numField("보정 금액 ($, 양수=입금)", cashAmount, setCashAmount, "💵");
+    }
+    if (ct === "EXTRA_SPLIT") {
+      return numField("배율 (2=증자, 0.5=감자)", multiplier, setMultiplier, "📈");
+    }
+    if (ct === "EXTRA_BUY") {
+      return (
+        <>
+          {numField("권리금 ($)", deposit, setDeposit, "💼")}
+          {numField("착수금 ($)", buyCost, setBuyCost, "💵")}
+          {numField("월 현금흐름 ($)", cf, setCf, "📊")}
+          {numField("은행 대출 ($)", loan, setLoan, "🏦")}
+        </>
+      );
+    }
+    // 편집 불가 타입 (PAYDAY/BABY/CHARITY/DOWNSIZED)
+    return (
+      <div style={{ padding: 12, borderRadius: 8, background: "#0a0a0f", border: "1px dashed #27272a", textAlign: "center" }}>
+        <p style={{ fontSize: 12, color: "#a1a1aa", margin: 0 }}>
+          이 턴({ct})은 숫자 필드 편집이 불필요합니다.
+        </p>
+        <p style={{ fontSize: 10, color: "#71717a", margin: "4px 0 0" }}>
+          메모만 수정할 수 있습니다. 삭제하려면 ❌ 취소 후 🗑️ 삭제 버튼을 사용하세요.
+        </p>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 1000, padding: 20,
+    }} onClick={onClose}>
+      <div style={{
+        width: "100%", maxWidth: 440, background: "#111118",
+        borderRadius: 16, border: "1px solid #27272a", padding: 24,
+        maxHeight: "90vh", overflowY: "auto",
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ marginBottom: 16 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 900, color: "#fafafa", margin: 0 }}>
+            ✏️ T{turn.turn} 턴 편집
+          </h2>
+          <p style={{ fontSize: 10, color: "#71717a", margin: "4px 0 0" }}>
+            턴 타입: {ct} {action ? `· ${action}` : ""}
+          </p>
+          <p style={{ fontSize: 10, color: "#a1a1aa", margin: "8px 0 0", padding: "6px 10px", borderRadius: 6, background: "#3b82f615", border: "1px solid #3b82f630" }}>
+            ℹ️ 숫자를 바꾸면 현금·자산·대출이 자동 재계산됩니다.
+          </p>
+        </div>
+
+        {renderFields()}
+
+        {/* 메모 (transaction) 공통 편집 */}
+        <div style={{ marginTop: 10, marginBottom: 16 }}>
+          <label style={{ fontSize: 10, color: "#a1a1aa", display: "block", marginBottom: 4, fontWeight: 600 }}>📝 메모 (기록 설명)</label>
+          <textarea
+            value={transaction}
+            onChange={e => setTransaction(e.target.value)}
+            rows={2}
+            style={{
+              width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #27272a",
+              background: "#0a0a0f", color: "#e4e4e7", fontSize: 11, outline: "none", boxSizing: "border-box",
+              fontFamily: "inherit", resize: "vertical",
+            }}
+          />
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={onClose} style={{
+            flex: 1, padding: "10px", borderRadius: 8, border: "1px solid #27272a",
+            background: "transparent", color: "#a1a1aa", fontSize: 12, fontWeight: 700, cursor: "pointer",
+          }}>❌ 취소</button>
+          <button onClick={handleSave} style={{
+            flex: 2, padding: "10px", borderRadius: 8, border: "none",
+            background: "#3b82f6", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer",
+          }}>💾 저장 (자동 재계산)</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════
    PlayMode 컴포넌트
 ═══════════════════════════════════════════════════ */
 function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewClickedSessions, isContestMode = false, authUser = null }) {
@@ -809,7 +1497,6 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
   const [boardPos, setBoardPos] = useState(0); // 현재 보드 위치 (0=시작, 1~24)
   const [diceInput, setDiceInput] = useState(""); // 주사위 숫자 입력
   const [diceConfirmed, setDiceConfirmed] = useState(false); // 주사위 확정 여부
-  const [charityTurns, setCharityTurns] = useState(0); // 기부 후 남은 주사위2개 턴
   const [passedPaydays, setPassedPaydays] = useState(0); // 이번 턴에 지나간 페이데이 수
   const [cellType, setCellType] = useState("");
   const [dealType, setDealType] = useState("deal1");
@@ -818,16 +1505,12 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
   const [shares, setShares] = useState("");
   const [sellPriceInput, setSellPriceInput] = useState(0);
   const [rightsPrice, setRightsPrice] = useState(0);
-  const [downsizeRestTurns, setDownsizeRestTurns] = useState(0); // 다운사이즈 이후 남은 휴식 턴 수 (0~2)
   const [gameEnded, setGameEnded] = useState(false); // 쥐경주 탈출 시 true
   const [gameSaved, setGameSaved] = useState(false); // 게임 저장 완료 시 true (디브리핑 버튼 활성화 조건)
+  const [gameSaving, setGameSaving] = useState(false); // 저장 버튼 클릭 후 응답 대기 중
   const [playSessionId, setPlaySessionId] = useState(null); // 후기 버튼용 세션 ID
-  const [totalCF, setTotalCF] = useState(0);
-  const [cash, setCash] = useState(0); // 보유 현금
-  const [bankLoan, setBankLoan] = useState(0); // 은행 대출 잔액 ($1,000 단위)
-  const [loanInterest, setLoanInterest] = useState(0); // 월 이자 지출 (대출 × 10%)
-  const [assets, setAssets] = useState([]); // {turn,name,cf,type,shares?,price?,loan?,downPay?,card,time}
-  const [babies, setBabies] = useState(0);
+  // 초기 대출 (job 선택 시점의 옵션 — turnLog 바깥 상태로 유지)
+  const [initialLoan, setInitialLoan] = useState(0);
   const [viewTab, setViewTab] = useState("input"); // "input"|"assets"|"history"
   const [timerOn, setTimerOn] = useState(true); // 타이머 켜기/끄기
   const [startTime, setStartTime] = useState(null);
@@ -840,6 +1523,37 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
   const [stockSellQty, setStockSellQty] = useState({});    // { [assetIndex]: qty }
   const [stockSellPrice, setStockSellPrice] = useState({}); // { [assetIndex]: price }
 
+  // ─── 2차 작업 (딜러 도구) UI state ───
+  const [dealerToolsOpen, setDealerToolsOpen] = useState(false);
+  const dealerToolsRef = useRef(null); // 빠른 접근 버튼으로 스크롤할 대상
+  // 턴 편집 모달: { index, turn } | null
+  const [editingTurn, setEditingTurn] = useState(null);
+  const [extraTool, setExtraTool] = useState(null); // "split" | "wipe" | "buy" | "cash" | null
+  const [extraSplitName, setExtraSplitName] = useState("");
+  const [extraSplitMultiplier, setExtraSplitMultiplier] = useState("2");
+  const [extraBuyName, setExtraBuyName] = useState("");
+  const [extraBuyCost, setExtraBuyCost] = useState("");
+  const [extraBuyCF, setExtraBuyCF] = useState("");
+  const [extraBuyType, setExtraBuyType] = useState("사업");
+  const [extraBuyLoan, setExtraBuyLoan] = useState("");
+
+  // ─── 카드 선택 드릴다운 state (기회/권리금 인수 공용 패턴) ───
+  const [cardCategory, setCardCategory] = useState(null); // "주식"|"부동산"|"사업"|null
+  const [cardSubtype, setCardSubtype] = useState(null);   // 종목/주택타입/딜크기 등
+  // MARKET 카드 드릴다운 state
+  const [marketCategory, setMarketCategory] = useState(null); // "부동산"|"사업"|"이벤트"|null
+  const [marketSubtype, setMarketSubtype] = useState(null);
+  // 권리금 인수용 별도 드릴다운 state
+  const [extraBuyCategory, setExtraBuyCategory] = useState(null); // "부동산"|"사업"|null
+  const [extraBuySubtype, setExtraBuySubtype] = useState(null);
+  const [extraBuySelectedCard, setExtraBuySelectedCard] = useState(null);
+  // 권리금 인수 2단계 전환 (Step 1: 권리금 입력 / Step 2: 구매-포기 결정)
+  const [extraBuyStep, setExtraBuyStep] = useState(1);     // 1 | 2
+  const [extraBuyDeposit, setExtraBuyDeposit] = useState(0);  // Step 2로 넘어갈 때 지불한 권리금 저장
+  const [extraBuyExtraLoan, setExtraBuyExtraLoan] = useState(0); // Step 2에서 추가 대출 받은 금액
+  const [extraCashAmount, setExtraCashAmount] = useState("");
+  const [extraCashReason, setExtraCashReason] = useState("");
+
   // 타이머: 직업 선택 시 시작, timerOn일 때만 카운트
   useEffect(() => {
     if (!job || !startTime || !timerOn) return;
@@ -850,16 +1564,145 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
   }, [job, startTime, timerOn]);
 
   const jobData = job ? JOBS.find(j => j.name === job) : null;
-  const { baseExpense, childTotal, totalExpense, passiveIncome, escaped } = useMemo(() => {
-    const be = jobData ? jobData.expense : 0;
-    const ct = jobData ? babies * jobData.childCost : 0;
-    const te = be + ct + loanInterest;
-    return { baseExpense: be, childTotal: ct, totalExpense: te, passiveIncome: totalCF, escaped: totalCF > te };
-  }, [jobData, babies, loanInterest, totalCF]);
+
+  // ═════════════════════════════════════════════════
+  // 🎮 파생 재무 상태 (엔진 기반 재계산)
+  // ═════════════════════════════════════════════════
+  // turnLog + initialLoan 으로부터 매 렌더 시 자동 재계산.
+  // cash/assets/totalCF/babies/bankLoan/loanInterest/totalExpense 등은 전부 이 useMemo에서 파생.
+  const gameState = useMemo(
+    () => computeGameState(jobData, turnLog, { initialLoan }),
+    [jobData, turnLog, initialLoan]
+  );
+  const {
+    cash,
+    assets,
+    totalCF,
+    babies,
+    bankLoan,
+    loanInterest,
+    totalExpense,
+    charityTurnsRemaining,
+    downsizeRestRemaining,
+  } = gameState;
+  // 기존 코드와의 변수명 호환
+  const charityTurns = charityTurnsRemaining;
+  const downsizeRestTurns = downsizeRestRemaining;
+  const baseExpense = jobData ? jobData.expense : 0;
+  const childTotal = jobData ? babies * jobData.childCost : 0;
+  const passiveIncome = totalCF;
+  const escaped = totalCF > totalExpense;
 
   const cardList = useMemo(() => 
     cellType === "OPPORTUNITY" ? (dealType === "deal1" ? deck.deal1 : deck.deal2) : cellType === "MARKET" ? deck.market : cellType === "DOODAD" ? deck.doodad : []
   , [cellType, dealType, deck]);
+
+  // ── 기회 카드 드릴다운용 파생 ──
+  // 카테고리별 카드 개수 (Step 1 버튼에 표시)
+  const cardCategoriesWithCounts = useMemo(() => {
+    if (cellType !== "OPPORTUNITY") return [];
+    const acc = { "주식": 0, "부동산": 0, "사업": 0, "기타": 0 };
+    for (const c of cardList) {
+      const cat = classifyCardCategory(c);
+      acc[cat] = (acc[cat] || 0) + 1;
+    }
+    return ["주식", "부동산", "사업", "기타"].filter(k => acc[k] > 0).map(k => ({ key: k, count: acc[k] }));
+  }, [cardList, cellType]);
+
+  // 선택된 카테고리 안의 서브타입별 카드 개수 (Step 2 버튼에 표시)
+  const cardSubtypesWithCounts = useMemo(() => {
+    if (cellType !== "OPPORTUNITY" || !cardCategory) return [];
+    const acc = new Map();
+    for (const c of cardList) {
+      if (classifyCardCategory(c) !== cardCategory) continue;
+      const sub = getCardSubtype(c, dealType);
+      acc.set(sub, (acc.get(sub) || 0) + 1);
+    }
+    return Array.from(acc.entries()).map(([key, count]) => ({ key, count }));
+  }, [cardList, cardCategory, cellType, dealType]);
+
+  // 선택된 카테고리+서브타입으로 필터링된 실제 카드 (Step 3 목록)
+  const filteredCards = useMemo(() => {
+    if (cellType !== "OPPORTUNITY") return cardList;
+    return cardList.filter(c => {
+      if (cardCategory && classifyCardCategory(c) !== cardCategory) return false;
+      if (cardSubtype && getCardSubtype(c, dealType) !== cardSubtype) return false;
+      return true;
+    });
+  }, [cardList, cardCategory, cardSubtype, cellType, dealType]);
+
+  // ── MARKET 카드 드릴다운 파생 ──
+  const marketCategoriesWithCounts = useMemo(() => {
+    if (cellType !== "MARKET") return [];
+    const acc = { "부동산": 0, "사업": 0, "이벤트": 0 };
+    for (const c of cardList) {
+      const cat = classifyMarketCategory(c);
+      if (acc[cat] !== undefined) acc[cat]++;
+    }
+    return ["부동산", "사업", "이벤트"].filter(k => acc[k] > 0).map(k => ({ key: k, count: acc[k] }));
+  }, [cardList, cellType]);
+
+  const marketSubtypesWithCounts = useMemo(() => {
+    if (cellType !== "MARKET" || !marketCategory) return [];
+    const acc = new Map();
+    for (const c of cardList) {
+      if (classifyMarketCategory(c) !== marketCategory) continue;
+      const sub = getMarketSubtype(c);
+      acc.set(sub, (acc.get(sub) || 0) + 1);
+    }
+    return Array.from(acc.entries()).map(([key, count]) => ({ key, count }));
+  }, [cardList, marketCategory, cellType]);
+
+  const filteredMarketCards = useMemo(() => {
+    if (cellType !== "MARKET") return cardList;
+    return cardList.filter(c => {
+      if (marketCategory && classifyMarketCategory(c) !== marketCategory) return false;
+      if (marketSubtype && getMarketSubtype(c) !== marketSubtype) return false;
+      return true;
+    });
+  }, [cardList, marketCategory, marketSubtype, cellType]);
+
+  // ── 권리금 인수 드릴다운용 파생 ──
+  // 카드 풀: SMALL + BIG 전체. 주식/증자감자 제외 (부동산/사업만).
+  // 각 카드에 원본 deal 정보를 함께 기록 (서브타입 계산용).
+  const extraBuyCardPool = useMemo(() => {
+    const small = (deck.deal1 || []).map(c => ({ card: c, dealType: "deal1" }));
+    const big = (deck.deal2 || []).map(c => ({ card: c, dealType: "deal2" }));
+    return [...small, ...big].filter(({ card }) => {
+      if (isStock(card)) return false;
+      if (isSplitCard(card)) return false;
+      const cat = classifyCardCategory(card);
+      return cat === "부동산" || cat === "사업";
+    });
+  }, [deck]);
+
+  const extraBuyCategoriesWithCounts = useMemo(() => {
+    const acc = { "부동산": 0, "사업": 0 };
+    for (const { card } of extraBuyCardPool) {
+      const cat = classifyCardCategory(card);
+      if (acc[cat] !== undefined) acc[cat]++;
+    }
+    return ["부동산", "사업"].filter(k => acc[k] > 0).map(k => ({ key: k, count: acc[k] }));
+  }, [extraBuyCardPool]);
+
+  const extraBuySubtypesWithCounts = useMemo(() => {
+    if (!extraBuyCategory) return [];
+    const acc = new Map();
+    for (const { card, dealType: dt } of extraBuyCardPool) {
+      if (classifyCardCategory(card) !== extraBuyCategory) continue;
+      const sub = getCardSubtype(card, dt);
+      acc.set(sub, (acc.get(sub) || 0) + 1);
+    }
+    return Array.from(acc.entries()).map(([key, count]) => ({ key, count }));
+  }, [extraBuyCardPool, extraBuyCategory]);
+
+  const extraBuyFilteredCards = useMemo(() => {
+    return extraBuyCardPool.filter(({ card, dealType: dt }) => {
+      if (extraBuyCategory && classifyCardCategory(card) !== extraBuyCategory) return false;
+      if (extraBuySubtype && getCardSubtype(card, dt) !== extraBuySubtype) return false;
+      return true;
+    });
+  }, [extraBuyCardPool, extraBuyCategory, extraBuySubtype]);
 
   // 주사위 확정 → 보드 이동 + 페이데이 통과 처리
   const confirmDice = () => {
@@ -879,11 +1722,8 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       }
     }
 
-    // 지나간 페이데이만큼 현금 추가 (도착 칸이 페이데이면 나중에 턴 기록 시 처리)
-    if (payCount > 0 && jobData) {
-      const paydayAmount = jobData.cashflow + totalCF - loanInterest;
-      setCash(prev => prev + paydayAmount * payCount);
-    }
+    // 지나간 페이데이 수는 passedPaydays로 추적. 실제 현금 반영은 addTurn에서
+    // createPaydayPassTurn으로 turnLog에 적재되며, 파생 상태가 자동 재계산.
 
     setBoardPos(newPos);
     setPassedPaydays(payCount);
@@ -910,6 +1750,19 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
   };
 
   const sellCheck = (cellType === "MARKET" && selectedCard && action === "sell") ? checkSellEligibility(selectedCard) : { eligible: true, message: "" };
+
+  // ── MARKET 카드 자동 해당없음: 선택된 카드가 매도 제안인데 매도 가능 자산이 없으면 action을 자동 "na"로 설정
+  useEffect(() => {
+    if (cellType !== "MARKET" || !selectedCard) return;
+    // 손상 카드는 건너뜀 (자체 판정)
+    const cardText = (selectedCard.desc || "") + (selectedCard.special || "");
+    if (RE_DAMAGE.test(cardText)) return;
+    // 매도 제안 카드에서 보유 자산이 없으면 자동 "na"
+    const canSell = checkSellEligibility(selectedCard);
+    if (!canSell.eligible && action !== "na") {
+      setAction("na");
+    }
+  }, [selectedCard, cellType]); // action을 deps에 넣지 않음 (무한 루프 방지)
 
   // 종목별 보유 주식 수량
   const getOwnedShares = (card) => {
@@ -954,74 +1807,109 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
 
     const decisionSec = (timerOn && cardSelectedAt && action) ? Math.round((Date.now() - cardSelectedAt) / 1000) : null;
     const sharesNum = parseInt(shares) || 0;
-    let transaction = "";
-    let cashDelta = 0;
+    const time = timerOn ? elapsed : null;
+    const dice = parseInt(diceInput) || 0;
+    const turn = currentTurn;
+    const dealTypeName = cellType === "OPPORTUNITY"
+      ? (dealType === "deal1" ? deck.deal1Name : deck.deal2Name)
+      : cellType;
 
-    // ── 현금 변동 계산 ──
+    let entry = null;
+    let transaction = "";
+    let splitApplied = null; // 무상증자/감자: true=보유중적용, false=미보유해당없음, null=해당없음
+    let soldAssetInfo = null; // MARKET 매각 시 실제 매각된 자산 정보 (AI 브리핑용)
+
+    // ── OPPORTUNITY ──
     if (cellType === "OPPORTUNITY" && action === "buy" && selectedCard) {
       const cf = parseNumNeg(selectedCard.cf);
       const type = getAssetType(selectedCard);
       const down = isStock(selectedCard) ? extractStockCost(selectedCard, sharesNum) : extractDown(selectedCard);
       const loan = isStock(selectedCard) ? 0 : extractLoan(selectedCard);
-      cashDelta = -down;
-      if (type === "주식") {
-        transaction = `${selectedCard.sub||"주식"} ${sharesNum}주 구매 @${selectedCard.price} → -$${fmtNum(down)}`;
-        setAssets(prev => [...prev, { id: makeAssetId(), turn: currentTurn, name: selectedCard.sub || "주식", cf: 0, type, shares: sharesNum, price: selectedCard.price || "", downPay: down, loan: 0, card: selectedCard, time: timerOn ? elapsed : null }]);
-      } else {
-        transaction = `${selectedCard.sub||"자산"} 구매 착수금 -$${fmtNum(down)} / CF +$${cf}/월`;
-        setTotalCF(prev => prev + cf);
-        setAssets(prev => [...prev, { id: makeAssetId(), turn: currentTurn, name: selectedCard.sub || selectedCard.desc?.substring(0, 20), cf, type, downPay: down, loan, card: selectedCard, time: timerOn ? elapsed : null }]);
-      }
+      const assetName = type === "주식"
+        ? (selectedCard.sub || "주식")
+        : (selectedCard.sub || selectedCard.desc?.substring(0, 20) || "자산");
+      entry = createBuyTurn({
+        turn, boardPos, dice, passedPaydays, dealType: dealTypeName, card: selectedCard,
+        buyCost: down, cf: type === "주식" ? 0 : cf, assetType: type, assetName,
+        shares: type === "주식" ? sharesNum : undefined,
+        stockPrice: type === "주식" ? (selectedCard.price || "") : undefined,
+        loan, time, decisionSec,
+      });
+      transaction = type === "주식"
+        ? `${selectedCard.sub||"주식"} ${sharesNum}주 구매 @${selectedCard.price} → -$${fmtNum(down)}`
+        : `${assetName} 구매 착수금 -$${fmtNum(down)} / CF +$${cf}/월`;
     }
-    if (cellType === "OPPORTUNITY" && action === "sell" && selectedCard && isStock(selectedCard)) {
+    else if (cellType === "OPPORTUNITY" && action === "sell" && selectedCard && isStock(selectedCard)) {
       const sellTotal = sellPriceInput * sharesNum;
-      cashDelta = sellTotal;
-      const sName = (selectedCard.sub || "").trim();
+      entry = createSellStockTurn({
+        turn, boardPos, dice, passedPaydays, dealType: dealTypeName, card: selectedCard,
+        stockName: (selectedCard.sub || "").trim(),
+        sellQty: sharesNum, sellPrice: sellPriceInput,
+        time, decisionSec,
+      });
       transaction = `${selectedCard.sub||"주식"} ${sharesNum}주 매각 @$${sellPriceInput} → +$${fmtNum(sellTotal)}`;
-      setAssets(prev => reduceStockShares(prev, sName, sharesNum));
     }
-    if (cellType === "OPPORTUNITY" && action === "rights" && selectedCard) {
-      cashDelta = rightsPrice;
+    else if (cellType === "OPPORTUNITY" && action === "rights" && selectedCard) {
+      // rights 전용 팩토리가 없으므로 OPPORTUNITY action:rights entry를 직접 구성
+      entry = {
+        turn, cellType: "OPPORTUNITY", boardPos, dice, passedPaydays,
+        dealType: dealTypeName, card: selectedCard, action: "rights",
+        time, decisionSec,
+        _schemaVersion: SCHEMA_VERSION,
+        _rightsPrice: rightsPrice,
+      };
       transaction = `권리판매 +$${fmtNum(rightsPrice)}`;
     }
-    if (cellType === "OPPORTUNITY" && action === "pass") {
+    else if (cellType === "OPPORTUNITY" && action === "pass") {
+      entry = {
+        turn, cellType: "OPPORTUNITY", boardPos, dice, passedPaydays,
+        dealType: dealTypeName, card: selectedCard, action: "pass",
+        time, decisionSec,
+        _schemaVersion: SCHEMA_VERSION,
+      };
       transaction = `${selectedCard?.sub||"카드"} 패스`;
     }
-    // ── 무상증자/감자 자동 적용 ──
-    let splitApplied = null; // 무상증자/감자 카드: true=보유중적용, false=미보유해당없음
-    if (cellType === "OPPORTUNITY" && action === "split" && selectedCard && isSplitCard(selectedCard)) {
+    // ── 무상증자/감자 ──
+    else if (cellType === "OPPORTUNITY" && action === "split" && selectedCard && isSplitCard(selectedCard)) {
       const mult = getSplitMultiplier(selectedCard);
       const stockName = (selectedCard.sub || "").trim();
       const owned = assets.filter(a => a.type === "주식" && a.shares > 0 && a.name.includes(stockName));
       if (owned.length > 0) {
         const totalBefore = owned.reduce((s, a) => s + (a.shares || 0), 0);
-        const totalAfter = Math.floor(totalBefore * mult);
-        setAssets(prev => prev.map(a => {
-          if (a.type === "주식" && a.shares > 0 && a.name.includes(stockName)) {
-            return { ...a, shares: Math.floor(a.shares * mult) };
-          }
-          return a;
-        }));
+        const totalAfter = mult >= 1 ? Math.floor(totalBefore * mult) : Math.round(totalBefore * mult);
+        entry = {
+          turn, cellType: "OPPORTUNITY", boardPos, dice, passedPaydays,
+          dealType: dealTypeName, card: selectedCard, action: "split",
+          time, decisionSec,
+          _schemaVersion: SCHEMA_VERSION,
+          _stockName: stockName,
+          _multiplier: mult,
+        };
         transaction = mult >= 1
           ? `${selectedCard.sub} 무상증자 ${totalBefore}주 → ${totalAfter}주 (×${mult})`
           : `${selectedCard.sub} 감자 ${totalBefore}주 → ${totalAfter}주 (×${mult})`;
         splitApplied = true;
       } else {
+        // 보유 없음: 재계산에 영향 없는 pass-유사 entry
+        entry = {
+          turn, cellType: "OPPORTUNITY", boardPos, dice, passedPaydays,
+          dealType: dealTypeName, card: selectedCard, action: "split",
+          time, decisionSec,
+          _schemaVersion: SCHEMA_VERSION,
+          _stockName: stockName,
+          _multiplier: 1, // 무효 — 재계산에 영향 없음
+        };
         transaction = `${selectedCard.sub} ${mult >= 1 ? "무상증자" : "감자"} — 보유 없음, 해당 없음`;
         splitApplied = false;
       }
     }
-    // 매각된 자산 정보 (entry 기록용, AI 브리핑 정확성 확보)
-    let soldAssetInfo = null;
-
-    if (cellType === "MARKET" && action === "sell" && selectedCard) {
-      // MARKET 카드는 부동산/사업 매각만 존재 (주식 카드 없음)
+    // ── MARKET ──
+    else if (cellType === "MARKET" && action === "sell" && selectedCard) {
       // 매각가 추출: sell 필드 우선, 없으면 desc에서 $금액 패턴 추출
       let sellPrice = 0;
       if (selectedCard.sell) {
         sellPrice = parseNum(selectedCard.sell);
       } else {
-        // desc에서 매각가 패턴 추출: "$숫자,숫자" 형태만 (3/2 같은 숫자 혼동 방지)
         const priceMatch = (selectedCard.desc || "").match(/\$([0-9]{1,3}(?:,[0-9]{3})*)/);
         if (priceMatch) sellPrice = parseInt(priceMatch[1].replace(/,/g, "")) || 0;
       }
@@ -1037,111 +1925,155 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       if (!sellAsset) sellAsset = findLastSafe(assets, a => a.type !== "주식");
       if (sellAsset) {
         const assetLoan = sellAsset.loan || 0;
-        const netProceeds = sellPrice > 0 ? sellPrice - assetLoan : 0;
-        cashDelta = Math.max(0, netProceeds);
-        transaction = `${sellAsset.name}(${sellAsset.type}) 매각 $${fmtNum(sellPrice)} - 대출 $${fmtNum(assetLoan)} = +$${fmtNum(cashDelta)}`;
-        // AI 브리핑과 기록 표시용: 실제 매각된 자산 정보 보존
+        const netProceeds = Math.max(0, sellPrice - assetLoan);
         soldAssetInfo = { name: sellAsset.name, type: sellAsset.type, cf: sellAsset.cf, sellPrice };
-        const targetId = sellAsset.id;
-        setTotalCF(prev => prev - sellAsset.cf);
-        // ID 기반으로 자산 제거 — 참조 동등성 의존 제거 (CF 이중 차감 방지)
-        setAssets(prev => prev.filter(a => a.id !== targetId));
+        entry = createMarketSellTurn({
+          turn, boardPos, dice, passedPaydays, card: selectedCard,
+          assetId: sellAsset.id,
+          sellPrice, assetCF: sellAsset.cf, assetLoan,
+          time, decisionSec,
+        });
+        transaction = `${sellAsset.name}(${sellAsset.type}) 매각 $${fmtNum(sellPrice)} - 대출 $${fmtNum(assetLoan)} = +$${fmtNum(netProceeds)}`;
+      } else {
+        // 매각 대상 없음 — hold 유사 처리
+        entry = {
+          turn, cellType: "MARKET", boardPos, dice, passedPaydays,
+          dealType: "MARKET", card: selectedCard, action: "sell",
+          time, decisionSec,
+          _schemaVersion: SCHEMA_VERSION,
+        };
+        transaction = "MARKET 매각 — 대상 자산 없음";
       }
     }
-    if (cellType === "MARKET" && (action === "hold" || action === "na")) {
+    else if (cellType === "MARKET" && action === "damage" && selectedCard) {
+      // 임차인 자산 손상: 보유 부동산 채수 × 단가
+      const perUnitMatch = (selectedCard.special || selectedCard.desc || "").match(/\$?([0-9,]+)/);
+      const perUnit = perUnitMatch ? parseInt(perUnitMatch[1].replace(/,/g, "")) || 0 : 0;
+      const realEstateAssets_ = assets.filter(a => a.type === "부동산");
+      const totalUnits = realEstateAssets_.reduce((sum, a) => sum + getAssetUnits(a), 0);
+      const damageTotal = perUnit * totalUnits;
+      entry = {
+        turn, cellType: "MARKET", boardPos, dice, passedPaydays,
+        dealType: "MARKET", card: selectedCard, action: "damage",
+        time, decisionSec,
+        _schemaVersion: SCHEMA_VERSION,
+        _damageAmount: damageTotal,
+      };
+      transaction = totalUnits > 0
+        ? `자산 손상 지불 ${totalUnits}채 × $${fmtNum(perUnit)} = -$${fmtNum(damageTotal)}`
+        : `자산 손상 — 보유 부동산 없음, 지불 없음`;
+    }
+    else if (cellType === "MARKET" && (action === "hold" || action === "na")) {
+      entry = {
+        turn, cellType: "MARKET", boardPos, dice, passedPaydays,
+        dealType: "MARKET", card: selectedCard, action,
+        time, decisionSec,
+        _schemaVersion: SCHEMA_VERSION,
+      };
       transaction = action === "na" ? "MARKET 해당없음" : "MARKET 홀딩";
     }
-    if (cellType === "DOODAD" && selectedCard) {
+    // ── DOODAD ──
+    else if (cellType === "DOODAD" && selectedCard) {
       const isChildCard = RE_CHILD_DOODAD.test(selectedCard.desc || "");
       const amt = parseNum(selectedCard.amount);
       const actualAmt = isChildCard ? amt * babies : amt;
-      cashDelta = -actualAmt;
-      transaction = isChildCard ? `DOODAD ${selectedCard.desc?.substring(0,15)} 자녀${babies}명×$${amt} = -$${fmtNum(actualAmt)}` : `DOODAD -$${fmtNum(actualAmt)}`;
+      entry = createDoodadTurn({
+        turn, boardPos, dice, passedPaydays, card: selectedCard,
+        amount: amt, isChildCard,
+        time, decisionSec,
+      });
+      transaction = isChildCard
+        ? `DOODAD ${selectedCard.desc?.substring(0,15)} 자녀${babies}명×$${amt} = -$${fmtNum(actualAmt)}`
+        : `DOODAD -$${fmtNum(actualAmt)}`;
     }
-    if (cellType === "PAYDAY") {
-      const paydayAmount = jobData ? (jobData.cashflow + totalCF - loanInterest) : 0;
-      cashDelta = paydayAmount;
+    // ── PAYDAY (도착 칸) ──
+    else if (cellType === "PAYDAY") {
+      const childTotal = jobData ? babies * jobData.childCost : 0;
+      const paydayAmount = jobData ? (jobData.cashflow + totalCF - childTotal - loanInterest) : 0;
+      entry = createPaydayTurn({
+        turn, boardPos, dice, passedPaydays, payAmount: paydayAmount, time,
+      });
       transaction = `PayDay +$${fmtNum(paydayAmount)}`;
     }
-    if (cellType === "CHARITY") {
+    // ── CHARITY ──
+    else if (cellType === "CHARITY") {
       if (action === "charity_yes") {
         const totalIncome = (jobData?.salary || 0) + totalCF;
         const charityAmount = Math.round(totalIncome * 0.1);
-        cashDelta = -charityAmount;
+        entry = createCharityTurn({
+          turn, boardPos, dice, passedPaydays,
+          donated: true, donationAmount: charityAmount,
+          time, decisionSec,
+        });
         transaction = `기부 -$${fmtNum(charityAmount)} → 주사위2개×3턴`;
-        setCharityTurns(3);
       } else {
+        entry = createCharityTurn({
+          turn, boardPos, dice, passedPaydays,
+          donated: false, donationAmount: 0,
+          time, decisionSec,
+        });
         transaction = "기부 안함";
       }
     }
-    if (cellType === "BABY") {
-      setBabies(prev => Math.min(prev + 1, 3));
-      transaction = `아기 탄생 → 양육비 +$${fmtNum(jobData?.childCost)}/월`;
+    // ── BABY ──
+    else if (cellType === "BABY") {
+      entry = createBabyTurn({
+        turn, boardPos, dice, passedPaydays, time, decisionSec,
+      });
+      transaction = babies >= 3
+        ? `베이비 칸 — 자녀 3명 제한, 기록만 (총 양육비 $${fmtNum((jobData?.childCost || 0) * 3)}/월 유지)`
+        : `아기 탄생 → 양육비 +$${fmtNum(jobData?.childCost)}/월 (자녀 ${babies} → ${babies + 1}명)`;
     }
-    if (cellType === "DOWNSIZED") {
-      cashDelta = -totalExpense;
-      transaction = `다운사이즈 — 한 달 총지출 -$${fmtNum(totalExpense)} (이후 2턴 휴식)`;
-      setDownsizeRestTurns(2); // 이 턴은 지출 차감, 다음 2턴은 주사위 없이 휴식
+    // ── DOWNSIZED ──
+    else if (cellType === "DOWNSIZED") {
+      const expense = totalExpense;
+      entry = createDownsizedTurn({
+        turn, boardPos, dice, passedPaydays, expense,
+        time, decisionSec,
+      });
+      transaction = `다운사이즈 — 한 달 총지출 -$${fmtNum(expense)} (이후 2턴 휴식)`;
     }
 
-    // 현금 적용
-    if (cashDelta !== 0) setCash(prev => prev + cashDelta);
+    if (!entry) return;
+
+    // UI/브리핑용 메타데이터를 entry에 첨부
+    entry.transaction = transaction;
+    entry.splitApplied = splitApplied;
+    entry.soldAsset = soldAssetInfo;
 
     // PayDay 통과 기록 (도착 칸 외에 지나간 PayDay)
     const paydayLogs = [];
     if (passedPaydays > 0) {
-      const paydayAmount = jobData ? (jobData.cashflow + totalCF - loanInterest) : 0;
+      const childTotal = jobData ? babies * jobData.childCost : 0;
+      const paydayAmount = jobData ? (jobData.cashflow + totalCF - childTotal - loanInterest) : 0;
       for (let p = 0; p < passedPaydays; p++) {
-        paydayLogs.push({ turn: currentTurn, cellType: "PAYDAY_PASS", boardPos, dice: 0, passedPaydays: 0, dealType: "PAYDAY", card: null, action: null, shares: null, time: timerOn ? elapsed : null, decisionSec: null, cashSnapshot: cash + cashDelta + paydayAmount * (p + 1), transaction: `PayDay 통과 +$${fmtNum(paydayAmount)}` });
+        const passEntry = createPaydayPassTurn({
+          turn, boardPos, payAmount: paydayAmount, time,
+        });
+        passEntry.transaction = `PayDay 통과 +$${fmtNum(paydayAmount)}`;
+        paydayLogs.push(passEntry);
       }
     }
-
-    const entry = {
-      turn: currentTurn, cellType, boardPos,
-      dice: parseInt(diceInput) || 0, passedPaydays,
-      dealType: cellType === "OPPORTUNITY" ? (dealType === "deal1" ? deck.deal1Name : deck.deal2Name) : cellType,
-      card: selectedCard, action, shares: isStock(selectedCard) ? sharesNum : null,
-      time: timerOn ? elapsed : null, decisionSec,
-      cashSnapshot: cash + cashDelta, transaction,
-      splitApplied, // 무상증자/감자: true=보유중적용, false=미보유해당없음, null=해당없음
-      soldAsset: soldAssetInfo, // MARKET 매각 시 실제 매각된 자산 정보 (AI 브리핑용)
-    };
 
     setTurnLog(prev => [...prev, ...paydayLogs, entry]);
     setCurrentTurn(prev => prev + 1);
-    setSelectedCard(null); setAction(null); setShares(""); setCardSelectedAt(null); setSellPriceInput(0); setRightsPrice(0);
+    setSelectedCard(null); setAction(null); setShares(""); setCardSelectedAt(null);
+    setSellPriceInput(0); setRightsPrice(0);
     setDiceInput(""); setDiceConfirmed(false); setPassedPaydays(0); setCellType("");
     setDealType("deal1"); setViewTab("input");
-    if (charityTurns > 0 && cellType !== "CHARITY") setCharityTurns(prev => prev - 1);
+    setCardCategory(null); setCardSubtype(null);
+    setMarketCategory(null); setMarketSubtype(null);
+    // 탈출 체크는 useEffect에서 처리 (turnLog 변경 후 파생 상태가 업데이트된 다음 판정)
+  };
 
-    // 쥐경주 탈출 체크: 패시브인컴 > 총지출 (이번 턴 변경분 반영)
-    let cfDelta = 0;
-    if (cellType === "OPPORTUNITY" && action === "buy" && selectedCard && !isStock(selectedCard)) {
-      cfDelta = parseNumNeg(selectedCard.cf);
-    } else if (cellType === "MARKET" && action === "sell" && selectedCard) {
-      // MARKET 매각 시 자산 CF가 제거됨 → sellAsset.cf 만큼 감소
-      // (위에서 setTotalCF(prev => prev - sellAsset.cf) 이미 호출됨)
-      // 탈출 체크용 newTotalCF는 그 변경을 미리 반영해야 함
-      const desc = (selectedCard.desc || "") + (selectedCard.sell || "") + (selectedCard.special || "");
-      let soldAsset = null;
-      for (const rule of SELL_RULES) {
-        if (rule.descRe.test(desc)) {
-          soldAsset = findLastSafe(assets, a => a.type !== "주식" && rule.assetRe.test(a.name));
-          if (soldAsset) break;
-        }
-      }
-      if (!soldAsset) soldAsset = findLastSafe(assets, a => a.type !== "주식");
-      cfDelta = soldAsset ? -soldAsset.cf : 0;
-    }
-    const newTotalCF = totalCF + cfDelta;
-    // 이번 턴에 BABY라면 양육비가 늘어나 총지출이 증가함
-    const babiesAfter = cellType === "BABY" ? Math.min(babies + 1, 3) : babies;
-    const newExpense = (jobData ? jobData.expense : 0) + (jobData ? babiesAfter * jobData.childCost : 0) + loanInterest;
-    // 대회 모드에서는 자동 탈출 금지 (수동 "탈출 선언" 버튼으로만 탈출)
-    if (newTotalCF > newExpense && !gameEnded && !isContestMode) {
+  // ── 쥐경주 탈출 자동 감지 (파생 상태 기반) ──
+  // 플레이 모드와 대회 모드 동일하게 동작. (둘의 차이는 타이머 강제 ON 여부뿐)
+  useEffect(() => {
+    if (!jobData || gameEnded) return;
+    if (totalCF > totalExpense && turnLog.length > 0) {
       setGameEnded(true);
     }
-  };
+  }, [totalCF, totalExpense, jobData, gameEnded, turnLog.length]);
 
   // 자산 통계 (단일 루프로 분류 + 집계)
   const assetStats = useMemo(() => {
@@ -1156,6 +2088,57 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     return { stock, re, biz, other, stockShares, reCF, bizCF };
   }, [assets]);
   const { stock: stockAssets, re: realEstateAssets, biz: bizAssets, other: otherAssets, stockShares: totalStockShares, reCF, bizCF } = assetStats;
+
+  // ── 기록 탭 그룹핑: 진짜 턴(주사위 굴림)을 헤더로, 그 턴에 속한 보조 행위를 본문으로 ──
+  // 진짜 턴 cellType: 보드 이동이 발생하는 셀(OPPORTUNITY/MARKET/DOODAD/PAYDAY/CHARITY/BABY/DOWNSIZED)
+  //                   + DOWNSIZED_REST (주사위는 안 굴리지만 정식 턴 소모)
+  // 보조 행위 cellType: PAYDAY_PASS, STOCK_SELL, EXT_SELL, EXTRA_*
+  const MAIN_CELL_TYPES = ["OPPORTUNITY","MARKET","DOODAD","PAYDAY","CHARITY","BABY","DOWNSIZED","DOWNSIZED_REST"];
+  const turnGroups = useMemo(() => {
+    const groups = [];       // [{ main: entry|null, subs: [entry, ...], turnNum, startIdx }]
+    let currentGroup = null;
+    for (let i = 0; i < turnLog.length; i++) {
+      const t = turnLog[i];
+      const isMain = MAIN_CELL_TYPES.includes(t.cellType);
+      if (isMain) {
+        // 새 진짜 턴 발견 → 이전 그룹 마감
+        if (currentGroup) groups.push(currentGroup);
+        currentGroup = { main: { entry: t, idx: i }, subs: [], turnNum: t.turn };
+      } else {
+        // 보조 행위: 현재 그룹에 추가, 그룹이 아직 없으면 "대기 중" 그룹 시작
+        if (!currentGroup) {
+          currentGroup = { main: null, subs: [], turnNum: t.turn };
+        }
+        currentGroup.subs.push({ entry: t, idx: i });
+      }
+    }
+    if (currentGroup) groups.push(currentGroup);
+    return groups;
+  }, [turnLog]);
+
+  // 턴 편집/삭제 핸들러 — useCallback으로 참조 안정화해서 TurnRow의 memo 효과 발휘
+  const handleEditTurn = useCallback((index, turn) => {
+    setEditingTurn({ index, turn });
+  }, []);
+
+  const handleDeleteTurn = useCallback((index, isSub, turnNum) => {
+    const label = isSub ? "이 보조 행위를" : `T${turnNum} 턴을`;
+    if (window.confirm(`${label} 삭제하시겠습니까?\n\n⚠️ 기록(로그)만 삭제됩니다.\n현금·자산·대출 등 재무 상태는 자동 재계산됩니다.\n\n계속하시겠습니까?`)) {
+      setTurnLog(prev => prev.filter((_, idx) => idx !== index));
+    }
+  }, []);
+
+  // 턴 row 렌더 — memo된 TurnRow를 사용
+  const renderTurnRow = (t, i, isSub) => (
+    <TurnRow
+      key={i}
+      t={t}
+      i={i}
+      isSub={isSub}
+      onEdit={handleEditTurn}
+      onDelete={handleDeleteTurn}
+    />
+  );
 
   // ── 게임 저장 페이로드 생성 (중복 제거) ──
   const buildGamePayload = () => {
@@ -1177,6 +2160,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       time: now.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }),
       dateTime: now.toISOString(),
       turnLog, assets, cash, totalCF, bankLoan, loanInterest, babies, gameEnded,
+      initialLoan, // 파생 상태 재계산용 (복구 시 필수)
       simText: buildPromptText(gameResults, version, turnLog.length),
       // Phase B 추가 필드
       isContest: isContestMode,
@@ -1191,15 +2175,18 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
   const resetGame = () => {
     setJob(null); setTurnLog([]); setCurrentTurn(1); setBoardPos(0);
     setDiceInput(""); setDiceConfirmed(false);
-    setCharityTurns(0); setPassedPaydays(0);
-    setTotalCF(0); setCash(0); setBankLoan(0); setLoanInterest(0);
-    setAssets([]); setBabies(0);
+    setPassedPaydays(0);
+    setInitialLoan(0);
     setSelectedCard(null); setAction(null); setShares("");
     setSellPriceInput(0); setRightsPrice(0);
     setViewTab("input"); setCellType("");
     setStartTime(null); setElapsed(0); setCardSelectedAt(null);
-    setGameEnded(false); setGameSaved(false); setDownsizeRestTurns(0);
+    setGameEnded(false); setGameSaved(false);
     setReSellIdx(0); setReSellPrice(""); setStockSellQty({}); setStockSellPrice({});
+    setCardCategory(null); setCardSubtype(null);
+    setMarketCategory(null); setMarketSubtype(null);
+    setExtraBuyCategory(null); setExtraBuySubtype(null); setExtraBuySelectedCard(null);
+    setExtraBuyStep(1); setExtraBuyDeposit(0); setExtraBuyExtraLoan(0);
   };
 
   // ═══════════════════════════════════════════════════
@@ -1261,25 +2248,30 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
   const handleRestore = () => {
     if (!pendingRestoreData) return;
     const state = pendingRestoreData.game_state;
-    
+
+    // 레거시 스키마(v2 이전) 게임은 재계산 구조와 호환되지 않음 → 복구 거부
+    const log = state.turnLog || [];
+    if (log.length > 0 && isLegacyTurnLog(log)) {
+      alert("이전 버전에서 저장된 게임입니다. 시뮬레이터가 업데이트되어 복구할 수 없습니다. 새로 시작해주세요.");
+      setShowRestorePrompt(false);
+      setPendingRestoreData(null);
+      deleteGameSession(authUser?.id);
+      return;
+    }
+
     try {
       setJob(state.job || null);
-      setTurnLog(state.turnLog || []);
-      setCurrentTurn((state.turnLog?.length || 0) + 1);
+      setTurnLog(log);
+      setCurrentTurn((log.length || 0) + 1);
       setBoardPos(state.boardPos || 0);
-      setCash(state.cash || 0);
-      setTotalCF(state.totalCF || 0);
-      setBankLoan(state.bankLoan || 0);
-      setLoanInterest(state.loanInterest || 0);
-      setAssets(state.assets || []);
-      setBabies(state.babies || 0);
+      setInitialLoan(state.initialLoan || 0);
       setPlaySessionId(state.playSessionId || `play-${Date.now()}`);
       if (state.timerOn !== undefined) setTimerOn(state.timerOn);
       if (state.startTime) setStartTime(state.startTime);
-      setCharityTurns(state.charityTurns || 0);
-      setDownsizeRestTurns(state.downsizeRestTurns || 0);
       setGameEnded(state.gameEnded || false);
-      
+      // cash/assets/totalCF/babies/bankLoan/loanInterest/charityTurns/downsizeRestTurns는
+      // 파생 상태이므로 복구 시 직접 세팅하지 않음. turnLog + initialLoan으로부터 자동 재계산.
+
       setShowRestorePrompt(false);
       setPendingRestoreData(null);
     } catch (e) {
@@ -1493,7 +2485,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         )}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           {JOBS.map(j => (
-            <button key={j.name} onClick={() => { setJob(j.name); setTimerOn(true); setStartTime(Date.now()); setCash(j.savings + j.cashflow); setPlaySessionId(`play-${Date.now()}`); }} style={{
+            <button key={j.name} onClick={() => { setJob(j.name); setTimerOn(true); setStartTime(Date.now()); setPlaySessionId(`play-${Date.now()}`); }} style={{
               padding: "14px 12px", borderRadius: 12, border: "1px solid #27272a",
               background: "#111118", cursor: "pointer", textAlign: "left",
             }}>
@@ -1535,13 +2527,18 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
             </div>
           ))}
         </div>
-        {/* 월별 현금흐름 계산 */}
+        {/* 월별 현금흐름 계산 = cashflow + totalCF - 양육비 - 이자 */}
         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 6, padding: "6px 0", marginBottom: 4, borderTop: "1px solid #27272a" }}>
           <span style={{ fontSize: 10, color: "#71717a" }}>월별 현금흐름</span>
-          <span style={{ fontSize: 14, fontWeight: 900, color: (jobData ? jobData.cashflow + totalCF - loanInterest : 0) >= 0 ? "#22c55e" : "#ef4444" }}>
-            ${fmtNum((jobData ? jobData.cashflow + totalCF - loanInterest : 0))}/월
+          <span style={{ fontSize: 14, fontWeight: 900, color: (jobData ? jobData.cashflow + totalCF - childTotal - loanInterest : 0) >= 0 ? "#22c55e" : "#ef4444" }}>
+            ${fmtNum((jobData ? jobData.cashflow + totalCF - childTotal - loanInterest : 0))}/월
           </span>
-          <span style={{ fontSize: 9, color: "#52525b" }}>(CF ${fmtNum(jobData?.cashflow || 0)} {totalCF >= 0 ? "+" : ""}${fmtNum(totalCF)}{loanInterest > 0 ? ` -${fmtNum(loanInterest)}이자` : ""})</span>
+          <span style={{ fontSize: 9, color: "#52525b" }}>
+            (CF ${fmtNum(jobData?.cashflow || 0)}
+            {totalCF >= 0 ? " +" : " "}${fmtNum(totalCF)}
+            {childTotal > 0 ? ` -${fmtNum(childTotal)}양육비` : ""}
+            {loanInterest > 0 ? ` -${fmtNum(loanInterest)}이자` : ""})
+          </span>
         </div>
         {bankLoan > 0 && (
           <div style={{ display: "flex", justifyContent: "center", gap: 12, paddingTop: 4, borderTop: "1px solid #27272a" }}>
@@ -1625,10 +2622,17 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                 </p>
               </div>
               <button onClick={() => {
-                setTurnLog(prev => [...prev, { turn: currentTurn, cellType: "DOWNSIZED_REST", boardPos, dice: 0, passedPaydays: 0, dealType: "DOWNSIZED", card: null, action: "rest", shares: null, time: timerOn ? elapsed : null, decisionSec: null, cashSnapshot: cash, transaction: `다운사이즈 휴식 (잔여 ${downsizeRestTurns - 1}턴)` }]);
+                const restEntry = {
+                  turn: currentTurn, cellType: "DOWNSIZED_REST", boardPos,
+                  dice: 0, passedPaydays: 0, dealType: "DOWNSIZED",
+                  card: null, action: "rest", shares: null,
+                  time: timerOn ? elapsed : null, decisionSec: null,
+                  _schemaVersion: SCHEMA_VERSION,
+                  transaction: `다운사이즈 휴식 (잔여 ${downsizeRestTurns - 1}턴)`,
+                };
+                setTurnLog(prev => [...prev, restEntry]);
                 setCurrentTurn(prev => prev + 1);
-                setDownsizeRestTurns(prev => prev - 1);
-                if (charityTurns > 0) setCharityTurns(prev => prev - 1);
+                // downsizeRestTurns와 charityTurns는 파생 상태이므로 엔진이 자동으로 감소시킴.
               }} style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", cursor: "pointer", background: "#ef4444", color: "#fff", fontSize: 14, fontWeight: 800, marginBottom: 12 }}>
                 ⬇️ 턴 {currentTurn} 휴식 (지출 없음)
               </button>
@@ -1691,7 +2695,16 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
               {["PAYDAY", "BABY", "DOWNSIZED"].includes(cellType) && (
                 <div style={{ marginBottom: 12 }}>
                   {cellType === "PAYDAY" && <p style={{ fontSize: 12, color: "#86efac", margin: "0 0 8px" }}>💰 월급날! 현금흐름이 현금에 추가됩니다.</p>}
-                  {cellType === "BABY" && <p style={{ fontSize: 12, color: "#f9a8d4", margin: "0 0 8px" }}>👶 아기 탄생! 양육비 ${fmtNum(jobData?.childCost)}/월이 총지출에 추가됩니다.</p>}
+                  {cellType === "BABY" && babies >= 3 && (
+                    <p style={{ fontSize: 12, color: "#a1a1aa", margin: "0 0 8px" }}>
+                      👶 베이비 칸이지만 자녀가 이미 3명입니다. 더 이상의 출산은 불가능하며, 이 턴은 기록만 남습니다.
+                    </p>
+                  )}
+                  {cellType === "BABY" && babies < 3 && (
+                    <p style={{ fontSize: 12, color: "#f9a8d4", margin: "0 0 8px" }}>
+                      👶 아기 탄생! 양육비 ${fmtNum(jobData?.childCost)}/월이 총지출에 추가됩니다. (현재 자녀 {babies}명 → {babies + 1}명)
+                    </p>
+                  )}
                   {cellType === "DOWNSIZED" && <p style={{ fontSize: 12, color: "#fca5a5", margin: "0 0 8px" }}>⬇️ 다운사이즈! 이번 턴에 총지출 ${fmtNum(totalExpense)}을 지불하고, 이후 2턴은 휴식합니다.</p>}
                 </div>
               )}
@@ -1742,7 +2755,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                   <label style={{ fontSize: 11, color: "#71717a", display: "block", marginBottom: 4 }}>딜 타입</label>
                   <div style={{ display: "flex", gap: 8 }}>
                     {[{ k: "deal1", c: "#10b981" }, { k: "deal2", c: "#3b82f6" }].map(d => (
-                      <button key={d.k} onClick={() => { setDealType(d.k); setSelectedCard(null); }} style={{
+                      <button key={d.k} onClick={() => { setDealType(d.k); setSelectedCard(null); setCardCategory(null); setCardSubtype(null); }} style={{
                         flex: 1, padding: "8px", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer",
                         border: dealType === d.k ? `1.5px solid ${d.c}` : "1px solid #27272a",
                         background: dealType === d.k ? d.c + "20" : "#18181b",
@@ -1753,8 +2766,179 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                 </div>
               )}
 
-          {/* 카드 드롭다운 */}
-          {["OPPORTUNITY", "MARKET", "DOODAD"].includes(cellType) && (
+          {/* 카드 선택 — OPPORTUNITY는 드릴다운 3단계 */}
+          {cellType === "OPPORTUNITY" && (
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 11, color: "#71717a", display: "block", marginBottom: 6 }}>카드 선택</label>
+
+              {/* Step 1: 카테고리 */}
+              {!cardCategory && (
+                <div>
+                  <div style={{ fontSize: 10, color: "#52525b", marginBottom: 6 }}>1단계 · 어떤 종류의 카드인가요?</div>
+                  <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(cardCategoriesWithCounts.length, 4)}, 1fr)`, gap: 6 }}>
+                    {cardCategoriesWithCounts.map(({ key, count }) => {
+                      const emoji = key === "주식" ? "📈" : key === "부동산" ? "🏠" : key === "사업" ? "💼" : "❓";
+                      const color = key === "주식" ? "#10b981" : key === "부동산" ? "#3b82f6" : key === "사업" ? "#f59e0b" : "#71717a";
+                      return (
+                        <button key={key} onClick={() => { setCardCategory(key); setCardSubtype(null); setSelectedCard(null); }} style={{
+                          padding: "14px 8px", borderRadius: 10, border: "1px solid " + color + "40",
+                          background: color + "10", color: color, cursor: "pointer",
+                          fontSize: 13, fontWeight: 700, textAlign: "center",
+                        }}>
+                          <div style={{ fontSize: 20, marginBottom: 4 }}>{emoji}</div>
+                          {key}
+                          <div style={{ fontSize: 10, color: "#71717a", marginTop: 2, fontWeight: 500 }}>({count}장)</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Step 2: 서브타입 */}
+              {cardCategory && !cardSubtype && (
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                    <button onClick={() => { setCardCategory(null); setCardSubtype(null); setSelectedCard(null); }} style={{
+                      padding: "3px 8px", borderRadius: 4, border: "1px solid #27272a",
+                      background: "#18181b", color: "#71717a", cursor: "pointer", fontSize: 10,
+                    }}>← 뒤로</button>
+                    <span style={{ fontSize: 10, color: "#52525b" }}>2단계 · {cardCategory} 중 어떤 것?</span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6 }}>
+                    {cardSubtypesWithCounts.map(({ key, count }) => (
+                      <button key={key} onClick={() => { setCardSubtype(key); setSelectedCard(null); }} style={{
+                        padding: "10px", borderRadius: 8, border: "1px solid #27272a",
+                        background: "#18181b", color: "#e4e4e7", cursor: "pointer",
+                        fontSize: 12, fontWeight: 600, textAlign: "left",
+                      }}>
+                        {key} <span style={{ fontSize: 10, color: "#71717a", fontWeight: 500 }}>({count}장)</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Step 3: 실제 카드 선택 */}
+              {cardCategory && cardSubtype && (
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+                    <button onClick={() => { setCardSubtype(null); setSelectedCard(null); }} style={{
+                      padding: "3px 8px", borderRadius: 4, border: "1px solid #27272a",
+                      background: "#18181b", color: "#71717a", cursor: "pointer", fontSize: 10,
+                    }}>← 뒤로</button>
+                    <span style={{ fontSize: 10, color: "#52525b" }}>3단계 ·</span>
+                    <span style={{ fontSize: 11, color: "#e4e4e7", fontWeight: 600 }}>{cardCategory} / {cardSubtype}</span>
+                    <span style={{ fontSize: 10, color: "#71717a" }}>({filteredCards.length}장)</span>
+                  </div>
+                  <select
+                    value={selectedCard ? cardList.indexOf(selectedCard) : ""}
+                    onChange={e => { const idx = parseInt(e.target.value); const c = idx >= 0 ? cardList[idx] : null; setSelectedCard(c); setShares(""); setCardSelectedAt(idx >= 0 ? Date.now() : null); setSellPriceInput(c ? parseNum(c.price) : 0); setAction(c && isSplitCard(c) ? "split" : null); }}
+                    style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #27272a", background: "#18181b", color: "#e4e4e7", fontSize: 13, outline: "none", appearance: "auto" }}
+                  >
+                    <option value="">카드를 선택하세요</option>
+                    {filteredCards.map((c) => {
+                      const origIdx = cardList.indexOf(c);
+                      return (
+                        <option key={origIdx} value={origIdx}>
+                          {buildCardOptionLabel(c, 35)}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* MARKET 카드 — 드릴다운 3단계 */}
+          {cellType === "MARKET" && (
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 11, color: "#71717a", display: "block", marginBottom: 6 }}>카드 선택</label>
+
+              {/* Step 1: 카테고리 */}
+              {!marketCategory && (
+                <div>
+                  <div style={{ fontSize: 10, color: "#52525b", marginBottom: 6 }}>1단계 · 어떤 카드인가요?</div>
+                  <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(marketCategoriesWithCounts.length, 3)}, 1fr)`, gap: 6 }}>
+                    {marketCategoriesWithCounts.map(({ key, count }) => {
+                      const emoji = key === "부동산" ? "🏠" : key === "사업" ? "💼" : "⚠️";
+                      const color = key === "부동산" ? "#3b82f6" : key === "사업" ? "#f59e0b" : "#ef4444";
+                      const label = key === "이벤트" ? "이벤트/특수" : `${key} 제안`;
+                      return (
+                        <button key={key} onClick={() => { setMarketCategory(key); setMarketSubtype(null); setSelectedCard(null); }} style={{
+                          padding: "14px 8px", borderRadius: 10, border: "1px solid " + color + "40",
+                          background: color + "10", color: color, cursor: "pointer",
+                          fontSize: 13, fontWeight: 700, textAlign: "center",
+                        }}>
+                          <div style={{ fontSize: 20, marginBottom: 4 }}>{emoji}</div>
+                          {label}
+                          <div style={{ fontSize: 10, color: "#71717a", marginTop: 2, fontWeight: 500 }}>({count}장)</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Step 2: 서브타입 */}
+              {marketCategory && !marketSubtype && (
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                    <button onClick={() => { setMarketCategory(null); setMarketSubtype(null); setSelectedCard(null); }} style={{
+                      padding: "3px 8px", borderRadius: 4, border: "1px solid #27272a",
+                      background: "#18181b", color: "#71717a", cursor: "pointer", fontSize: 10,
+                    }}>← 뒤로</button>
+                    <span style={{ fontSize: 10, color: "#52525b" }}>2단계 · {marketCategory} 종류</span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6 }}>
+                    {marketSubtypesWithCounts.map(({ key, count }) => (
+                      <button key={key} onClick={() => { setMarketSubtype(key); setSelectedCard(null); }} style={{
+                        padding: "10px", borderRadius: 8, border: "1px solid #27272a",
+                        background: "#18181b", color: "#e4e4e7", cursor: "pointer",
+                        fontSize: 12, fontWeight: 600, textAlign: "left",
+                      }}>
+                        {key} <span style={{ fontSize: 10, color: "#71717a", fontWeight: 500 }}>({count}장)</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Step 3: 카드 선택 */}
+              {marketCategory && marketSubtype && (
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+                    <button onClick={() => { setMarketSubtype(null); setSelectedCard(null); }} style={{
+                      padding: "3px 8px", borderRadius: 4, border: "1px solid #27272a",
+                      background: "#18181b", color: "#71717a", cursor: "pointer", fontSize: 10,
+                    }}>← 뒤로</button>
+                    <span style={{ fontSize: 10, color: "#52525b" }}>3단계 ·</span>
+                    <span style={{ fontSize: 11, color: "#e4e4e7", fontWeight: 600 }}>{marketCategory} / {marketSubtype}</span>
+                    <span style={{ fontSize: 10, color: "#71717a" }}>({filteredMarketCards.length}장)</span>
+                  </div>
+                  <select
+                    value={selectedCard ? cardList.indexOf(selectedCard) : ""}
+                    onChange={e => { const idx = parseInt(e.target.value); const c = idx >= 0 ? cardList[idx] : null; setSelectedCard(c); setShares(""); setCardSelectedAt(idx >= 0 ? Date.now() : null); setSellPriceInput(c ? parseNum(c.price) : 0); setAction(c && isSplitCard(c) ? "split" : null); }}
+                    style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #27272a", background: "#18181b", color: "#e4e4e7", fontSize: 13, outline: "none", appearance: "auto" }}
+                  >
+                    <option value="">카드를 선택하세요</option>
+                    {filteredMarketCards.map((c) => {
+                      const origIdx = cardList.indexOf(c);
+                      return (
+                        <option key={origIdx} value={origIdx}>
+                          {buildCardOptionLabel(c, 40)}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* DOODAD 카드 — 기존 드롭다운 유지 (43장, 단순 구조) */}
+          {cellType === "DOODAD" && (
             <div style={{ marginBottom: 12 }}>
               <label style={{ fontSize: 11, color: "#71717a", display: "block", marginBottom: 4 }}>카드 선택</label>
               <select
@@ -1765,7 +2949,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                 <option value="">카드를 선택하세요</option>
                 {cardList.map((c, i) => (
                   <option key={i} value={i}>
-                    {c.sub || ""} {c.price || ""} {c.cf ? `CF:${c.cf}` : ""} {c.roi ? `ROI:${c.roi}` : ""} {c.amount || ""} {c.sell ? `매각:${c.sell}` : ""} {c.special ? `[${c.special}]` : ""} — {(c.desc || "").substring(0, 40)}
+                    {buildCardOptionLabel(c, 40)}
                   </option>
                 ))}
               </select>
@@ -1792,11 +2976,11 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
               {isOppCard && !isStockCard && (cardPrice > 0 || cardDown > 0 || cardCF !== 0) && (
                 <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #27272a" }}>
                   {[
-                    cardPrice > 0 && { label: "가격", value: `$${fmtNum(cardPrice)}`, color: "#fafafa", bg: "#ffffff08" },
-                    cardDown > 0 && { label: "착수금", value: `$${fmtNum(cardDown)}`, color: "#fde68a", bg: "#f59e0b08" },
-                    cardLoan > 0 && { label: "은행대출", value: `$${fmtNum(cardLoan)}`, color: "#fca5a5", bg: "#ef444408" },
-                    cardCF !== 0 && { label: "월 현금흐름", value: `${cardCF >= 0 ? "+" : ""}$${fmtNum(cardCF)}`, color: cardCF >= 0 ? "#86efac" : "#fca5a5", bg: cardCF >= 0 ? "#22c55e08" : "#ef444408" },
-                    selectedCard.roi && { label: "ROI", value: selectedCard.roi, color: "#93c5fd", bg: "#3b82f608" },
+                    cardPrice > 0 && { label: "💰 총 가격", value: `$${fmtNum(cardPrice)}`, color: "#fafafa", bg: "#ffffff08" },
+                    cardLoan > 0 && { label: "🏦 은행 대출", value: `$${fmtNum(cardLoan)}`, color: "#fca5a5", bg: "#ef444408" },
+                    cardDown > 0 && { label: "💵 착수금", value: `$${fmtNum(cardDown)}`, color: "#fde68a", bg: "#f59e0b08" },
+                    cardCF !== 0 && { label: "📊 월 현금흐름", value: `${cardCF >= 0 ? "+" : ""}$${fmtNum(cardCF)}`, color: cardCF >= 0 ? "#86efac" : "#fca5a5", bg: cardCF >= 0 ? "#22c55e08" : "#ef444408" },
+                    selectedCard.roi && { label: "📈 ROI", value: selectedCard.roi, color: "#93c5fd", bg: "#3b82f608" },
                   ].filter(Boolean).map((row, i) => (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", background: row.bg, borderBottom: "1px solid #27272a20" }}>
                       <span style={{ fontSize: 11, color: "#71717a" }}>{row.label}</span>
@@ -1960,12 +3144,17 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                     <BankLoanUI
                       shortage={buyCost - cash}
                       bankLoan={bankLoan}
-                      monthlyCF={jobData ? jobData.cashflow + totalCF : 0}
+                      monthlyCF={jobData ? jobData.cashflow + totalCF - childTotal : 0}
                       currentInterest={loanInterest}
                       onLoan={(amount) => {
-                        setBankLoan(prev => prev + amount);
-                        setLoanInterest(prev => prev + Math.round(amount * 0.1));
-                        setCash(prev => prev + amount);
+                        const loanEntry = createExtraLoanTurn({
+                          turn: currentTurn,
+                          loanAction: "borrow",
+                          loanAmount: amount,
+                          time: timerOn ? elapsed : null,
+                        });
+                        loanEntry.transaction = `은행 대출 +$${fmtNum(amount)} (이자 월 +$${fmtNum(Math.round(amount * 0.1))})`;
+                        setTurnLog(prev => [...prev, loanEntry]);
                       }}
                     />
                   )}
@@ -2000,18 +3189,44 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
             );
           })()}
 
-          {cellType === "MARKET" && selectedCard && (
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              {[{ k: "sell", label: "판매", c: "#f59e0b" }, { k: "hold", label: "홀딩", c: "#3b82f6" }, { k: "na", label: "해당없음", c: "#52525b" }].map(a => (
-                <button key={a.k} onClick={() => setAction(a.k)} style={{
-                  flex: 1, padding: "10px", borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: "pointer",
-                  border: action === a.k ? `2px solid ${a.c}` : "1px solid #27272a",
-                  background: action === a.k ? a.c + "20" : "#18181b",
-                  color: action === a.k ? (a.k === "na" ? "#a1a1aa" : a.c) : "#71717a",
-                }}>{a.label}</button>
-              ))}
-            </div>
-          )}
+          {cellType === "MARKET" && selectedCard && (() => {
+            const isDamageCard = RE_DAMAGE.test((selectedCard.desc || "") + (selectedCard.special || ""));
+            // 손상 카드 전용 단가 및 총 피해액 미리보기
+            const perUnitMatch = (selectedCard.special || selectedCard.desc || "").match(/\$?([0-9,]+)/);
+            const perUnit = perUnitMatch ? parseInt(perUnitMatch[1].replace(/,/g, "")) || 0 : 0;
+            const realEstateAssets_ = assets.filter(a => a.type === "부동산");
+            const totalUnits = realEstateAssets_.reduce((sum, a) => sum + getAssetUnits(a), 0);
+            const damageTotal = perUnit * totalUnits;
+            const actions = isDamageCard
+              ? [{ k: "damage", label: totalUnits > 0 ? `손상 지불 ($${fmtNum(damageTotal)})` : "해당 자산 없음 — 건너뛰기", c: "#ef4444" }]
+              : [{ k: "sell", label: "판매", c: "#f59e0b" }, { k: "hold", label: "홀딩", c: "#3b82f6" }, { k: "na", label: "해당없음", c: "#52525b" }];
+            return (
+              <>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  {actions.map(a => (
+                    <button key={a.k} onClick={() => setAction(a.k)} style={{
+                      flex: 1, padding: "10px", borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: "pointer",
+                      border: action === a.k ? `2px solid ${a.c}` : "1px solid #27272a",
+                      background: action === a.k ? a.c + "20" : "#18181b",
+                      color: action === a.k ? (a.k === "na" ? "#a1a1aa" : a.c) : "#71717a",
+                    }}>{a.label}</button>
+                  ))}
+                </div>
+                {isDamageCard && (
+                  <div style={{ padding: "8px 12px", borderRadius: 8, background: "#7f1d1d15", border: "1px solid #ef444430", marginBottom: 12 }}>
+                    <p style={{ fontSize: 11, color: "#fca5a5", margin: 0, fontWeight: 600 }}>
+                      📋 보유 부동산 {realEstateAssets_.length}개 / 총 {totalUnits}채 × ${fmtNum(perUnit)} = <span style={{ color: "#ef4444", fontWeight: 800 }}>-${fmtNum(damageTotal)}</span>
+                    </p>
+                    {realEstateAssets_.length > 0 && (
+                      <p style={{ fontSize: 9, color: "#71717a", margin: "4px 0 0" }}>
+                        {realEstateAssets_.map(a => `${a.name}(${getAssetUnits(a)}채)`).join(" · ")}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </>
+            );
+          })()}
 
           {/* 판매 불가 경고 */}
           {cellType === "MARKET" && action === "sell" && !sellCheck.eligible && (
@@ -2062,6 +3277,37 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
             ))}
           </div>
 
+          {/* 📣 타인 카드 대응 — 자산 탭 상단 빠른 접근 */}
+          <div style={{ padding: "10px 12px", borderRadius: 12, background: "#0a0a0f", border: "1px dashed #3f3f46", marginBottom: 10 }}>
+            <div style={{ fontSize: 10, color: "#a1a1aa", marginBottom: 6, fontWeight: 600 }}>📣 다른 플레이어 카드 대응 (내 턴 아닐 때도 즉시 반영)</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+              <button
+                onClick={() => {
+                  setDealerToolsOpen(true);
+                  setExtraTool("split");
+                  setTimeout(() => dealerToolsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+                }}
+                style={{ padding: "8px", borderRadius: 8, border: "1px solid #a78bfa40", background: "#a78bfa10", color: "#c4b5fd", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+              >📈 증자/감자</button>
+              <button
+                onClick={() => {
+                  setDealerToolsOpen(true);
+                  setExtraTool("wipe");
+                  setTimeout(() => dealerToolsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+                }}
+                style={{ padding: "8px", borderRadius: 8, border: "1px solid #ef444440", background: "#ef444410", color: "#fca5a5", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+              >📉 상장폐지</button>
+              <button
+                onClick={() => {
+                  setDealerToolsOpen(true);
+                  setExtraTool("buy");
+                  setTimeout(() => dealerToolsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+                }}
+                style={{ padding: "8px", borderRadius: 8, border: "1px solid #8b5cf640", background: "#8b5cf610", color: "#c4b5fd", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+              >💼 권리금 인수</button>
+            </div>
+          </div>
+
           {/* 부동산 */}
           {realEstateAssets.length > 0 && (
             <div style={{ padding: "14px 16px", borderRadius: 14, background: "#111118", border: "1px solid #27272a", marginBottom: 10 }}>
@@ -2096,12 +3342,22 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                     const asset = realEstateAssets[idx];
                     if (!asset || sellPrice <= 0) return;
                     const net = Math.max(0, sellPrice - (asset.loan || 0));
-                    const targetId = asset.id;
-                    setCash(prev => prev + net);
-                    setTotalCF(prev => prev - asset.cf);
-                    // ID 기반 제거 — 중복 차감/누락 방지
-                    setAssets(prev => prev.filter(a => a.id !== targetId));
-                    setTurnLog(prev => [...prev, { turn: currentTurn, cellType: "EXT_SELL", boardPos: 0, dice: 0, passedPaydays: 0, dealType: "타인MARKET", card: { sub: asset.name, desc: `타인 마켓카드로 ${asset.name} 매도` }, action: "sell", shares: null, assetType: asset.type || "부동산", time: timerOn ? elapsed : null, decisionSec: null, cashSnapshot: cash + net, transaction: `${asset.name} 매도 $${fmtNum(sellPrice)} - 대출 $${fmtNum((asset.loan||0))} = +$${fmtNum(net)}` }]);
+                    const extSellEntry = {
+                      turn: currentTurn, cellType: "EXT_SELL",
+                      boardPos: 0, dice: 0, passedPaydays: 0,
+                      dealType: "타인MARKET",
+                      card: { sub: asset.name, desc: `타인 마켓카드로 ${asset.name} 매도` },
+                      action: "sell", shares: null,
+                      assetType: asset.type || "부동산",
+                      time: timerOn ? elapsed : null, decisionSec: null,
+                      _schemaVersion: SCHEMA_VERSION,
+                      _sellAssetId: asset.id,
+                      _sellPrice: sellPrice,
+                      _assetCF: asset.cf,
+                      _assetLoan: asset.loan || 0,
+                      transaction: `${asset.name} 매도 $${fmtNum(sellPrice)} - 대출 $${fmtNum((asset.loan||0))} = +$${fmtNum(net)}`,
+                    };
+                    setTurnLog(prev => [...prev, extSellEntry]);
                     setReSellPrice(""); setReSellIdx(0);
                   }} style={{ padding: "6px 10px", borderRadius: 6, border: "none", background: "#f59e0b", color: "#000", fontSize: 10, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>매도</button>
                 </div>
@@ -2112,7 +3368,29 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
           {/* 주식 */}
           {stockAssets.length > 0 && (
             <div style={{ padding: "14px 16px", borderRadius: 14, background: "#111118", border: "1px solid #27272a", marginBottom: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#10b981", marginBottom: 8 }}>📈 주식 ({totalStockShares}주)</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#10b981" }}>📈 주식 ({totalStockShares}주)</div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <button
+                    onClick={() => {
+                      setDealerToolsOpen(true);
+                      setExtraTool("split");
+                      setTimeout(() => dealerToolsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+                    }}
+                    title="타인 카드의 무상증자/감자를 내 보유 주식에 적용"
+                    style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #a78bfa40", background: "#a78bfa10", color: "#c4b5fd", fontSize: 10, fontWeight: 700, cursor: "pointer" }}
+                  >📈 증자/감자</button>
+                  <button
+                    onClick={() => {
+                      setDealerToolsOpen(true);
+                      setExtraTool("wipe");
+                      setTimeout(() => dealerToolsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+                    }}
+                    title="전 주식 상장폐지 ($0 처리)"
+                    style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #ef444440", background: "#ef444410", color: "#fca5a5", fontSize: 10, fontWeight: 700, cursor: "pointer" }}
+                  >📉 상장폐지</button>
+                </div>
+              </div>
               {stockAssets.map((a, i) => {
                 const buyPrice = parseNum(a.price);
                 return (
@@ -2161,22 +3439,15 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                       const sellQty = Math.min(a.shares, Math.max(1, parseInt(qtyRaw) || a.shares));
                       const sellPrice = Math.max(1, parseInt(priceRaw) || 0);
                       const sellTotal = sellPrice * sellQty;
-                      const targetId = a.id;
-                      setCash(prev => prev + sellTotal);
-                      // ID 기반 주식 수량 감소/제거 (참조 동등성 의존 제거)
-                      setAssets(prev => prev.flatMap(x => {
-                        if (x.id !== targetId) return [x];
-                        if (x.shares <= sellQty) return []; // 전량 매각
-                        return [{ ...x, shares: x.shares - sellQty }];
-                      }));
-                      setTurnLog(prev => [...prev, {
-                        turn: currentTurn, cellType: "STOCK_SELL", dealType: "STOCK_SELL",
-                        card: { sub: a.name, price: `$${sellPrice}`, desc: `${a.name} ${sellQty}주 매각 @$${sellPrice}` },
-                        action: "sell", shares: sellQty, assetType: "주식",
-                        time: timerOn ? elapsed : null, decisionSec: null,
-                        transaction: `${a.name} ${sellQty}주 매각 @$${sellPrice} = +$${fmtNum(sellTotal)}`,
-                        cashSnapshot: cash + sellTotal,
-                      }]);
+                      const stockSellEntry = createStockSellTurn({
+                        turn: currentTurn,
+                        assetId: a.id,
+                        stockName: a.name,
+                        sellQty, sellPrice,
+                        time: timerOn ? elapsed : null,
+                      });
+                      stockSellEntry.transaction = `${a.name} ${sellQty}주 매각 @$${sellPrice} = +$${fmtNum(sellTotal)}`;
+                      setTurnLog(prev => [...prev, stockSellEntry]);
                       setStockSellQty(prev => { const c = { ...prev }; delete c[i]; return c; });
                       setStockSellPrice(prev => { const c = { ...prev }; delete c[i]; return c; });
                     }} style={{
@@ -2239,46 +3510,648 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
             </div>
           )}
 
-          {/* 은행 대출 현황 & 상환 (언제든 가능) */}
-          {bankLoan > 0 && (
-            <div style={{ padding: "14px 16px", borderRadius: 14, background: "#7f1d1d10", border: "1px solid #ef444430", marginTop: 10 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: "#fca5a5" }}>🏦 은행 대출</span>
-                <span style={{ fontSize: 9, color: "#71717a" }}>내 턴이 아니어도 상환 가능</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                <span style={{ fontSize: 11, color: "#a1a1aa" }}>대출 잔액</span>
-                <span style={{ fontSize: 13, fontWeight: 800, color: "#ef4444" }}>${fmtNum(bankLoan)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                <span style={{ fontSize: 11, color: "#a1a1aa" }}>월 이자 (10%)</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#fca5a5" }}>-${fmtNum(loanInterest)}/월</span>
-              </div>
-              {cash >= 1000 && (
-                <div>
-                  <div style={{ fontSize: 10, color: "#71717a", marginBottom: 6 }}>$1,000 단위 상환 (보유 ${fmtNum(cash)})</div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    {[1000, Math.min(5000, bankLoan), bankLoan].filter((v, i, a) => v <= cash && v <= bankLoan && a.indexOf(v) === i).map(amt => (
-                      <button key={amt} onClick={() => {
-                        setCash(prev => prev - amt);
-                        setBankLoan(prev => prev - amt);
-                        setLoanInterest(Math.round((bankLoan - amt) * 0.1));
-                        setTurnLog(prev => [...prev, { turn: currentTurn, cellType: "PAYDAY", boardPos: 0, dice: 0, passedPaydays: 0, dealType: "대출상환", card: null, action: null, shares: null, time: timerOn ? elapsed : null, decisionSec: null, cashSnapshot: cash - amt, transaction: `은행 대출 $${fmtNum(amt)} 상환 (잔액 $${fmtNum((bankLoan - amt))})` }]);
-                      }} style={{
-                        flex: 1, padding: "8px", borderRadius: 8, border: "1px solid #22c55e30",
-                        background: "#22c55e10", color: "#86efac", fontSize: 11, fontWeight: 700, cursor: "pointer",
-                      }}>
-                        ${fmtNum(amt)}
-                      </button>
-                    ))}
-                  </div>
+          {/* 은행 대출 섹션 — 항상 표시. 직업 카드 초기 대출 + 신용 대출 통합 관리. */}
+          {(() => {
+            // 신용 대출 한도: 월별 현금흐름의 10배까지 (현재 이자 감안해서 남은 여유 CF 기준)
+            const monthlyCFNow = jobData ? jobData.cashflow + totalCF - childTotal - loanInterest : 0;
+            const maxCreditLoan = Math.max(0, Math.floor((monthlyCFNow * 10) / 1000) * 1000);
+            // 대출 가능 여부: 월CF > 0 + 한도 >= 1000
+            const canBorrow = monthlyCFNow > 0 && maxCreditLoan >= 1000;
+            return (
+              <div style={{ padding: "14px 16px", borderRadius: 14, background: "#7f1d1d10", border: "1px solid #ef444430", marginTop: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#fca5a5" }}>🏦 은행 대출</span>
+                  <span style={{ fontSize: 9, color: "#71717a" }}>내 턴이 아니어도 사용 가능</span>
                 </div>
-              )}
-              {cash < 1000 && (
-                <p style={{ fontSize: 10, color: "#71717a", margin: 0 }}>현금 $1,000 이상 보유 시 상환 가능</p>
-              )}
-            </div>
-          )}
+
+                {/* 직업 카드 부채 목록 — 각 부채 전액 상환 버튼 */}
+                {jobData?.liabilities && (() => {
+                  const DEBT_META = [
+                    { key: "homeMortgage", label: "주택담보대출", icon: "🏠" },
+                    { key: "schoolLoan",   label: "학자금 대출",   icon: "🎓" },
+                    { key: "carLoan",      label: "자동차 할부",   icon: "🚗" },
+                    { key: "creditCard",   label: "신용카드 할부", icon: "💳" },
+                  ];
+                  // 상환된 부채 타입 Set
+                  const repaidSet = new Set(gameState._repaidDebts || []);
+                  const activeDebts = DEBT_META.filter(({ key }) => {
+                    const d = jobData.liabilities[key];
+                    return d && d.principal > 0;
+                  });
+                  if (activeDebts.length === 0) return null;
+                  return (
+                    <div style={{ padding: "10px 12px", borderRadius: 8, background: "#0a0a0f", marginBottom: 8 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#c4b5fd", marginBottom: 6 }}>📋 직업 카드 부채 (전액 상환)</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {activeDebts.map(({ key, label, icon }) => {
+                          const d = jobData.liabilities[key];
+                          const isRepaid = repaidSet.has(key);
+                          const canAfford = cash >= d.principal;
+                          return (
+                            <div key={key} style={{
+                              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+                              padding: "6px 8px", borderRadius: 6,
+                              background: isRepaid ? "#14532d15" : "#18181b",
+                              border: `1px solid ${isRepaid ? "#22c55e40" : "#27272a"}`,
+                              opacity: isRepaid ? 0.7 : 1,
+                            }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 11, color: isRepaid ? "#86efac" : "#e4e4e7", fontWeight: 600 }}>
+                                  {icon} {label} {isRepaid && "✅"}
+                                </div>
+                                <div style={{ fontSize: 9, color: "#71717a" }}>
+                                  원금 ${fmtNum(d.principal)} · 월 -${fmtNum(d.payment)}
+                                </div>
+                              </div>
+                              {isRepaid ? (
+                                <span style={{ fontSize: 10, fontWeight: 700, color: "#86efac" }}>상환 완료</span>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    if (!canAfford) {
+                                      alert(`현금 부족\n\n필요: $${fmtNum(d.principal)}\n보유: $${fmtNum(cash)}`);
+                                      return;
+                                    }
+                                    if (!window.confirm(`${label} 전액 상환\n\n현금 -$${fmtNum(d.principal)}\n월 지출 -$${fmtNum(d.payment)} (현금흐름 +$${fmtNum(d.payment)})\n\n상환하시겠습니까?`)) return;
+                                    const entry = createDebtRepayTurn({
+                                      turn: currentTurn,
+                                      debtType: key,
+                                      debtLabel: label,
+                                      principal: d.principal,
+                                      payment: d.payment,
+                                      time: timerOn ? elapsed : null,
+                                    });
+                                    setTurnLog(prev => [...prev, entry]);
+                                  }}
+                                  disabled={!canAfford}
+                                  style={{
+                                    padding: "5px 10px", borderRadius: 6, border: "none",
+                                    cursor: canAfford ? "pointer" : "not-allowed",
+                                    background: canAfford ? "#22c55e" : "#27272a",
+                                    color: canAfford ? "#000" : "#52525b",
+                                    fontSize: 10, fontWeight: 800, whiteSpace: "nowrap",
+                                  }}
+                                >💵 상환</button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 잔액 & 이자 표시 */}
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                  <span style={{ fontSize: 11, color: "#a1a1aa" }}>신용 대출 잔액</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: bankLoan > 0 ? "#ef4444" : "#52525b" }}>${fmtNum(bankLoan)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                  <span style={{ fontSize: 11, color: "#a1a1aa" }}>월 이자 (10%)</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: loanInterest > 0 ? "#fca5a5" : "#52525b" }}>-${fmtNum(loanInterest)}/월</span>
+                </div>
+
+                {/* 신용 대출 받기 (상시 가능) */}
+                <div style={{ padding: "10px 12px", borderRadius: 8, background: "#0a0a0f", marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#fde68a", marginBottom: 4 }}>💰 신용 대출 받기 ($1,000 단위)</div>
+                  <div style={{ fontSize: 9, color: "#71717a", marginBottom: 8 }}>
+                    월별 현금흐름의 10배까지 가능 · 현재 한도 <span style={{ color: "#fde68a", fontWeight: 700 }}>${fmtNum(maxCreditLoan)}</span>
+                  </div>
+                  {canBorrow ? (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {[1000, 5000, 10000, maxCreditLoan].filter((v, i, a) => v >= 1000 && v <= maxCreditLoan && a.indexOf(v) === i).map(amt => (
+                        <button key={amt} onClick={() => {
+                          if (amt > maxCreditLoan || amt < 1000) {
+                            alert("대출 불가: 월별 현금흐름이 부족합니다.");
+                            return;
+                          }
+                          const loanEntry = createExtraLoanTurn({
+                            turn: currentTurn,
+                            loanAction: "borrow",
+                            loanAmount: amt,
+                            time: timerOn ? elapsed : null,
+                          });
+                          loanEntry.transaction = `은행 대출 +$${fmtNum(amt)} (월 이자 +$${fmtNum(Math.round(amt * 0.1))})`;
+                          setTurnLog(prev => [...prev, loanEntry]);
+                        }} style={{
+                          flex: "1 1 60px", padding: "8px", borderRadius: 8, border: "1px solid #f59e0b40",
+                          background: "#f59e0b15", color: "#fde68a", fontSize: 11, fontWeight: 700, cursor: "pointer",
+                        }}>
+                          +${fmtNum(amt)}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p style={{ fontSize: 10, color: "#71717a", margin: 0 }}>
+                      ⚠️ 월별 현금흐름이 부족하여 신규 대출 불가 (현금흐름 ${fmtNum(monthlyCFNow)} × 10 = ${fmtNum(maxCreditLoan)})
+                    </p>
+                  )}
+                </div>
+
+                {/* 대출 상환 (잔액 있을 때만) */}
+                {bankLoan > 0 && (
+                  <div style={{ padding: "10px 12px", borderRadius: 8, background: "#0a0a0f" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#86efac", marginBottom: 4 }}>💵 대출 상환 ($1,000 단위)</div>
+                    <div style={{ fontSize: 9, color: "#71717a", marginBottom: 8 }}>
+                      현재 보유 현금 <span style={{ color: "#86efac", fontWeight: 700 }}>${fmtNum(cash)}</span>
+                    </div>
+                    {cash >= 1000 ? (
+                      <div style={{ display: "flex", gap: 6 }}>
+                        {[1000, Math.min(5000, bankLoan), bankLoan].filter((v, i, a) => v <= cash && v <= bankLoan && a.indexOf(v) === i).map(amt => (
+                          <button key={amt} onClick={() => {
+                            const repayEntry = createExtraLoanTurn({
+                              turn: currentTurn,
+                              loanAction: "repay",
+                              loanAmount: amt,
+                              time: timerOn ? elapsed : null,
+                            });
+                            repayEntry.transaction = `은행 대출 $${fmtNum(amt)} 상환 (잔액 $${fmtNum((bankLoan - amt))})`;
+                            setTurnLog(prev => [...prev, repayEntry]);
+                          }} style={{
+                            flex: 1, padding: "8px", borderRadius: 8, border: "1px solid #22c55e30",
+                            background: "#22c55e10", color: "#86efac", fontSize: 11, fontWeight: 700, cursor: "pointer",
+                          }}>
+                            -${fmtNum(amt)}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p style={{ fontSize: 10, color: "#71717a", margin: 0 }}>현금 $1,000 이상 보유 시 상환 가능</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* ═══ 딜러 도구 (2차 작업) ═══ */}
+          <div ref={dealerToolsRef} style={{ marginTop: 10, padding: "12px 14px", borderRadius: 14, background: "#18181b", border: "1px solid #27272a" }}>
+            <button
+              onClick={() => setDealerToolsOpen(v => !v)}
+              style={{
+                width: "100%", background: "transparent", border: "none",
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: 0, cursor: "pointer", color: "#e4e4e7",
+              }}
+            >
+              <span style={{ fontSize: 12, fontWeight: 700 }}>🔧 딜러 도구 (타인카드·보정)</span>
+              <span style={{ fontSize: 10, color: "#71717a" }}>{dealerToolsOpen ? "▼ 접기" : "▶ 펼치기"}</span>
+            </button>
+            {dealerToolsOpen && (
+              <div style={{ marginTop: 10 }}>
+                {/* 4개 기능 탭 */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 4, marginBottom: 10 }}>
+                  {[
+                    { key: "split", label: "증자/감자", icon: "📈" },
+                    { key: "wipe", label: "상장폐지", icon: "📉" },
+                    { key: "buy", label: "권리금 인수", icon: "💼" },
+                    { key: "cash", label: "현금 보정", icon: "💵" },
+                  ].map(tool => (
+                    <button
+                      key={tool.key}
+                      onClick={() => setExtraTool(extraTool === tool.key ? null : tool.key)}
+                      style={{
+                        padding: "8px 4px", borderRadius: 8, border: "1px solid " + (extraTool === tool.key ? "#8b5cf6" : "#27272a"),
+                        background: extraTool === tool.key ? "#8b5cf620" : "#0a0a0f",
+                        color: extraTool === tool.key ? "#c4b5fd" : "#a1a1aa",
+                        fontSize: 10, fontWeight: 600, cursor: "pointer", lineHeight: 1.3,
+                      }}
+                    >
+                      <div style={{ fontSize: 14, marginBottom: 2 }}>{tool.icon}</div>
+                      {tool.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* ── ④ 증자/감자 폼 ── */}
+                {extraTool === "split" && (
+                  <div style={{ padding: 10, borderRadius: 8, background: "#0a0a0f", border: "1px dashed #3f3f46" }}>
+                    <p style={{ fontSize: 10, color: "#a1a1aa", margin: "0 0 8px 0", lineHeight: 1.5 }}>
+                      다른 사람이 뽑은 기회카드의 증자/감자를 내 보유 주식에 적용합니다.
+                    </p>
+                    <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                      <select
+                        value={extraSplitName}
+                        onChange={e => setExtraSplitName(e.target.value)}
+                        style={{ flex: 1, padding: "6px 8px", borderRadius: 6, border: "1px solid #27272a", background: "#18181b", color: "#e4e4e7", fontSize: 11, outline: "none" }}
+                      >
+                        <option value="">종목 선택</option>
+                        {stockAssets.map((a, i) => (
+                          <option key={i} value={a.name}>{a.name} ({a.shares}주)</option>
+                        ))}
+                      </select>
+                      <select
+                        value={extraSplitMultiplier}
+                        onChange={e => setExtraSplitMultiplier(e.target.value)}
+                        style={{ width: 100, padding: "6px 8px", borderRadius: 6, border: "1px solid #27272a", background: "#18181b", color: "#e4e4e7", fontSize: 11, outline: "none" }}
+                      >
+                        <option value="2">무상증자 ×2</option>
+                        <option value="0.5">1/2 감자</option>
+                      </select>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (!extraSplitName) { alert("종목을 선택해주세요"); return; }
+                        const mult = parseFloat(extraSplitMultiplier);
+                        const entry = createExtraSplitTurn({
+                          turn: currentTurn,
+                          stockName: extraSplitName,
+                          multiplier: mult,
+                          time: timerOn ? elapsed : null,
+                        });
+                        const owned = assets.filter(a => a.type === "주식" && a.shares > 0 && a.name.includes(extraSplitName));
+                        const totalBefore = owned.reduce((s, a) => s + (a.shares || 0), 0);
+                        const totalAfter = mult >= 1 ? Math.floor(totalBefore * mult) : Math.round(totalBefore * mult);
+                        entry.transaction = `${extraSplitName} ${mult >= 1 ? "무상증자" : "감자"} ${totalBefore}주 → ${totalAfter}주 (타인카드)`;
+                        setTurnLog(prev => [...prev, entry]);
+                        setExtraSplitName(""); setExtraSplitMultiplier("2"); setExtraTool(null);
+                      }}
+                      disabled={!extraSplitName}
+                      style={{
+                        width: "100%", padding: "8px", borderRadius: 8, border: "none", cursor: extraSplitName ? "pointer" : "not-allowed",
+                        background: extraSplitName ? "#8b5cf6" : "#27272a", color: extraSplitName ? "#fff" : "#71717a",
+                        fontSize: 11, fontWeight: 700,
+                      }}
+                    >적용</button>
+                  </div>
+                )}
+
+                {/* ── ⑥ 상장폐지 폼 ── */}
+                {extraTool === "wipe" && (
+                  <div style={{ padding: 10, borderRadius: 8, background: "#0a0a0f", border: "1px dashed #3f3f46" }}>
+                    <p style={{ fontSize: 10, color: "#fca5a5", margin: "0 0 8px 0", lineHeight: 1.5 }}>
+                      ⚠️ 국제금융위기 등으로 보유 중인 <b>모든 주식이 $0 처리</b>됩니다. 부동산·사업은 영향 없음.
+                    </p>
+                    <div style={{ padding: 8, background: "#7f1d1d15", borderRadius: 6, marginBottom: 8 }}>
+                      <span style={{ fontSize: 10, color: "#fca5a5" }}>
+                        현재 보유 주식: {totalStockShares > 0 ? `${stockAssets.length}종목 ${totalStockShares}주 → 전량 제거됨` : "없음"}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (totalStockShares === 0) { alert("보유 주식이 없습니다"); return; }
+                        if (!window.confirm(`보유 중인 모든 주식(${stockAssets.length}종목 ${totalStockShares}주)이 사라집니다.\n\n계속하시겠습니까?`)) return;
+                        const entry = createExtraWipeTurn({
+                          turn: currentTurn,
+                          time: timerOn ? elapsed : null,
+                        });
+                        entry.transaction = `전 주식 상장폐지 — ${stockAssets.length}종목 ${totalStockShares}주 소멸`;
+                        setTurnLog(prev => [...prev, entry]);
+                        setExtraTool(null);
+                      }}
+                      disabled={totalStockShares === 0}
+                      style={{
+                        width: "100%", padding: "8px", borderRadius: 8, border: "none", cursor: totalStockShares > 0 ? "pointer" : "not-allowed",
+                        background: totalStockShares > 0 ? "#ef4444" : "#27272a",
+                        color: totalStockShares > 0 ? "#fff" : "#71717a",
+                        fontSize: 11, fontWeight: 700,
+                      }}
+                    >전 주식 상장폐지 실행</button>
+                  </div>
+                )}
+
+                {/* ── ⑦ 권리금 인수 폼 (드릴다운) ── */}
+                {extraTool === "buy" && (
+                  <div style={{ padding: 10, borderRadius: 8, background: "#0a0a0f", border: "1px dashed #3f3f46" }}>
+                    <p style={{ fontSize: 10, color: "#a1a1aa", margin: "0 0 8px 0", lineHeight: 1.5 }}>
+                      다른 플레이어가 뽑은 스몰딜/빅딜 카드(주식 제외)의 권리를 사서 내 자산으로 추가합니다. 내 턴이 아닐 때도 즉시 반영됩니다.
+                    </p>
+
+                    {/* Step 1 UI (카드 선택 + 권리금 입력) — Step 2에서는 숨김 */}
+                    {extraBuyStep === 1 && (
+                    <>
+                    {/* Step 1: 카테고리 */}
+                    {!extraBuyCategory && (
+                      <div>
+                        <div style={{ fontSize: 10, color: "#52525b", marginBottom: 6 }}>1단계 · 어떤 자산인가요?</div>
+                        <div style={{ display: "grid", gridTemplateColumns: `repeat(${extraBuyCategoriesWithCounts.length}, 1fr)`, gap: 6 }}>
+                          {extraBuyCategoriesWithCounts.map(({ key, count }) => {
+                            const emoji = key === "부동산" ? "🏠" : "💼";
+                            const color = key === "부동산" ? "#3b82f6" : "#f59e0b";
+                            return (
+                              <button key={key} onClick={() => { setExtraBuyCategory(key); setExtraBuySubtype(null); setExtraBuySelectedCard(null); }} style={{
+                                padding: "12px 8px", borderRadius: 8, border: "1px solid " + color + "40",
+                                background: color + "10", color: color, cursor: "pointer",
+                                fontSize: 12, fontWeight: 700, textAlign: "center",
+                              }}>
+                                <div style={{ fontSize: 18, marginBottom: 2 }}>{emoji}</div>
+                                {key}
+                                <div style={{ fontSize: 9, color: "#71717a", marginTop: 2, fontWeight: 500 }}>({count}장)</div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Step 2: 서브타입 */}
+                    {extraBuyCategory && !extraBuySubtype && (
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                          <button onClick={() => { setExtraBuyCategory(null); setExtraBuySubtype(null); setExtraBuySelectedCard(null); }} style={{
+                            padding: "3px 8px", borderRadius: 4, border: "1px solid #27272a",
+                            background: "#18181b", color: "#71717a", cursor: "pointer", fontSize: 10,
+                          }}>← 뒤로</button>
+                          <span style={{ fontSize: 10, color: "#52525b" }}>2단계 · {extraBuyCategory} 종류</span>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6 }}>
+                          {extraBuySubtypesWithCounts.map(({ key, count }) => (
+                            <button key={key} onClick={() => { setExtraBuySubtype(key); setExtraBuySelectedCard(null); }} style={{
+                              padding: "8px 10px", borderRadius: 6, border: "1px solid #27272a",
+                              background: "#18181b", color: "#e4e4e7", cursor: "pointer",
+                              fontSize: 11, fontWeight: 600, textAlign: "left",
+                            }}>
+                              {key} <span style={{ fontSize: 9, color: "#71717a", fontWeight: 500 }}>({count}장)</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Step 3: 실제 카드 선택 */}
+                    {extraBuyCategory && extraBuySubtype && (
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+                          <button onClick={() => { setExtraBuySubtype(null); setExtraBuySelectedCard(null); }} style={{
+                            padding: "3px 8px", borderRadius: 4, border: "1px solid #27272a",
+                            background: "#18181b", color: "#71717a", cursor: "pointer", fontSize: 10,
+                          }}>← 뒤로</button>
+                          <span style={{ fontSize: 10, color: "#52525b" }}>3단계 ·</span>
+                          <span style={{ fontSize: 11, color: "#e4e4e7", fontWeight: 600 }}>{extraBuyCategory} / {extraBuySubtype}</span>
+                          <span style={{ fontSize: 10, color: "#71717a" }}>({extraBuyFilteredCards.length}장)</span>
+                        </div>
+                        <select
+                          value={extraBuySelectedCard ? extraBuyFilteredCards.findIndex(x => x.card === extraBuySelectedCard) : ""}
+                          onChange={e => {
+                            const idx = parseInt(e.target.value);
+                            const entry = idx >= 0 ? extraBuyFilteredCards[idx] : null;
+                            setExtraBuySelectedCard(entry ? entry.card : null);
+                            if (entry) {
+                              // 카드 값으로 입력값 자동 채움
+                              const c = entry.card;
+                              const down = extractDown(c);
+                              const price = parseNum(c.price);
+                              const cf = parseNumNeg(c.cf);
+                              const loan = (price > 0 && down > 0) ? price - down : 0;
+                              setExtraBuyName(c.sub || "");
+                              setExtraBuyCost(String(down || price || 0));
+                              setExtraBuyCF(String(cf));
+                              setExtraBuyLoan(String(loan));
+                              setExtraBuyType(classifyCardCategory(c) === "부동산" ? "부동산" : "사업");
+                            }
+                          }}
+                          style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #27272a", background: "#18181b", color: "#e4e4e7", fontSize: 11, outline: "none", appearance: "auto" }}
+                        >
+                          <option value="">카드를 선택하세요</option>
+                          {extraBuyFilteredCards.map((entry, i) => {
+                            const c = entry.card;
+                            return (
+                              <option key={i} value={i}>
+                                {buildCardOptionLabel(c, 30)}
+                              </option>
+                            );
+                          })}
+                        </select>
+
+                        {/* 선택된 카드 요약 + 권리금 조정 */}
+                        {extraBuySelectedCard && (
+                          <div style={{ marginTop: 8, padding: 8, borderRadius: 6, background: "#1a1a2e" }}>
+                            <p style={{ fontSize: 10, color: "#a1a1aa", margin: "0 0 6px", lineHeight: 1.5 }}>
+                              {extraBuySelectedCard.desc}
+                            </p>
+                            <p style={{ fontSize: 9, color: "#71717a", margin: "0 0 8px" }}>
+                              카드 기본값: 착수금 ${fmtNum(extractDown(extraBuySelectedCard))} / CF {extraBuySelectedCard.cf || "$0"}/월
+                              {(() => {
+                                const price = parseNum(extraBuySelectedCard.price);
+                                const down = extractDown(extraBuySelectedCard);
+                                const loan = (price > 0 && down > 0) ? price - down : 0;
+                                return loan > 0 ? ` / 대출 $${fmtNum(loan)}` : "";
+                              })()}
+                            </p>
+                            <div style={{ fontSize: 10, color: "#c4b5fd", marginBottom: 4, fontWeight: 600 }}>
+                              💰 실제 지불한 권리금(협상가) — 기본값과 다르면 조정
+                            </div>
+                            <input
+                              type="number" min={0} placeholder="권리금 $" value={extraBuyCost}
+                              onChange={e => setExtraBuyCost(e.target.value)}
+                              style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #8b5cf640", background: "#18181b", color: "#fde68a", fontSize: 12, fontWeight: 700, textAlign: "center", outline: "none", boxSizing: "border-box" }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    </>
+                    )}
+
+                    {/* Step 1 제출: 권리금 지불 후 Step 2로 이동 */}
+                    {extraBuyStep === 1 && (
+                      <button
+                        onClick={() => {
+                          const name = extraBuyName.trim();
+                          const deposit = parseInt(extraBuyCost) || 0;
+                          if (!name) { alert("카드를 선택해주세요"); return; }
+                          if (deposit <= 0) { alert("권리금을 입력해주세요"); return; }
+                          if (deposit > cash) { alert(`현금이 부족합니다 (보유 $${fmtNum(cash)} / 필요 $${fmtNum(deposit)})`); return; }
+                          // Step 2로 이동 — 아직 turnLog에 기록 안 함
+                          setExtraBuyDeposit(deposit);
+                          setExtraBuyExtraLoan(0);
+                          setExtraBuyStep(2);
+                        }}
+                        disabled={!extraBuySelectedCard}
+                        style={{
+                          width: "100%", marginTop: 10, padding: "10px", borderRadius: 8, border: "none",
+                          cursor: extraBuySelectedCard ? "pointer" : "not-allowed",
+                          background: extraBuySelectedCard ? "#8b5cf6" : "#27272a",
+                          color: extraBuySelectedCard ? "#fff" : "#71717a",
+                          fontSize: 12, fontWeight: 700,
+                        }}
+                      >{extraBuySelectedCard ? "💰 권리금 지불 → 다음 단계" : "카드를 선택하세요"}</button>
+                    )}
+
+                    {/* Step 2: 구매 / 포기 결정 */}
+                    {extraBuyStep === 2 && extraBuySelectedCard && (() => {
+                      const cardDown = extractDown(extraBuySelectedCard);
+                      const cardPrice = parseNum(extraBuySelectedCard.price);
+                      const cardLoan = (cardPrice > 0 && cardDown > 0) ? cardPrice - cardDown : 0;
+                      // 권리금 지불 반영 후 가용 현금
+                      const cashAfterDeposit = cash - extraBuyDeposit;
+                      // 착수금을 내려면 얼마가 더 필요한가
+                      const shortageAfterDeposit = Math.max(0, cardDown - cashAfterDeposit - extraBuyExtraLoan);
+                      // 추가 대출 한도 (기존 BankLoanUI 한도 계산식과 동일)
+                      const monthlyCFAfter = (jobData ? jobData.cashflow + totalCF - childTotal : 0);
+                      const remainingCF = Math.max(0, monthlyCFAfter - loanInterest - Math.round(extraBuyExtraLoan * 0.1));
+                      const maxExtraLoan = Math.floor(remainingCF / 0.1 / 1000) * 1000;
+                      const canBuy = shortageAfterDeposit === 0;
+                      return (
+                        <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: "#1a1a2e", border: "1px solid #8b5cf650" }}>
+                          <div style={{ fontSize: 11, color: "#c4b5fd", fontWeight: 700, marginBottom: 6 }}>
+                            ✅ 권리금 ${fmtNum(extraBuyDeposit)} 지불 완료
+                          </div>
+                          <p style={{ fontSize: 10, color: "#a1a1aa", margin: "0 0 8px", lineHeight: 1.5 }}>
+                            이제 카드에 적힌 착수금을 지불하고 자산을 실제로 인수할지 결정하세요.
+                          </p>
+
+                          {/* 착수금/대출 정보 */}
+                          <div style={{ borderRadius: 6, overflow: "hidden", border: "1px solid #27272a", marginBottom: 8 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", fontSize: 10, background: "#ffffff05" }}>
+                              <span style={{ color: "#71717a" }}>카드 착수금</span>
+                              <span style={{ color: "#fde68a", fontWeight: 700 }}>${fmtNum(cardDown)}</span>
+                            </div>
+                            {cardLoan > 0 && (
+                              <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", fontSize: 10, background: "#ffffff05" }}>
+                                <span style={{ color: "#71717a" }}>카드 대출 (자동)</span>
+                                <span style={{ color: "#fca5a5", fontWeight: 700 }}>${fmtNum(cardLoan)}</span>
+                              </div>
+                            )}
+                            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", fontSize: 10, background: "#ffffff05" }}>
+                              <span style={{ color: "#71717a" }}>권리금 낸 후 현금</span>
+                              <span style={{ color: cashAfterDeposit >= cardDown ? "#86efac" : "#fca5a5", fontWeight: 700 }}>${fmtNum(cashAfterDeposit)}</span>
+                            </div>
+                          </div>
+
+                          {/* 부족 시 추가 대출 UI */}
+                          {shortageAfterDeposit > 0 && (
+                            <div style={{ padding: 8, borderRadius: 6, background: "#f59e0b10", border: "1px solid #f59e0b30", marginBottom: 8 }}>
+                              <p style={{ fontSize: 10, color: "#fde68a", margin: "0 0 6px", fontWeight: 600 }}>
+                                ⚠️ 착수금 ${fmtNum(shortageAfterDeposit)} 부족
+                              </p>
+                              {maxExtraLoan >= 1000 ? (
+                                <>
+                                  <p style={{ fontSize: 9, color: "#a1a1aa", margin: "0 0 6px" }}>
+                                    $1,000 단위 추가 대출 (최대 ${fmtNum(maxExtraLoan)})
+                                  </p>
+                                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                    <button onClick={() => setExtraBuyExtraLoan(Math.max(0, extraBuyExtraLoan - 1000))} style={{
+                                      padding: "6px 10px", borderRadius: 6, border: "1px solid #27272a",
+                                      background: "#18181b", color: "#fde68a", cursor: "pointer", fontSize: 11, fontWeight: 700,
+                                    }}>-$1K</button>
+                                    <div style={{ flex: 1, textAlign: "center", fontSize: 12, color: "#fde68a", fontWeight: 800 }}>
+                                      추가 대출 ${fmtNum(extraBuyExtraLoan)}
+                                    </div>
+                                    <button onClick={() => setExtraBuyExtraLoan(Math.min(maxExtraLoan, extraBuyExtraLoan + 1000))} style={{
+                                      padding: "6px 10px", borderRadius: 6, border: "1px solid #27272a",
+                                      background: "#18181b", color: "#fde68a", cursor: "pointer", fontSize: 11, fontWeight: 700,
+                                    }}>+$1K</button>
+                                  </div>
+                                </>
+                              ) : (
+                                <p style={{ fontSize: 10, color: "#fca5a5", margin: 0 }}>
+                                  대출 여력 없음 — 구매 불가 (포기만 가능)
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          {/* 결정 버튼 2개 */}
+                          <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                            <button
+                              onClick={() => {
+                                // 구매 확정 — entry 생성
+                                const totalLoan = cardLoan + extraBuyExtraLoan;
+                                const cardCF = parseNumNeg(extraBuySelectedCard.cf);
+                                const entry = createExtraBuyTurn({
+                                  turn: currentTurn,
+                                  assetName: extraBuyName,
+                                  assetType: extraBuyType,
+                                  deposit: extraBuyDeposit, // 권리금 (별도 차감)
+                                  buyCost: cardDown,         // 착수금만
+                                  cf: cardCF,
+                                  loan: totalLoan,
+                                  time: timerOn ? elapsed : null,
+                                  originalCard: extraBuySelectedCard,
+                                });
+                                setTurnLog(prev => [...prev, entry]);
+                                // 리셋
+                                setExtraBuyName(""); setExtraBuyCost(""); setExtraBuyCF(""); setExtraBuyLoan(""); setExtraBuyType("사업");
+                                setExtraBuyCategory(null); setExtraBuySubtype(null); setExtraBuySelectedCard(null);
+                                setExtraBuyStep(1); setExtraBuyDeposit(0); setExtraBuyExtraLoan(0);
+                                setExtraTool(null);
+                              }}
+                              disabled={!canBuy}
+                              style={{
+                                flex: 1, padding: "10px", borderRadius: 8, border: "none",
+                                cursor: canBuy ? "pointer" : "not-allowed",
+                                background: canBuy ? "#22c55e" : "#27272a",
+                                color: canBuy ? "#000" : "#71717a",
+                                fontSize: 12, fontWeight: 800,
+                              }}
+                            >✅ 구매 확정</button>
+                            <button
+                              onClick={() => {
+                                // 포기 — 권리금만 지불, 자산 미인수
+                                const entry = createExtraBuyTurn({
+                                  turn: currentTurn,
+                                  assetName: extraBuyName,
+                                  assetType: extraBuyType,
+                                  deposit: extraBuyDeposit,  // 권리금만
+                                  buyCost: 0,                // 착수금 없음
+                                  forfeited: true,
+                                  time: timerOn ? elapsed : null,
+                                  originalCard: extraBuySelectedCard,
+                                });
+                                setTurnLog(prev => [...prev, entry]);
+                                // 리셋
+                                setExtraBuyName(""); setExtraBuyCost(""); setExtraBuyCF(""); setExtraBuyLoan(""); setExtraBuyType("사업");
+                                setExtraBuyCategory(null); setExtraBuySubtype(null); setExtraBuySelectedCard(null);
+                                setExtraBuyStep(1); setExtraBuyDeposit(0); setExtraBuyExtraLoan(0);
+                                setExtraTool(null);
+                              }}
+                              style={{
+                                flex: 1, padding: "10px", borderRadius: 8, border: "1px solid #ef444440",
+                                cursor: "pointer",
+                                background: "#ef444415", color: "#fca5a5",
+                                fontSize: 12, fontWeight: 700,
+                              }}
+                            >❌ 포기</button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* ── ⑧ 현금 보정 폼 ── */}
+                {extraTool === "cash" && (
+                  <div style={{ padding: 10, borderRadius: 8, background: "#0a0a0f", border: "1px dashed #3f3f46" }}>
+                    <p style={{ fontSize: 10, color: "#a1a1aa", margin: "0 0 8px 0", lineHeight: 1.5 }}>
+                      딜러가 실수로 잘못 준 현금 조정, 기록 누락 보정 등에 사용합니다. 양수=입금, 음수=출금.
+                    </p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <input
+                        type="number" placeholder="금액 $ (예: +500 또는 -300)" value={extraCashAmount}
+                        onChange={e => setExtraCashAmount(e.target.value)}
+                        style={{ padding: "6px 8px", borderRadius: 6, border: "1px solid #27272a", background: "#18181b", color: "#fde68a", fontSize: 11, outline: "none", textAlign: "center" }}
+                      />
+                      <input
+                        type="text" placeholder="사유 (예: 딜러 실수 보정)" value={extraCashReason}
+                        onChange={e => setExtraCashReason(e.target.value)}
+                        style={{ padding: "6px 8px", borderRadius: 6, border: "1px solid #27272a", background: "#18181b", color: "#e4e4e7", fontSize: 11, outline: "none" }}
+                      />
+                    </div>
+                    <button
+                      onClick={() => {
+                        const delta = parseInt(extraCashAmount) || 0;
+                        if (delta === 0) { alert("금액을 입력해주세요"); return; }
+                        const entry = createExtraCashTurn({
+                          turn: currentTurn, cashDelta: delta,
+                          reason: extraCashReason || `현금 수동 조정 ${delta >= 0 ? "+" : ""}$${delta}`,
+                          time: timerOn ? elapsed : null,
+                        });
+                        entry.transaction = `현금 보정 ${delta >= 0 ? "+" : ""}$${fmtNum(delta)}${extraCashReason ? ` — ${extraCashReason}` : ""}`;
+                        setTurnLog(prev => [...prev, entry]);
+                        setExtraCashAmount(""); setExtraCashReason("");
+                        setExtraTool(null);
+                      }}
+                      style={{
+                        width: "100%", marginTop: 8, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer",
+                        background: "#f59e0b", color: "#000", fontSize: 11, fontWeight: 700,
+                      }}
+                    >보정 실행</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -2286,66 +4159,38 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       {viewTab === "history" && (
         <div style={{ marginBottom: 16 }}>
           {turnLog.length > 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {turnLog.map((t, i) => {
-                const isPaydayPass = t.cellType === "PAYDAY_PASS";
-                const isDownRest = t.cellType === "DOWNSIZED_REST";
-                const isStockSell = t.cellType === "STOCK_SELL";
-                const isExtSell = t.cellType === "EXT_SELL";
-                const colorKey = isPaydayPass ? "PAYDAY"
-                  : isDownRest ? "DOWNSIZED"
-                  : isStockSell ? "OPPORTUNITY"  // 주식 매각은 녹색 계열 (기회카드와 같은 계열)
-                  : isExtSell ? "MARKET"
-                  : t.cellType;
-                const cc = CELL_COLORS[colorKey] || CELL_COLORS.OPPORTUNITY;
-                const specialLabel = isPaydayPass ? "💰 PayDay 통과"
-                  : isDownRest ? "⬇️ 다운사이즈 휴식"
-                  : isStockSell ? `📈 주식 매각 — ${t.card?.sub || ""}`
-                  : isExtSell ? `🏠 외부 매도 — ${t.card?.sub || ""}`
-                  : null;
-                const isSpecial = isPaydayPass || isDownRest;
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {turnGroups.map((group, gIdx) => {
+                // 그룹 헤더 텍스트
+                const headerLabel = group.main
+                  ? `T${group.turnNum} 진행`
+                  : `T${group.turnNum} 대기 중 보조 행위`;
                 return (
-                  <div key={i} style={{ padding: "10px 12px", borderRadius: 10, background: isPaydayPass ? "#14532d15" : isDownRest ? "#7f1d1d10" : isStockSell ? "#10b98110" : isExtSell ? "#8b5cf610" : cc.bg, border: `1px solid ${cc.border}30` }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: cc.border + "30", color: cc.text }}>
-                          T{t.turn}
-                        </span>
-                        {!isSpecial && !isStockSell && !isExtSell && t.boardPos > 0 && <span style={{ fontSize: 9, color: "#52525b" }}>칸{t.boardPos}</span>}
-                        {!isSpecial && !isStockSell && !isExtSell && t.dice > 0 && <span style={{ fontSize: 9, color: "#52525b" }}>🎲{t.dice}</span>}
-                        <span style={{ fontSize: 11, color: cc.text }}>
-                          {specialLabel || (t.card?.sub || t.cellType)}
-                        </span>
-                        {t.shares > 0 && <span style={{ fontSize: 9, color: "#71717a" }}>{t.shares}주</span>}
-                        {t.time != null && <span style={{ fontSize: 9, color: "#f59e0b", marginLeft: 4 }}>⏱{fmtTime(t.time)}</span>}
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        {t.decisionSec != null && <span style={{ fontSize: 9, color: "#a78bfa" }}>{t.decisionSec}초</span>}
-                        {t.action && (() => {
-                          const badge = ACTION_BADGE[t.action] || ACTION_BADGE.hold;
-                          return <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: badge.bg, color: badge.color }}>{badge.label}</span>;
-                        })()}
-                        {/* 턴 삭제 버튼 (잘못 입력한 턴 정리용 — 로그만 삭제, 재무 상태는 자동 복원 안됨) */}
-                        <button
-                          onClick={() => {
-                            if (window.confirm(`T${t.turn} 턴을 삭제하시겠습니까?\n\n⚠️ 기록(로그)만 삭제됩니다.\n현금·자산·대출 등 재무 상태는 그대로 유지됩니다.\n(자동 복원은 다음 업데이트에서 제공 예정)\n\n계속하시겠습니까?`)) {
-                              setTurnLog(prev => prev.filter((_, idx) => idx !== i));
-                            }
-                          }}
-                          title="이 턴 기록 삭제"
-                          style={{
-                            padding: "2px 6px", borderRadius: 4, border: "none",
-                            background: "#7f1d1d40", color: "#fca5a5", cursor: "pointer",
-                            fontSize: 10, fontWeight: 700,
-                          }}
-                        >🗑️</button>
-                      </div>
+                  <div key={gIdx} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {/* ── 그룹 헤더 ── */}
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "4px 2px",
+                      borderBottom: "1px solid #27272a",
+                    }}>
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, color: "#a1a1aa",
+                        letterSpacing: "0.03em",
+                      }}>
+                        ┌ {headerLabel}
+                      </span>
+                      <span style={{ flex: 1, borderBottom: "1px dashed #27272a", marginTop: 2 }} />
                     </div>
-                    {/* 거래 내역 + 보유 현금 */}
-                    {(t.transaction || t.cashSnapshot != null) && (
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4, paddingTop: 4, borderTop: `1px solid ${cc.border}15` }}>
-                        {t.transaction && <span style={{ fontSize: 9, color: "#a1a1aa", flex: 1 }}>{t.transaction}</span>}
-                        {t.cashSnapshot != null && <span style={{ fontSize: 10, fontWeight: 700, color: t.cashSnapshot >= 0 ? "#fde68a" : "#fca5a5" }}>💰${fmtNum(t.cashSnapshot)}</span>}
+                    {/* ── 메인 행 ── */}
+                    {group.main && renderTurnRow(group.main.entry, group.main.idx, false)}
+                    {/* ── 보조 행 묶음 ── */}
+                    {group.subs.length > 0 && (
+                      <div style={{
+                        display: "flex", flexDirection: "column", gap: 4,
+                        marginLeft: 16, paddingLeft: 10,
+                        borderLeft: "2px solid #27272a",
+                      }}>
+                        {group.subs.map(s => renderTurnRow(s.entry, s.idx, true))}
                       </div>
                     )}
                   </div>
@@ -2433,33 +4278,53 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
 
       {/* 게임 저장 (로그인 사용자 기준, 플레이어 불필요) */}
       {turnLog.length >= 3 && (
-        <button onClick={async () => {
-          try {
-            if (typeof onSaveGame !== "function") {
-              console.error("[게임 저장] onSaveGame 콜백이 없음");
-              alert("⚠️ 저장 기능이 연결되지 않았습니다. 페이지를 새로고침해주세요.");
-              return;
+        <button
+          disabled={gameSaving}
+          onClick={async () => {
+            if (gameSaving) return;
+            setGameSaving(true);
+            try {
+              if (typeof onSaveGame !== "function") {
+                console.error("[게임 저장] onSaveGame 콜백이 없음");
+                alert("⚠️ 저장 기능이 연결되지 않았습니다. 페이지를 새로고침해주세요.");
+                return;
+              }
+              const result = await onSaveGame(buildGamePayload());
+
+              // 저장 성공 판정: 예외 없이 돌아왔고, 명시적으로 null을 반환하지 않았으면 성공
+              if (result === null) {
+                alert("⚠️ 게임 저장에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요.");
+                return;
+              }
+
+              // 성공 처리 (result가 undefined여도 예외 없이 끝났으면 성공으로 간주)
+              try { await deleteGameSession(authUser?.id); } catch (_) {}
+              setGameSaved(true); // 디브리핑 버튼 활성화
+              alert("✅ 게임이 저장되었습니다.");
+            } catch (e) {
+              console.error("[게임 저장] 예외:", e);
+              alert(`⚠️ 게임 저장 중 오류: ${e.message || "알 수 없는 오류"}`);
+            } finally {
+              setGameSaving(false);
             }
-            const result = await onSaveGame(buildGamePayload());
-            
-            // 저장 성공 판정: 예외 없이 돌아왔고, 명시적으로 null을 반환하지 않았으면 성공
-            if (result === null) {
-              alert("⚠️ 게임 저장에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요.");
-              return;
-            }
-            
-            // 성공 처리 (result가 undefined여도 예외 없이 끝났으면 성공으로 간주)
-            try { await deleteGameSession(authUser?.id); } catch (_) {}
-            setGameSaved(true); // 디브리핑 버튼 활성화
-            alert("✅ 게임이 저장되었습니다.");
-          } catch (e) {
-            console.error("[게임 저장] 예외:", e);
-            alert(`⚠️ 게임 저장 중 오류: ${e.message || "알 수 없는 오류"}`);
-          }
-        }} style={{
-          width: "100%", marginTop: 12, padding: 14, borderRadius: 12, border: "none", cursor: "pointer",
-          background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", color: "#fff", fontSize: 13, fontWeight: 700,
-        }}>💾 게임 저장</button>
+          }}
+          style={{
+            width: "100%", marginTop: 12, padding: 14, borderRadius: 12, border: "none",
+            cursor: gameSaving ? "not-allowed" : "pointer",
+            background: gameSaving ? "#3f3f46" : "linear-gradient(135deg, #3b82f6, #8b5cf6)",
+            color: "#fff", fontSize: 13, fontWeight: 700,
+            opacity: gameSaving ? 0.7 : 1,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          }}
+        >
+          {gameSaving ? (
+            <>
+              <span style={{ display: "inline-block", animation: "cfSpin 1s linear infinite" }}>🎲</span>
+              <style>{`@keyframes cfSpin { to { transform: rotate(360deg) } }`}</style>
+              저장 중...
+            </>
+          ) : "💾 게임 저장"}
+        </button>
       )}
 
       {/* 초기화 */}
@@ -2524,6 +4389,19 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
             </>
           )}
         </div>
+      )}
+
+      {/* ═══ 턴 편집 모달 ═══ */}
+      {editingTurn && (
+        <TurnEditModal
+          turnIndex={editingTurn.index}
+          turn={editingTurn.turn}
+          onSave={(updatedTurn) => {
+            setTurnLog(prev => prev.map((t, idx) => idx === editingTurn.index ? updatedTurn : t));
+            setEditingTurn(null);
+          }}
+          onClose={() => setEditingTurn(null)}
+        />
       )}
     </div>
   );
@@ -3086,20 +4964,7 @@ export default function CoachingSimulator() {
 
   // ─── 인증 게이트 (Phase A) ───
   if (authLoading) {
-    return (
-      <div style={{
-        minHeight: "100vh",
-        background: "#080810",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        color: "#71717a",
-        fontSize: 14,
-        fontFamily: "'Pretendard Variable', 'Noto Sans KR', -apple-system, sans-serif",
-      }}>
-        로딩 중...
-      </div>
-    );
+    return <DiceSpinner fullScreen size="lg" message="로딩 중..." />;
   }
 
   // 로그인 안 됨 + 게스트 모드 아님 → 로그인 화면
@@ -3314,7 +5179,14 @@ export default function CoachingSimulator() {
           {Object.entries(DECKS).map(([key, d]) => (
             <button
               key={key}
-              onClick={() => { setVersion(key); setResults(null); }}
+              onClick={() => {
+                if (key === "202") {
+                  alert("⚠️ 캐쉬플로우 202 모드는 아직 준비중입니다.\n\n조금만 기다려주세요!");
+                  return;
+                }
+                setVersion(key);
+                setResults(null);
+              }}
               style={{
                 flex: 1, maxWidth: 200, padding: "14px 20px", borderRadius: 14,
                 border: version === key ? `2px solid ${d.color}` : "2px solid #27272a",
@@ -3332,7 +5204,8 @@ export default function CoachingSimulator() {
           ))}
         </div>
 
-        {/* 1줄: 시뮬레이션 / 플레이 / 대회 / 플레이어 (게임 모드) */}
+        {/* 1줄: 시뮬레이션 / 플레이 / 대회 / 플레이어 — 시뮬 모드에서만 표시 (플레이 중엔 방해 금지) */}
+        {appMode === "sim" && (
         <div style={{ display: "flex", gap: 0, marginBottom: 8, borderRadius: 12, overflow: "hidden", border: "1px solid #27272a" }}>
           <button onClick={() => { setAppMode("sim"); setIsContestMode(false); }} style={{
             flex: 1, padding: "12px", border: "none", cursor: "pointer",
@@ -3373,8 +5246,10 @@ export default function CoachingSimulator() {
             opacity: isGuest ? 0.5 : 1,
           }}>👤 프로필{isGuest ? " 🔒" : ""}</button>
         </div>
+        )}
 
-        {/* 2줄: 내 이력 / 랭킹 / Admin (Phase B Day 2) */}
+        {/* 2줄: 내 이력 / 랭킹 / Admin — 시뮬 모드에서만 표시 */}
+        {appMode === "sim" && (
         <div style={{ display: "flex", gap: 0, marginBottom: 24, borderRadius: 12, overflow: "hidden", border: "1px solid #27272a" }}>
           <button onClick={() => { if (guardAuth("play")) setAppMode("history"); }} style={{
             flex: 1, padding: "10px", border: "none", cursor: "pointer",
@@ -3401,6 +5276,20 @@ export default function CoachingSimulator() {
             }}>⚙️ Admin</button>
           )}
         </div>
+        )}
+
+        {/* 플레이 모드: 홈으로 돌아가는 버튼 (최소 UI) */}
+        {appMode === "play" && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <button onClick={() => { setAppMode("sim"); setIsContestMode(false); }} style={{
+              padding: "8px 14px", borderRadius: 8, border: "1px solid #27272a",
+              background: "transparent", color: "#a1a1aa", fontSize: 12, fontWeight: 600, cursor: "pointer",
+            }}>← 홈으로</button>
+            <span style={{ fontSize: 11, color: "#71717a" }}>
+              {isContestMode ? "🏆 대회 모드" : "🎮 플레이 모드"}
+            </span>
+          </div>
+        )}
 
         {/* ═══ 대회 모드 배너 (Phase B) ═══ */}
         {appMode === "play" && isContestMode && (
@@ -3854,6 +5743,13 @@ async function generatePaidFeedback({ tier, version, turns, simText, extraContex
   return data.content.filter(c => c.type === "text").map(c => c.text).join("\n");
 }
 
+// 디브리핑 티어 정의 — 모듈 스코프 상수 (매 렌더마다 재생성되지 않도록)
+const TIERS = [
+  { label: "요약 피드백", chars: "500자", price: "무료", color: "#22c55e", sub: "게임 결과 요약 + 핵심 인사이트", model: "" },
+  { label: "상세 피드백", chars: "2,000자", price: "$9", color: "#3b82f6", sub: "스토리텔링 + 현실 연결 + 행동 설계", model: "Sonnet" },
+  { label: "프리미엄 피드백", chars: "5,000자", price: "$20", color: "#f59e0b", sub: "전문 코칭 리포트 + 맞춤 전략", model: "Opus" },
+];
+
 function DebriefSection({ results, version, turns, deck }) {
   const [mode, setMode] = useState(null);
   const [tier, setTier] = useState(null);
@@ -3866,6 +5762,13 @@ function DebriefSection({ results, version, turns, deck }) {
   const [bestWorstTab, setBestWorstTab] = useState("cf");
   const debRef = useRef(null);
   const abortRef = useRef(null);
+
+  // ── 피드백 캐시: 같은 게임 세션에서 티어별로 한 번만 API 호출 ──
+  // { 0: "무료 텍스트", 1: "상세 텍스트", 2: "프리미엄 텍스트" }
+  const [feedbackCache, setFeedbackCache] = useState({});
+  // ── 확인 단계: 티어 선택 → 확인 화면 → 실행 버튼 누를 때만 API 호출 ──
+  // null | 0 | 1 | 2  (현재 확인 화면에서 보여주는 티어)
+  const [pendingTier, setPendingTier] = useState(null);
 
   // ── 리포트 저장/로드 (window.storage) ──
   const [savedReports, setSavedReports] = useState([]);
@@ -4915,14 +6818,30 @@ RULES:
 
   const runFree = () => {
     setTier(0);
+    // 캐시 있으면 재사용
+    if (feedbackCache[0]) {
+      setFreeText(feedbackCache[0]);
+      setMode("feedback");
+      return;
+    }
     const text = generateFreeFeedback(results, turns);
     setFreeText(text);
+    setFeedbackCache(prev => ({ ...prev, 0: text }));
     setMode("feedback");
     updateReportFeedback(text, 0);
   };
 
   const runPaid = async (selectedTier) => {
     setTier(selectedTier);
+    // 캐시 있으면 재사용 — API 호출 안 함
+    if (feedbackCache[selectedTier]) {
+      setPaidText(feedbackCache[selectedTier]);
+      setError("");
+      setLoading(false);
+      setMode("feedback");
+      return;
+    }
+
     setLoading(true);
     setError("");
     setPaidText("");
@@ -4935,6 +6854,7 @@ RULES:
         tier: selectedTier, version, turns, simText, extraContext: context,
       });
       setPaidText(pText);
+      setFeedbackCache(prev => ({ ...prev, [selectedTier]: pText }));
       updateReportFeedback(pText, selectedTier);
     } catch (e) {
       setError(e.message || "네트워크 오류가 발생했습니다.");
@@ -4943,11 +6863,20 @@ RULES:
     }
   };
 
-  const TIERS = [
-    { label: "요약 피드백", chars: "500자", price: "무료", color: "#22c55e", sub: "게임 결과 요약 + 핵심 인사이트", model: "" },
-    { label: "상세 피드백", chars: "2,000자", price: "$9", color: "#3b82f6", sub: "스토리텔링 + 현실 연결 + 행동 설계", model: "Sonnet" },
-    { label: "프리미엄 피드백", chars: "5,000자", price: "$20", color: "#f59e0b", sub: "전문 코칭 리포트 + 맞춤 전략", model: "Opus" },
-  ];
+  // 티어 버튼 클릭 → 확인 화면으로 (즉시 실행하지 않음)
+  const selectTierForConfirm = (selectedTier) => {
+    setPendingTier(selectedTier);
+    setError("");
+  };
+
+  // 확인 화면에서 "실행" 버튼 클릭 시
+  const executeTier = () => {
+    if (pendingTier === null) return;
+    const t = pendingTier;
+    setPendingTier(null);
+    if (t === 0) runFree();
+    else runPaid(t);
+  };
 
   // ─── 리포트 텍스트 생성 (복사/저장용) ───
   const [showReport, setShowReport] = useState(false);
@@ -5067,20 +6996,23 @@ RULES:
   // ─── 렌더: 분석 로딩 ───
   if (loadingAnalysis) {
     return (
-      <div ref={debRef} style={{ marginTop: 24, textAlign: "center", padding: "40px 20px" }}>
-        <div style={{ fontSize: 32, marginBottom: 12, animation: "spin 1s linear infinite" }}>🎲</div>
-        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-        <p style={{ fontSize: 14, color: "#a1a1aa" }}>AI가 {turns}턴의 인생을 분석하고 있습니다...</p>
-        <p style={{ fontSize: 12, color: "#52525b" }}>5단계 자산흐름 + 잘한/아쉬운 선택 비교 + 5가지 교훈 생성 중</p>
-        <button onClick={() => {
-          if (abortRef.current) abortRef.current.abort();
-          setLoadingAnalysis(false);
-          setMode(null);
-          setError("");
-        }} style={{
-          marginTop: 16, padding: "10px 30px", borderRadius: 10, border: "1px solid #ef444440",
-          background: "#ef444415", color: "#fca5a5", cursor: "pointer", fontSize: 13, fontWeight: 700,
-        }}>⏹ 멈추고 게임으로 돌아가기</button>
+      <div ref={debRef} style={{ marginTop: 24 }}>
+        <DiceSpinner
+          size="lg"
+          message={`AI가 ${turns}턴의 인생을 분석하고 있습니다...`}
+          subMessage="5단계 자산흐름 + 잘한/아쉬운 선택 비교 + 5가지 교훈 생성 중"
+        />
+        <div style={{ textAlign: "center" }}>
+          <button onClick={() => {
+            if (abortRef.current) abortRef.current.abort();
+            setLoadingAnalysis(false);
+            setMode(null);
+            setError("");
+          }} style={{
+            marginTop: 4, padding: "10px 30px", borderRadius: 10, border: "1px solid #ef444440",
+            background: "#ef444415", color: "#fca5a5", cursor: "pointer", fontSize: 13, fontWeight: 700,
+          }}>⏹ 멈추고 게임으로 돌아가기</button>
+        </div>
       </div>
     );
   }
@@ -5279,32 +7211,88 @@ RULES:
   };
 
   // ─── 렌더: 총평 선택 화면 ───
-  const renderFeedbackSelect = () => (
-    <div style={{ marginTop: 8 }}>
-      <div style={{ textAlign: "center", marginBottom: 16 }}>
-        <div style={{ fontSize: 24, marginBottom: 4 }}>📝</div>
-        <h3 style={{ fontSize: 16, fontWeight: 900, color: "#fafafa", margin: 0 }}>총평 리포트</h3>
-        <p style={{ fontSize: 11, color: "#71717a", marginTop: 2 }}>스토리텔링 기반 코칭 피드백</p>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {TIERS.map((t, i) => (
-          <button key={i} onClick={() => i === 0 ? runFree() : runPaid(i)} style={{
-            padding: "14px 16px", borderRadius: 12, cursor: "pointer", textAlign: "left",
-            border: `1px solid ${t.color}40`, background: "#0d0d14", transition: "all 0.2s",
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+  const renderFeedbackSelect = () => {
+    // 확인 단계: 티어를 하나 골랐으면 확인 화면만 표시
+    if (pendingTier !== null) {
+      const t = TIERS[pendingTier];
+      const isCached = !!feedbackCache[pendingTier];
+      return (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ padding: "16px 18px", borderRadius: 14, border: `2px solid ${t.color}`, background: t.color + "08", marginBottom: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 800, color: t.color }}>{t.label}</span>
-                {t.model && <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: t.model === "Opus" ? "#f59e0b20" : "#3b82f620", color: t.model === "Opus" ? "#f59e0b" : "#93c5fd" }}>{t.model}</span>}
+                <span style={{ fontSize: 16, fontWeight: 900, color: t.color }}>{t.label}</span>
+                {t.model && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: t.model === "Opus" ? "#f59e0b20" : "#3b82f620", color: t.model === "Opus" ? "#f59e0b" : "#93c5fd" }}>{t.model}</span>}
+                {isCached && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#22c55e20", color: "#86efac" }}>✓ 저장됨</span>}
               </div>
-              <span style={{ fontSize: 18, fontWeight: 900, color: t.color }}>{t.price}</span>
+              <span style={{ fontSize: 20, fontWeight: 900, color: t.color }}>{t.price}</span>
             </div>
-            <div style={{ fontSize: 11, color: "#71717a", marginTop: 4 }}>{t.sub}</div>
-          </button>
-        ))}
+            <p style={{ fontSize: 12, color: "#a1a1aa", margin: "0 0 6px", lineHeight: 1.6 }}>{t.sub}</p>
+            <p style={{ fontSize: 11, color: "#71717a", margin: 0 }}>{t.chars} 분량</p>
+            {isCached && (
+              <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, background: "#22c55e10", border: "1px solid #22c55e30" }}>
+                <p style={{ fontSize: 11, color: "#86efac", margin: 0, lineHeight: 1.5, fontWeight: 600 }}>
+                  ✅ 이전에 받은 피드백이 저장되어 있습니다. 다시 보기를 누르면 API 호출 없이 바로 표시됩니다 (추가 비용 없음).
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={() => { setPendingTier(null); }}
+              style={{
+                flex: 1, padding: "12px", borderRadius: 10, border: "1px solid #27272a",
+                background: "transparent", color: "#a1a1aa", fontSize: 12, fontWeight: 700, cursor: "pointer",
+              }}
+            >← 뒤로</button>
+            <button
+              onClick={executeTier}
+              style={{
+                flex: 2, padding: "12px", borderRadius: 10, border: "none",
+                background: t.color, color: pendingTier === 0 ? "#000" : "#fff",
+                fontSize: 13, fontWeight: 800, cursor: "pointer",
+              }}
+            >
+              {isCached ? "📖 저장된 피드백 보기" : pendingTier === 0 ? "▶ 피드백 실행" : "▶ 결제하고 피드백 받기"}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // 기본: 티어 목록 표시
+    return (
+      <div style={{ marginTop: 8 }}>
+        <div style={{ textAlign: "center", marginBottom: 16 }}>
+          <div style={{ fontSize: 24, marginBottom: 4 }}>📝</div>
+          <h3 style={{ fontSize: 16, fontWeight: 900, color: "#fafafa", margin: 0 }}>총평 리포트</h3>
+          <p style={{ fontSize: 11, color: "#71717a", marginTop: 2 }}>스토리텔링 기반 코칭 피드백</p>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {TIERS.map((t, i) => {
+            const isCached = !!feedbackCache[i];
+            return (
+              <button key={i} onClick={() => selectTierForConfirm(i)} style={{
+                padding: "14px 16px", borderRadius: 12, cursor: "pointer", textAlign: "left",
+                border: `1px solid ${t.color}40`, background: "#0d0d14", transition: "all 0.2s",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: t.color }}>{t.label}</span>
+                    {t.model && <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: t.model === "Opus" ? "#f59e0b20" : "#3b82f620", color: t.model === "Opus" ? "#f59e0b" : "#93c5fd" }}>{t.model}</span>}
+                    {isCached && <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#22c55e20", color: "#86efac" }}>✓ 저장됨</span>}
+                  </div>
+                  <span style={{ fontSize: 18, fontWeight: 900, color: t.color }}>{t.price}</span>
+                </div>
+                <div style={{ fontSize: 11, color: "#71717a", marginTop: 4 }}>{t.sub}</div>
+              </button>
+            );
+          })}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // ─── 렌더: 총평 결과 ───
   const renderFeedbackResult = () => {
@@ -5317,10 +7305,7 @@ RULES:
           <button onClick={() => { setMode("analysis-done"); setTier(null); setPaidText(""); setFreeText(""); setError(""); }} style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid #27272a", background: "#18181b", color: "#71717a", cursor: "pointer", fontSize: 10 }}>다른 피드백</button>
         </div>
         {loading ? (
-          <div style={{ textAlign: "center", padding: "30px 20px" }}>
-            <div style={{ fontSize: 28, marginBottom: 10, animation: "spin 1s linear infinite" }}>🎲</div>
-            <p style={{ fontSize: 13, color: "#a1a1aa" }}>AI 코칭 피드백 생성 중...</p>
-          </div>
+          <DiceSpinner message="AI 코칭 피드백 생성 중..." />
         ) : error && !displayText ? (
           <div style={{ padding: 14, borderRadius: 10, background: "#7f1d1d20", border: "1px solid #ef444430" }}>
             <p style={{ fontSize: 12, color: "#fca5a5", margin: 0 }}>{error}</p>
@@ -5334,7 +7319,7 @@ RULES:
             {tier < 2 && (
               <div style={{ marginTop: 12, padding: "12px 16px", borderRadius: 10, textAlign: "center", background: TIERS[tier + 1].color + "10", border: `1px solid ${TIERS[tier + 1].color}30` }}>
                 <p style={{ fontSize: 11, color: "#a1a1aa", margin: "0 0 6px" }}>더 깊은 분석이 필요하시다면</p>
-                <button onClick={() => runPaid(tier + 1)} style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: TIERS[tier + 1].color, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                <button onClick={() => { setMode("analysis-done"); setTier(null); setPaidText(""); setFreeText(""); setError(""); setPendingTier(tier + 1); }} style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: TIERS[tier + 1].color, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                   {TIERS[tier + 1].label} ({TIERS[tier + 1].price})
                 </button>
               </div>

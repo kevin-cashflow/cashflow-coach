@@ -288,7 +288,7 @@ export default function RankingTab({ authUser }) {
                   {getMedal(idx)}
                 </div>
                 <TierBadge tierKey={tier} size="sm" />
-                {s.credential && <CoachBadge credential={s.credential} size="xs" showName={false} />}
+                {s.credential && <CoachBadge credential={s.credential} size="sm" showName={true} />}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{
                     fontSize: 13,
@@ -343,7 +343,7 @@ export default function RankingTab({ authUser }) {
               {myRank + 1}.
             </div>
             <TierBadge tierKey={calculateTier(myStats.total_plays || 0)} size="sm" />
-            {myStats.credential && <CoachBadge credential={myStats.credential} size="xs" showName={false} />}
+            {myStats.credential && <CoachBadge credential={myStats.credential} size="sm" showName={true} />}
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 800, color: "#93c5fd" }}>
                 {myStats.display_name} <span style={{ fontSize: 10 }}>(나)</span>
