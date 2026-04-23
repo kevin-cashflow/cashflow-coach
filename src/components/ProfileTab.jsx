@@ -6,6 +6,7 @@ import CoachBadge, { getCredentialConfig } from "./CoachBadge";
 import CoachCodeModal from "./CoachCodeModal";
 import { TierProgressCard } from "./TierBadge";
 import TierGuide from "./TierGuide";
+import MyHistoryTab from "./MyHistoryTab";
 
 /**
  * 👤 프로필 탭 (Phase B Day 2)
@@ -49,6 +50,8 @@ export default function ProfileTab({ authUser }) {
   const [profileSaving, setProfileSaving] = useState(false);
   // 추가 정보 섹션 펼침 여부 (기본 접힘)
   const [profileExpanded, setProfileExpanded] = useState(false);
+  // 저장된 게임·디브리핑 섹션 펼침 여부 (기본 접힘)
+  const [historyExpanded, setHistoryExpanded] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -76,6 +79,26 @@ export default function ProfileTab({ authUser }) {
       clearTimeout(safetyTimer);
     };
   }, [authUser]);
+
+  // 브라우저 탭 복귀 시 로딩 멈춰있으면 재시도
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible" && loading && authUser) {
+        console.log("[ProfileTab] 탭 복귀 - 로딩 재시도");
+        setLoading(false);
+        setTimeout(() => {
+          loadProfile().finally(() => setLoading(false));
+        }, 100);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleVisibilityChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, authUser]);
 
   const loadProfile = async () => {
     setLoading(true);
@@ -691,12 +714,67 @@ export default function ProfileTab({ authUser }) {
       </div>
 
 
-      {/* 티어 진행도 카드 (코칭딜러 자격 아래) */}
+      {/* 티어 진행도 카드 (코칭딜러 자격 아래) — "내 현황" */}
       <div style={{ marginBottom: 14 }}>
         <TierProgressCard playCount={stats?.total_plays || 0} />
       </div>
 
-      {/* 🏆 티어 안내 (10단계 전체 표) - 내 현황 포함 */}
+      {/* 📊 저장된 게임 + 디브리핑 — 내 현황 바로 아래 (기본 접힘) */}
+      <div style={{
+        padding: 16,
+        borderRadius: 12,
+        background: "#111118",
+        border: "1px solid #27272a",
+        marginBottom: 14,
+      }}>
+        <button
+          onClick={() => setHistoryExpanded(!historyExpanded)}
+          style={{
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "4px 0",
+            border: "none",
+            background: "transparent",
+            color: "#fafafa",
+            cursor: "pointer",
+            fontSize: 14,
+            fontWeight: 800,
+          }}
+        >
+          <span>
+            📊 저장된 게임 · 디브리핑
+            <span style={{ fontSize: 10, color: "#71717a", fontWeight: 500, marginLeft: 6 }}>
+              (게임당 디브리핑 진행/저장)
+            </span>
+          </span>
+          <span style={{
+            fontSize: 11,
+            color: "#71717a",
+            transition: "transform 0.2s",
+            transform: historyExpanded ? "rotate(180deg)" : "rotate(0deg)",
+            display: "inline-block",
+          }}>▼</span>
+        </button>
+
+        {/* MyHistoryTab 항상 마운트 (탭 접기/펼치기 시 언마운트 안 되도록)
+            CSS display로만 보임/숨김 토글 → 진행중 피드백 요청 보존 */}
+        <div style={{
+          marginTop: historyExpanded ? 12 : 0,
+          display: historyExpanded ? "block" : "none",
+        }}>
+          <p style={{ fontSize: 11, color: "#71717a", margin: "0 0 12px" }}>
+            플레이 후 저장한 게임의 디브리핑을 언제든 진행하거나 다시 볼 수 있습니다.
+          </p>
+        </div>
+        {/* MyHistoryTab 본체 — 항상 마운트되어 state 보존 */}
+        <div style={{ display: historyExpanded ? "block" : "none" }}>
+          <MyHistoryTab authUser={authUser} embedded={true} />
+        </div>
+      </div>
+
+      {/* 🏆 티어 안내 (10단계 전체 표) */}
       <div style={{ marginBottom: 14 }}>
         <TierGuide userStats={stats} />
       </div>

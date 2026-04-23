@@ -406,7 +406,7 @@ function applyExtraBuy(s, t) {
     return { ...s, cash: s.cash - deposit };
   }
   const cf = t._cf || 0;
-  const loan = t._loan || 0;
+  const loan = t._loan || 0;  // 카드의 자체 부채 (정보용, 신용대출에 합산 안 함)
   const newAsset = {
     id: t._assetId,
     turn: t.turn,
@@ -418,15 +418,14 @@ function applyExtraBuy(s, t) {
     card: t._card || t.card,
     time: t.time,
   };
-  const newBankLoan = s.bankLoan + loan;
-  const newLoanInterest = Math.round(newBankLoan * 0.1);
+  // 카드의 대출(loan)은 이미 카드의 현금흐름(cf)에 이자가 차감되어 반영되어 있으므로
+  // 신용대출(bankLoan)에 추가하지 않음. 자산의 일부로만 기록.
   return {
     ...s,
     cash: s.cash - buyCost - deposit,  // 권리금 + 착수금 모두 차감
     assets: [...s.assets, newAsset],
     totalCF: s.totalCF + cf,
-    bankLoan: newBankLoan,
-    loanInterest: newLoanInterest,
+    // bankLoan 변동 없음 (카드 자체 부채는 신용대출과 별개)
   };
 }
 
