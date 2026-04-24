@@ -2,6 +2,14 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import {
+  generateFreeFeedback,
+  generatePaidFeedback,
+  buildPromptText,
+  runFullAnalysis,
+  AnalysisReport,
+  diagnoseFinancialLevel,
+} from "./CashflowCoachingSim";
 
 /**
  * ⚙️ Admin 관리 패널 (Phase B Day 2)
@@ -40,6 +48,9 @@ export default function AdminPanel({ authUser, userIsAdmin }) {
   const [adjustValue, setAdjustValue] = useState("");
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustLoading, setAdjustLoading] = useState(false);
+
+  // 🆕 회원 게임 이력 조회 모달 (Step 1)
+  const [viewingMemberGames, setViewingMemberGames] = useState(null); // { user_id, name, email } | null
 
   useEffect(() => {
     if (!userIsAdmin) {
@@ -1115,31 +1126,58 @@ export default function AdminPanel({ authUser, userIsAdmin }) {
                   </div>
                 )}
 
-                {/* 4행: 통계 + 플레이 횟수 수정 버튼 */}
+                {/* 4행: 통계 + 플레이 횟수 수정 버튼 + 게임 보기 버튼 */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                   <div style={{ fontSize: 10, color: "#71717a", flex: 1, minWidth: 0 }}>
                     가입: {formatDate(m.joined_at)} · 게임 {m.total_plays || 0}회
                     {m.contest_count > 0 && <span> · 대회 {m.contest_count}회</span>}
                   </div>
-                  <button
-                    onClick={() => {
-                      setAdjustingMember({
-                        user_id: m.user_id,
-                        name: m.nickname || m.real_name || m.email,
-                        total_plays: m.total_plays || 0,
-                      });
-                      setAdjustMode("set");
-                      setAdjustValue(String(m.total_plays || 0));
-                      setAdjustReason("");
-                    }}
-                    title="플레이 횟수 수정"
-                    style={{
-                      padding: "3px 8px", borderRadius: 4, border: "none",
-                      background: "#1e3a8a40", color: "#93c5fd",
-                      cursor: "pointer", fontSize: 9, fontWeight: 700,
-                      whiteSpace: "nowrap",
-                    }}
-                  >✏️ 횟수 수정</button>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button
+                      onClick={() => {
+                        setViewingMemberGames({
+                          user_id: m.user_id,
+                          name: m.nickname || m.real_name || m.email,
+                          email: m.email || "",
+                          realName: m.real_name || "",
+                          phone: m.phone || "",
+                          userType: m.user_type || "",
+                          userTypeOther: m.user_type_other || "",
+                          schoolName: m.school_name || "",
+                          organization: m.organization || "",
+                          coachCredential: m.coach_credential || "",
+                          totalPlays: m.total_plays || 0,
+                          joinedAt: m.joined_at,
+                        });
+                      }}
+                      title="게임 이력 보기"
+                      style={{
+                        padding: "3px 8px", borderRadius: 4, border: "none",
+                        background: "#7c3aed40", color: "#c4b5fd",
+                        cursor: "pointer", fontSize: 9, fontWeight: 700,
+                        whiteSpace: "nowrap",
+                      }}
+                    >🎮 게임 보기</button>
+                    <button
+                      onClick={() => {
+                        setAdjustingMember({
+                          user_id: m.user_id,
+                          name: m.nickname || m.real_name || m.email,
+                          total_plays: m.total_plays || 0,
+                        });
+                        setAdjustMode("set");
+                        setAdjustValue(String(m.total_plays || 0));
+                        setAdjustReason("");
+                      }}
+                      title="플레이 횟수 수정"
+                      style={{
+                        padding: "3px 8px", borderRadius: 4, border: "none",
+                        background: "#1e3a8a40", color: "#93c5fd",
+                        cursor: "pointer", fontSize: 9, fontWeight: 700,
+                        whiteSpace: "nowrap",
+                      }}
+                    >✏️ 횟수 수정</button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -1334,6 +1372,15 @@ export default function AdminPanel({ authUser, userIsAdmin }) {
           </div>
         </div>
       )}
+
+      {/* 🆕 회원 게임 이력 모달 */}
+      {viewingMemberGames && (
+        <AdminMemberGamesModal
+          member={viewingMemberGames}
+          adminUser={authUser}
+          onClose={() => setViewingMemberGames(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1431,4 +1478,953 @@ function downloadMembersCSV(members) {
   link.download = `회원명부_${new Date().toISOString().slice(0, 10)}.csv`;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+// ═══════════════════════════════════════════════════
+// 🎮 회원 게임 이력 모달 (Admin 전용, Step 1: 조회만)
+// ═══════════════════════════════════════════════════
+// - Supabase `games` 테이블에서 user_id로 게임 목록 조회
+// - 각 게임의 턴 로그 · 자산 · 자금 · 디브리핑 상세 표시
+// - Step 2에서 디브리핑 진행 기능 추가 예정
+function AdminMemberGamesModal({ member, adminUser, onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [games, setGames] = useState([]);
+  const [selectedGame, setSelectedGame] = useState(null); // 상세 보기 게임
+
+  useEffect(() => {
+    loadMemberGames();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [member.user_id]);
+
+  const [diagnostics, setDiagnostics] = useState(null); // 🆕 진단 정보
+
+  const loadMemberGames = async () => {
+    setLoading(true);
+    setError("");
+    setDiagnostics(null);
+    const diag = {
+      memberUserId: member.user_id,
+      rawCount: 0,
+      columnStructure: null,
+      userIdField: "user_id",
+      gameCount: 0,
+      errorMsg: null,
+      totalTableRowsSeen: 0,
+      uniqueUserIds: [],
+      targetUserFound: false,
+    };
+
+    try {
+      // ──────────────────────────────────────────
+      // PRE-STEP: 전체 테이블 샘플 조회 (RLS 확인용)
+      // ──────────────────────────────────────────
+      try {
+        const { data: sample, error: sampleErr } = await supabase
+          .from("games")
+          .select("id, user_id")
+          .limit(1000);
+
+        if (!sampleErr && sample) {
+          diag.totalTableRowsSeen = sample.length;
+          const uidSet = new Set();
+          sample.forEach(r => {
+            if (r.user_id) uidSet.add(String(r.user_id));
+          });
+          diag.uniqueUserIds = Array.from(uidSet);
+          diag.targetUserFound = diag.uniqueUserIds.includes(String(member.user_id));
+        }
+        console.log(`[AdminMemberGames] 전체 샘플: ${diag.totalTableRowsSeen}행, 유니크 user ${diag.uniqueUserIds.length}명`);
+      } catch (e) {
+        console.warn("[AdminMemberGames] 전체 샘플 조회 실패 (무시):", e.message);
+      }
+
+      // ──────────────────────────────────────────
+      // MAIN: 대상 user_id의 games 조회
+      // games 테이블은 이미 정규화된 컬럼 구조:
+      //   id, user_id, player_id, version, job, turn_count, date_time,
+      //   turn_log (JSON), assets (JSON), cash, total_cf, bank_loan,
+      //   loan_interest, babies, game_ended, sim_text, debrief (JSON),
+      //   is_contest, escaped, escape_time_sec,
+      //   passive_income_at_escape, job_at_escape
+      // ──────────────────────────────────────────
+      const { data, error: qErr } = await supabase
+        .from("games")
+        .select("*")
+        .eq("user_id", member.user_id)
+        .order("date_time", { ascending: false })
+        .limit(300);
+
+      if (qErr) throw qErr;
+
+      diag.rawCount = (data || []).length;
+      if (data && data[0]) {
+        diag.columnStructure = Object.keys(data[0]);
+      }
+      console.log(`[AdminMemberGames] 대상 user rows: ${diag.rawCount} (user_id=${member.user_id})`);
+
+      if (diag.rawCount === 0) {
+        setDiagnostics(diag);
+        setGames([]);
+        return;
+      }
+
+      // 각 row를 game 객체로 변환 (기존 UI와 호환되는 형식)
+      const gameRows = (data || []).map(row => {
+        // JSON 컬럼 파싱 (이미 객체이거나 문자열일 수 있음)
+        const parseJsonCol = (col) => {
+          if (col == null) return null;
+          if (typeof col === "string") {
+            try { return JSON.parse(col); } catch { return null; }
+          }
+          return col;
+        };
+
+        const turnLog = parseJsonCol(row.turn_log) || [];
+        const assets = parseJsonCol(row.assets) || [];
+        const debriefRaw = parseJsonCol(row.debrief);
+
+        // debrief 컬럼이 { analysis, feedback, ... } 구조라고 가정
+        // 다른 구조면 빈 구조로 보정
+        let debriefData;
+        if (debriefRaw && typeof debriefRaw === "object") {
+          debriefData = {
+            analysis: debriefRaw.analysis || null,
+            analysisAt: debriefRaw.analysisAt || null,
+            feedback: debriefRaw.feedback || {
+              free: debriefRaw.free || null,
+              detail: debriefRaw.detail || null,
+              premium: debriefRaw.premium || null,
+            },
+            editHistory: debriefRaw.editHistory || [],
+          };
+        } else {
+          debriefData = {
+            analysis: null, analysisAt: null,
+            feedback: { free: null, detail: null, premium: null },
+            editHistory: [],
+          };
+        }
+
+        return {
+          // DB PK (저장 시 필요)
+          id: row.id,
+          // 기존 UI와 호환되는 key (display only)
+          key: `game:${row.user_id}:${row.id}`,
+          // 저장된 사용자
+          user_id: row.user_id,
+          playerId: row.player_id,
+          // 메타
+          version: row.version,
+          job: row.job,
+          turnCount: row.turn_count,
+          dateTime: row.date_time,
+          // 턴 로그 & 자산
+          turnLog,
+          assets,
+          gameResults: turnLog, // 호환용 alias
+          // 재무 상태
+          cash: row.cash,
+          totalCF: row.total_cf,
+          bankLoan: row.bank_loan,
+          loanInterest: row.loan_interest,
+          babies: row.babies,
+          // 종료 정보
+          escaped: row.escaped,
+          escapeTimeSec: row.escape_time_sec,
+          passiveIncomeAtEscape: row.passive_income_at_escape,
+          jobAtEscape: row.job_at_escape,
+          gameEnded: row.game_ended,
+          isContest: row.is_contest,
+          // 시뮬 텍스트 (디브리핑에 필요)
+          simText: row.sim_text,
+          // 디브리핑 데이터
+          debriefData,
+          // 저장 로그 (혹시 debrief 안에 있으면)
+          saveLog: debriefRaw?.saveLog || null,
+        };
+      });
+
+      diag.gameCount = gameRows.length;
+
+      console.log(`[AdminMemberGames] ${gameRows.length}개 게임 로드 완료`);
+
+      setDiagnostics(diag);
+      setGames(gameRows);
+    } catch (e) {
+      console.error("[AdminMemberGames] 게임 조회 실패:", e);
+      diag.errorMsg = e.message;
+      setDiagnostics(diag);
+      setError(e.message || "게임 이력을 불러올 수 없습니다.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatDateTime = (iso) => {
+    if (!iso) return "";
+    try { return new Date(iso).toLocaleString("ko-KR"); }
+    catch { return iso; }
+  };
+
+  const userTypeLabels = {
+    general: "일반", teacher: "교사", institution: "기관 담당자",
+    company: "기업 관계자", other: "기타",
+  };
+  const userTypeLabel = member.userType
+    ? (userTypeLabels[member.userType] || member.userType) + (member.userTypeOther ? ` (${member.userTypeOther})` : "")
+    : "-";
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 2000, padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#0a0a0f", borderRadius: 16,
+          padding: 0, maxWidth: 720, width: "100%",
+          maxHeight: "92vh", overflow: "hidden",
+          display: "flex", flexDirection: "column",
+          border: "1px solid #27272a",
+        }}
+      >
+        {/* 헤더: 회원 정보 */}
+        <div style={{ padding: "18px 20px", borderBottom: "1px solid #27272a", background: "linear-gradient(135deg, #7c3aed15, #3b82f615)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#fafafa", marginBottom: 4 }}>
+                🎮 {member.name}
+                {member.coachCredential === "master" && <span style={{ marginLeft: 6, fontSize: 10, color: "#fbbf24" }}>🎓 마스터</span>}
+                {member.coachCredential === "dealer" && <span style={{ marginLeft: 6, fontSize: 10, color: "#60a5fa" }}>🎯 코칭딜러</span>}
+              </div>
+              <div style={{ fontSize: 11, color: "#a1a1aa", marginBottom: 2 }}>
+                {member.realName && <span>{member.realName} · </span>}
+                {member.email}
+                {member.phone && <span> · {member.phone}</span>}
+              </div>
+              <div style={{ fontSize: 10, color: "#71717a" }}>
+                {userTypeLabel}
+                {member.schoolName && <span> · {member.schoolName}</span>}
+                {member.organization && <span> · {member.organization}</span>}
+                <span> · 가입: {member.joinedAt ? new Date(member.joinedAt).toLocaleDateString("ko-KR") : "-"}</span>
+                <span> · 총 플레이: {member.totalPlays}회</span>
+              </div>
+            </div>
+            <button onClick={onClose} style={{
+              padding: "6px 12px", borderRadius: 8, border: "none",
+              background: "#27272a", color: "#e4e4e7",
+              cursor: "pointer", fontSize: 12, fontWeight: 700, flexShrink: 0,
+            }}>✕ 닫기</button>
+          </div>
+        </div>
+
+        {/* 본문 */}
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+          {loading && (
+            <div style={{ textAlign: "center", padding: 40, color: "#a1a1aa" }}>
+              <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
+              <div style={{ fontSize: 12 }}>게임 이력 불러오는 중...</div>
+            </div>
+          )}
+
+          {error && (
+            <div style={{ padding: 16, borderRadius: 8, background: "#7f1d1d30", border: "1px solid #ef444450", color: "#fca5a5", fontSize: 12 }}>
+              ⚠️ {error}
+              <button onClick={loadMemberGames} style={{ marginLeft: 8, padding: "2px 8px", borderRadius: 4, background: "#dc262680", color: "#fff", border: "none", fontSize: 11, cursor: "pointer" }}>재시도</button>
+            </div>
+          )}
+
+          {!loading && !error && games.length === 0 && (
+            <div>
+              <div style={{ textAlign: "center", padding: 30, color: "#71717a", fontSize: 12 }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>📭</div>
+                이 회원의 저장된 게임이 없습니다.
+              </div>
+
+              {/* 🆕 진단 정보 표시 (원인 파악) */}
+              {diagnostics && (
+                <div style={{ padding: 14, borderRadius: 8, background: "#111118", border: "1px solid #27272a", fontSize: 10, color: "#a1a1aa" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#fbbf24", marginBottom: 8 }}>🔍 진단 정보</div>
+
+                  <div style={{ marginBottom: 4 }}>
+                    <span style={{ color: "#71717a" }}>user_id:</span> <code style={{ color: "#86efac", fontSize: 9 }}>{diagnostics.memberUserId}</code>
+                  </div>
+
+                  {/* 🆕 전체 테이블 정보 (RLS 진단) */}
+                  <div style={{ padding: 8, background: "#18181b", borderRadius: 4, marginBottom: 8, marginTop: 6 }}>
+                    <div style={{ color: "#fbbf24", fontWeight: 700, marginBottom: 4, fontSize: 10 }}>🌐 games 테이블 전체 진단</div>
+                    <div style={{ marginBottom: 2 }}>
+                      <span style={{ color: "#71717a" }}>Admin이 볼 수 있는 전체 row:</span> <strong style={{ color: diagnostics.totalTableRowsSeen > 0 ? "#86efac" : "#fca5a5" }}>{diagnostics.totalTableRowsSeen}개</strong>
+                    </div>
+                    <div style={{ marginBottom: 2 }}>
+                      <span style={{ color: "#71717a" }}>발견된 유니크 user_id:</span> <strong style={{ color: "#c4b5fd" }}>{diagnostics.uniqueUserIds.length}명</strong>
+                    </div>
+                    <div style={{ marginBottom: 2 }}>
+                      <span style={{ color: "#71717a" }}>target user 존재 여부:</span> <strong style={{ color: diagnostics.targetUserFound ? "#86efac" : "#fca5a5" }}>
+                        {diagnostics.targetUserFound ? "✅ 발견됨" : "❌ 없음"}
+                      </strong>
+                    </div>
+                    {diagnostics.uniqueUserIds.length > 0 && diagnostics.uniqueUserIds.length <= 10 && (
+                      <div style={{ marginTop: 4, fontSize: 9, color: "#71717a" }}>
+                        보이는 user_id: {diagnostics.uniqueUserIds.slice(0, 10).map(u => u.substring(0, 8)).join(", ")}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ marginBottom: 4 }}>
+                    <span style={{ color: "#71717a" }}>target 쿼리 결과 row:</span> <strong style={{ color: diagnostics.rawCount > 0 ? "#86efac" : "#fca5a5" }}>{diagnostics.rawCount}개</strong>
+                  </div>
+                  <div style={{ marginBottom: 4 }}>
+                    <span style={{ color: "#71717a" }}>user_id 컬럼:</span> <code style={{ color: "#c4b5fd" }}>{diagnostics.userIdField || "미감지"}</code>
+                  </div>
+                  {diagnostics.columnStructure && (
+                    <div style={{ marginBottom: 4 }}>
+                      <span style={{ color: "#71717a" }}>실제 컬럼:</span> <code style={{ color: "#93c5fd", fontSize: 9 }}>{diagnostics.columnStructure.join(", ")}</code>
+                    </div>
+                  )}
+                  <div style={{ marginBottom: 4 }}>
+                    <span style={{ color: "#71717a" }}>게임 수:</span> <strong style={{ color: "#86efac" }}>{diagnostics.gameCount}</strong>
+                  </div>
+
+                  {/* 원인 추정 */}
+                  <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #27272a" }}>
+                    <div style={{ color: "#fbbf24", fontWeight: 700, marginBottom: 4 }}>💡 원인 추정:</div>
+                    {diagnostics.totalTableRowsSeen === 0 ? (
+                      <div style={{ color: "#fca5a5", lineHeight: 1.5 }}>
+                        ⛔ <strong>RLS 차단 확정</strong>: Admin이 games 테이블 자체를 아예 못 읽음<br/>
+                        · Supabase Dashboard → games 테이블 → Policies<br/>
+                        · Admin에게 SELECT 권한 부여 필요
+                      </div>
+                    ) : !diagnostics.targetUserFound ? (
+                      <div style={{ color: "#fca5a5", lineHeight: 1.5 }}>
+                        ⚠️ <strong>target user_id가 전체 {diagnostics.totalTableRowsSeen}행 중에 없음</strong><br/>
+                        · 해당 user의 games 데이터가 실제로 없거나<br/>
+                        · RLS가 부분적으로 차단 (Admin 본인 것만 보임)<br/>
+                        · 유니크 user {diagnostics.uniqueUserIds.length}명 중에 target 불포함
+                      </div>
+                    ) : diagnostics.rawCount === 0 ? (
+                      <div style={{ color: "#fca5a5", lineHeight: 1.5 }}>
+                        ⚠️ <strong>이상 상황</strong>: 전체 스캔엔 target이 있는데 eq 쿼리 결과가 0<br/>
+                        · user_id 컬럼 타입 불일치 가능성 (text vs uuid)
+                      </div>
+                    ) : diagnostics.gameCount === 0 ? (
+                      <div style={{ color: "#fca5a5", lineHeight: 1.5 }}>
+                        · rows는 있으나 `game:` 로 시작하는 키가 없음<br/>
+                        · 키 패턴이 다를 수 있음 (위 키 샘플 확인)
+                      </div>
+                    ) : (
+                      <div style={{ color: "#86efac", lineHeight: 1.5 }}>정상 동작 중 (게임 {diagnostics.gameCount}개 발견)</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!loading && !error && games.length > 0 && !selectedGame && (
+            <div>
+              <div style={{ fontSize: 11, color: "#a1a1aa", marginBottom: 10 }}>
+                총 <strong style={{ color: "#c4b5fd" }}>{games.length}</strong>개 게임 (최근 순)
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {games.map((g) => {
+                  const turnCount = (g.turnLog || []).length;
+                  const hasDebrief = g.debriefData?.feedback && (
+                    g.debriefData.feedback.free?.text ||
+                    g.debriefData.feedback.detail?.text ||
+                    g.debriefData.feedback.premium?.text
+                  );
+                  return (
+                    <div key={g.key}
+                      onClick={() => setSelectedGame(g)}
+                      style={{
+                        padding: 12, borderRadius: 8,
+                        background: "#111118", border: "1px solid #27272a",
+                        cursor: "pointer", transition: "background 0.15s",
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = "#1a1a22"}
+                      onMouseLeave={(e) => e.currentTarget.style.background = "#111118"}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+                        <div style={{ fontSize: 11, color: "#71717a" }}>
+                          📅 {formatDateTime(g.dateTime || g.storageUpdatedAt)}
+                        </div>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          {hasDebrief && <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: "#22c55e20", color: "#86efac", fontWeight: 700 }}>📝 디브리핑</span>}
+                          {g.escaped && <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: "#fbbf2420", color: "#fde68a", fontWeight: 700 }}>✅ 탈출</span>}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#fafafa", marginBottom: 4 }}>
+                        <span style={{ color: "#93c5fd" }}>{g.version || "캐쉬플로우"}</span>
+                        {" · "}{g.job || "직업 미지정"}
+                        {" · "}{turnCount || g.turnCount || 0}턴
+                      </div>
+                      <div style={{ fontSize: 10, color: "#a1a1aa" }}>
+                        💰 현금 ${fmtNumLocal(g.cash || 0)} · 📈 월 CF ${fmtNumLocal(g.totalCF || 0)} · 🏦 대출 ${fmtNumLocal(g.bankLoan || 0)}
+                        {g.babies > 0 && <span> · 👶 {g.babies}명</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {!loading && !error && selectedGame && (
+            <AdminGameDetail
+              game={selectedGame}
+              member={member}
+              adminUser={adminUser}
+              onBack={() => setSelectedGame(null)}
+              onGameUpdated={() => {
+                // 저장 후 목록 재로드 + 선택된 게임 데이터도 갱신
+                loadMemberGames();
+              }}
+            />
+          )}
+        </div>
+
+        {/* 푸터 */}
+        {!selectedGame && (
+          <div style={{ padding: "10px 16px", borderTop: "1px solid #27272a", background: "#111118", fontSize: 9, color: "#52525b", textAlign: "center" }}>
+            💡 게임을 클릭하면 턴 로그 · 자산 · 디브리핑을 확인하고 Admin이 대신 진행할 수 있습니다.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── 숫자 포맷 헬퍼 ───
+function fmtNumLocal(n) {
+  return new Intl.NumberFormat("en-US").format(n || 0);
+}
+
+// ═══════════════════════════════════════════════════
+// 💾 Admin이 생성한 디브리핑을 해당 user의 game row에 저장
+// ═══════════════════════════════════════════════════
+// games 테이블의 정규화된 구조:
+//   id (PK), user_id, debrief (JSON)
+// → debrief 컬럼에 { analysis, feedback: { free, detail, premium }, editHistory } JSON 저장
+async function saveDebriefToMemberGame(gameId, userId, tier, text, analysis, generatedAt, adminUser = null) {
+  // 1. 기존 row 읽기 (id로 정확히 1건)
+  const { data: existing, error: readErr } = await supabase
+    .from("games")
+    .select("id, user_id, debrief")
+    .eq("id", gameId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (readErr) throw new Error(`읽기 실패: ${readErr.message}`);
+  if (!existing) throw new Error(`게임 데이터(id=${gameId})를 찾을 수 없습니다.`);
+
+  // 기존 debrief JSON 파싱
+  let currentDebrief;
+  if (existing.debrief) {
+    if (typeof existing.debrief === "string") {
+      try { currentDebrief = JSON.parse(existing.debrief); }
+      catch { currentDebrief = {}; }
+    } else {
+      currentDebrief = existing.debrief;
+    }
+  } else {
+    currentDebrief = {};
+  }
+
+  // 기존 구조 보정
+  currentDebrief = {
+    analysis: currentDebrief.analysis || null,
+    analysisAt: currentDebrief.analysisAt || null,
+    feedback: currentDebrief.feedback || {},
+    editHistory: currentDebrief.editHistory || [],
+    ...currentDebrief,
+  };
+
+  // Admin 저장자 로그
+  const adminSaveLog = {
+    savedByUserId: adminUser?.id || null,
+    savedByEmail: adminUser?.email || null,
+    savedByNickname: adminUser?.user_metadata?.nickname || "Admin",
+    savedAt: generatedAt,
+    tier,
+    isAdmin: true,
+    targetUserId: userId,
+  };
+  console.log("[saveDebriefToMemberGame] 👑 Admin 저장 로그:", adminSaveLog);
+
+  // feedback 업데이트
+  const updatedFeedback = { ...(currentDebrief.feedback || {}) };
+  updatedFeedback[tier] = {
+    text,
+    generatedAt,
+    adminGenerated: true,
+    saveLog: adminSaveLog,
+  };
+
+  // 전체 debrief JSON 조립
+  const newDebrief = {
+    ...currentDebrief,
+    analysis: analysis || currentDebrief.analysis,
+    analysisAt: analysis ? generatedAt : currentDebrief.analysisAt,
+    feedback: updatedFeedback,
+    editHistory: [
+      ...(currentDebrief.editHistory || []),
+      { ...adminSaveLog, action: `admin_debrief_${tier}` },
+    ].slice(-50),
+  };
+
+  // UPDATE
+  const { error: updErr } = await supabase
+    .from("games")
+    .update({ debrief: newDebrief })
+    .eq("id", gameId)
+    .eq("user_id", userId);
+
+  if (updErr) throw new Error(`저장 실패: ${updErr.message}`);
+
+  console.log(`[saveDebriefToMemberGame] ✅ game id=${gameId} 의 ${tier} 디브리핑 저장 완료`);
+}
+
+// ═══════════════════════════════════════════════════
+// 🔍 게임 상세 (턴 로그 + 자산 + 자금 + 디브리핑)
+// ═══════════════════════════════════════════════════
+function AdminGameDetail({ game, member, adminUser, onBack, onGameUpdated }) {
+  const turnLog = game.turnLog || [];
+  const assets = game.assets || [];
+  const debriefData = game.debriefData || {};
+  const fb = debriefData.feedback || {};
+
+  // 🆕 디브리핑 진행 state
+  const [debriefRunning, setDebriefRunning] = useState(null); // "free" | "detail" | "premium" | null
+  const [debriefError, setDebriefError] = useState("");
+  const [debriefResult, setDebriefResult] = useState(null); // { tier, text, analysis, generatedAt }
+  const [confirmTier, setConfirmTier] = useState(null); // 유료 티어 확인 모달
+
+  const CELL_LABELS = {
+    SMALL_DEAL: "🏪 SMALL DEAL", BIG_DEAL: "🏢 BIG DEAL",
+    MARKET: "🛒 MARKET", DOODAD: "💸 DOODAD",
+    PAYDAY: "💰 PAYDAY", CHARITY: "🎁 CHARITY",
+    BABY: "👶 BABY", DOWNSIZED: "📉 DOWNSIZED",
+    OPPORTUNITY: "🎯 OPPORTUNITY",
+  };
+
+  const getActionLabel = (a) => {
+    if (!a) return "";
+    const map = { buy: "구매", pass: "패스", sell: "판매", hold: "홀딩", na: "해당없음", damage: "지불", charity_yes: "기부 YES", charity_no: "기부 NO" };
+    return map[a] || a;
+  };
+
+  // 🆕 Admin이 대신 디브리핑 진행
+  const handleAdminDebrief = async (tier) => {
+    if (!turnLog || turnLog.length === 0) {
+      setDebriefError("턴 기록이 없어 디브리핑을 진행할 수 없습니다.");
+      return;
+    }
+
+    // 이미 저장된 디브리핑이 있으면 표시만
+    const existing = fb[tier];
+    if (existing?.text) {
+      setDebriefResult({
+        tier,
+        text: existing.text,
+        analysis: debriefData.analysis || null,
+        generatedAt: existing.generatedAt,
+        savedReplay: true,
+      });
+      return;
+    }
+
+    setDebriefRunning(tier);
+    setDebriefError("");
+    setDebriefResult(null);
+
+    try {
+      // turnLog → results 구조 변환
+      const results = (game.gameResults || turnLog.map(t => ({
+        turn: t.turn,
+        cell: { type: t.cellType, label: t.cellType },
+        dealType: t.dealType,
+        card: t.card ? { ...t.card, _action: t.action, _shares: t.shares } : null,
+        decisionSec: t.decisionSec,
+        splitApplied: t.splitApplied,
+        dice: [0], total: 0, pos: 0,
+      })));
+
+      const turns = game.turnCount || turnLog.length;
+      const simText = game.simText || buildPromptText(results, game.version, turns);
+
+      let text;
+      let analysis = null;
+
+      if (tier === "free") {
+        // 무료: 텍스트 즉시 + 풀 분석 API
+        text = generateFreeFeedback(results, turns);
+
+        // 캐시된 analysis 있으면 재사용
+        if (debriefData.analysis?.phases) {
+          analysis = debriefData.analysis;
+        } else {
+          try {
+            analysis = await runFullAnalysis({
+              simText, version: game.version, turns, results,
+            });
+          } catch (e) {
+            console.warn("[AdminDebrief] runFullAnalysis 실패 (텍스트만):", e.message);
+          }
+        }
+      } else {
+        // 상세/프리미엄: API 호출
+        text = await generatePaidFeedback({
+          tier: tier === "detail" ? 1 : 2,
+          version: game.version, turns, simText,
+        });
+
+        // 유료는 6 Levels 진단 추가
+        try {
+          const passiveIncome = (assets || []).filter(a => a.type !== "주식").reduce((s, a) => s + (a.cf || 0), 0);
+          const totalExpense = game.totalCF !== undefined && game.totalCF < 0
+            ? Math.abs(game.totalCF) + passiveIncome : 1000;
+          const financialLevel = diagnoseFinancialLevel({
+            passiveIncome, totalExpense,
+            cash: game.cash || 0,
+            assets, bankLoan: game.bankLoan || 0,
+            jobName: game.job || "",
+          });
+          analysis = debriefData.analysis ? { ...debriefData.analysis, financialLevel } : { financialLevel };
+        } catch (e) {
+          console.warn("[AdminDebrief] 6단계 진단 실패:", e.message);
+        }
+      }
+
+      // 결과 표시
+      const generatedAt = new Date().toISOString();
+      setDebriefResult({ tier, text, analysis, generatedAt, savedReplay: false });
+
+      // 해당 user의 game row에 저장
+      try {
+        await saveDebriefToMemberGame(game.id, member.user_id, tier, text, analysis, generatedAt, adminUser);
+        // 부모에게 업데이트 알림 (목록 갱신)
+        if (onGameUpdated) onGameUpdated();
+      } catch (saveErr) {
+        console.error("[AdminDebrief] 저장 실패:", saveErr);
+        setDebriefError(`디브리핑은 생성되었지만 저장에 실패했습니다: ${saveErr.message}`);
+      }
+    } catch (e) {
+      console.error(`[AdminDebrief] ${tier} 실패:`, e);
+      setDebriefError(e.message || "디브리핑 진행 중 오류가 발생했습니다.");
+    } finally {
+      setDebriefRunning(null);
+      setConfirmTier(null);
+    }
+  };
+
+  return (
+    <div>
+      <button
+        onClick={onBack}
+        style={{
+          padding: "6px 12px", borderRadius: 6, border: "1px solid #27272a",
+          background: "transparent", color: "#a1a1aa",
+          cursor: "pointer", fontSize: 11, fontWeight: 600, marginBottom: 12,
+        }}
+      >← 게임 목록으로</button>
+
+      {/* 기본 정보 */}
+      <div style={{ padding: 14, borderRadius: 10, background: "#111118", border: "1px solid #27272a", marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "#fafafa", marginBottom: 6 }}>
+          {game.version || "캐쉬플로우"} · {game.job || "-"} · {game.turnCount || turnLog.length}턴
+        </div>
+        <div style={{ fontSize: 10, color: "#71717a" }}>
+          {game.dateTime ? new Date(game.dateTime).toLocaleString("ko-KR") : ""}
+          {game.escaped && <span style={{ color: "#86efac", marginLeft: 8 }}>✅ 탈출 성공</span>}
+        </div>
+      </div>
+
+      {/* 🆕 저장 로그 (누가 저장했는지) */}
+      {(game.saveLog || (game.saveHistory && game.saveHistory.length > 0) || (game.debriefData && game.debriefData.editHistory)) && (
+        <div style={{ marginBottom: 12, padding: 12, borderRadius: 8, background: "#111118", border: "1px solid #27272a" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#fbbf24", marginBottom: 6 }}>📝 저장 로그</div>
+
+          {/* 최초 저장 */}
+          {game.saveLog && (
+            <div style={{ fontSize: 10, color: "#d4d4d8", marginBottom: 4, lineHeight: 1.5 }}>
+              <strong style={{ color: "#86efac" }}>[최초 저장]</strong>
+              {" "}{game.saveLog.savedByNickname || game.saveLog.savedByEmail || game.saveLog.savedByUserId || "알 수 없음"}
+              {" · "}{game.saveLog.savedAt ? new Date(game.saveLog.savedAt).toLocaleString("ko-KR") : "-"}
+              {game.saveLog.savedByUserId && (
+                <div style={{ fontSize: 9, color: "#52525b", paddingLeft: 12, fontFamily: "monospace" }}>
+                  user_id: {String(game.saveLog.savedByUserId).substring(0, 16)}...
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 편집 이력 (디브리핑 등) */}
+          {game.debriefData?.editHistory && game.debriefData.editHistory.length > 0 && (
+            <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px dashed #27272a" }}>
+              <div style={{ fontSize: 10, color: "#71717a", marginBottom: 3 }}>편집 이력 ({game.debriefData.editHistory.length}건):</div>
+              {game.debriefData.editHistory.slice(-5).reverse().map((e, i) => (
+                <div key={i} style={{ fontSize: 9, color: "#d4d4d8", paddingLeft: 8, lineHeight: 1.5 }}>
+                  {e.isAdmin && <span style={{ color: "#fbbf24" }}>👑 </span>}
+                  <code style={{ color: e.isAdmin ? "#fde68a" : "#86efac" }}>{e.action || "edit"}</code>
+                  {" · "}{e.savedByNickname || e.savedByEmail || "-"}
+                  {" · "}<span style={{ color: "#71717a" }}>{e.savedAt ? new Date(e.savedAt).toLocaleString("ko-KR") : "-"}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* saveLog 없는 레거시 데이터 안내 */}
+          {!game.saveLog && (
+            <div style={{ fontSize: 9, color: "#52525b", fontStyle: "italic" }}>
+              ℹ️ 이 게임은 저장 로그 기능 도입 이전에 저장되어 기록이 없습니다.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 재무 상태 */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#c4b5fd", marginBottom: 6 }}>💰 최종 재무 상태</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, padding: 12, borderRadius: 8, background: "#111118", border: "1px solid #27272a" }}>
+          <div><span style={{ fontSize: 10, color: "#71717a" }}>보유 현금:</span> <span style={{ fontSize: 12, fontWeight: 700, color: "#fbbf24" }}>${fmtNumLocal(game.cash || 0)}</span></div>
+          <div><span style={{ fontSize: 10, color: "#71717a" }}>월 현금흐름:</span> <span style={{ fontSize: 12, fontWeight: 700, color: (game.totalCF || 0) >= 0 ? "#22c55e" : "#ef4444" }}>{(game.totalCF || 0) >= 0 ? "+" : ""}${fmtNumLocal(game.totalCF || 0)}</span></div>
+          <div><span style={{ fontSize: 10, color: "#71717a" }}>신용대출:</span> <span style={{ fontSize: 12, fontWeight: 700, color: "#f87171" }}>${fmtNumLocal(game.bankLoan || 0)}</span></div>
+          <div><span style={{ fontSize: 10, color: "#71717a" }}>월 이자:</span> <span style={{ fontSize: 12, fontWeight: 700, color: "#fca5a5" }}>${fmtNumLocal(game.loanInterest || 0)}</span></div>
+          <div><span style={{ fontSize: 10, color: "#71717a" }}>수동소득:</span> <span style={{ fontSize: 12, fontWeight: 700, color: "#22c55e" }}>${fmtNumLocal(assets.filter(a => a.type !== "주식").reduce((s, a) => s + (a.cf || 0), 0))}</span></div>
+          <div><span style={{ fontSize: 10, color: "#71717a" }}>자녀:</span> <span style={{ fontSize: 12, fontWeight: 700, color: "#fafafa" }}>{game.babies || 0}명</span></div>
+        </div>
+      </div>
+
+      {/* 자산 목록 */}
+      {assets.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#c4b5fd", marginBottom: 6 }}>📦 보유 자산 ({assets.length}개)</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: 12, borderRadius: 8, background: "#111118", border: "1px solid #27272a" }}>
+            {assets.map((a, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10 }}>
+                <span style={{ color: "#e4e4e7" }}>[{a.type}] {a.name}{a.shares ? ` (${a.shares}주)` : ""}</span>
+                <span style={{ color: (a.cf || 0) > 0 ? "#22c55e" : "#71717a" }}>
+                  {a.cf ? `CF ${a.cf > 0 ? "+" : ""}$${fmtNumLocal(a.cf)}` : ""}
+                  {a.cost ? ` · $${fmtNumLocal(a.cost)}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 턴별 기록 */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#c4b5fd", marginBottom: 6 }}>🎲 턴별 기록 ({turnLog.length}턴)</div>
+        {turnLog.length === 0 ? (
+          <div style={{ padding: 20, textAlign: "center", color: "#52525b", fontSize: 11, borderRadius: 8, background: "#111118", border: "1px dashed #27272a" }}>턴 기록이 없습니다</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 300, overflowY: "auto", padding: 12, borderRadius: 8, background: "#111118", border: "1px solid #27272a" }}>
+            {turnLog.map((t, i) => (
+              <div key={i} style={{
+                padding: "6px 10px", borderRadius: 6,
+                background: "#0a0a0f", borderLeft: `3px solid ${
+                  t.action === "buy" ? "#22c55e" :
+                  t.action === "pass" ? "#ef4444" :
+                  t.action === "sell" ? "#f59e0b" :
+                  t.action === "charity_yes" ? "#8b5cf6" :
+                  "#52525b"
+                }`,
+                fontSize: 10,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#fafafa", fontWeight: 600 }}>
+                    T{t.turn} · {CELL_LABELS[t.cellType] || t.cellType}
+                    {t.action && <span style={{ color: "#a1a1aa", marginLeft: 6 }}>[{getActionLabel(t.action)}]</span>}
+                  </span>
+                  {t.decisionSec != null && (
+                    <span style={{ fontSize: 9, color: "#52525b" }}>⏱️ {t.decisionSec}초</span>
+                  )}
+                </div>
+                {t.card && (t.card.sub || t.card.desc) && (
+                  <div style={{ color: "#a1a1aa", marginTop: 2 }}>
+                    {t.card.sub || t.card.desc}
+                    {t.card.cashflow != null && <span style={{ color: "#86efac", marginLeft: 4 }}>(CF {t.card.cashflow > 0 ? "+" : ""}${t.card.cashflow})</span>}
+                  </div>
+                )}
+                {t.transaction && (
+                  <div style={{ color: "#fbbf24", fontSize: 9, marginTop: 2 }}>{t.transaction}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 🆕 Admin 디브리핑 진행 영역 */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#c4b5fd", marginBottom: 6 }}>
+          📝 디브리핑 (Admin이 대신 진행 가능)
+        </div>
+
+        {/* 3개 티어 버튼 */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+          {[
+            { key: "free", icon: "💬", label: "요약", price: "무료", color: "#22c55e" },
+            { key: "detail", icon: "📝", label: "상세", price: "$9", color: "#3b82f6" },
+            { key: "premium", icon: "💎", label: "프리미엄", price: "$20", color: "#f59e0b" },
+          ].map(t => {
+            const done = !!fb[t.key]?.text;
+            const loading = debriefRunning === t.key;
+            return (
+              <button
+                key={t.key}
+                disabled={!!debriefRunning || turnLog.length === 0}
+                onClick={() => {
+                  if (t.key === "free") {
+                    handleAdminDebrief(t.key);
+                  } else {
+                    // 유료는 확인 팝업
+                    setConfirmTier(t.key);
+                  }
+                }}
+                style={{
+                  flex: 1, padding: "10px 4px", borderRadius: 8,
+                  border: done ? `1px solid ${t.color}` : `1px solid ${t.color}40`,
+                  background: done ? `${t.color}20` : `${t.color}08`,
+                  color: done ? t.color : "#a1a1aa",
+                  cursor: debriefRunning || turnLog.length === 0 ? "not-allowed" : "pointer",
+                  fontSize: 11, fontWeight: 700,
+                  opacity: debriefRunning && !loading ? 0.4 : 1,
+                  display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+                }}
+                title={turnLog.length === 0 ? "턴 기록이 없어 디브리핑 불가" : ""}
+              >
+                <span style={{ fontSize: 14 }}>{loading ? "⏳" : t.icon}</span>
+                <span>{t.label}</span>
+                <span style={{ fontSize: 9, color: done ? t.color : "#52525b" }}>
+                  {loading ? "생성 중..." : (done ? "📄 다시 보기" : `▶ ${t.price}`)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 유료 티어 확인 팝업 */}
+        {confirmTier && (
+          <div style={{ padding: 14, borderRadius: 8, background: "#fbbf2410", border: "1px solid #fbbf2440", marginBottom: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#fde68a", marginBottom: 6 }}>
+              ⚠️ {confirmTier === "detail" ? "상세 ($9)" : "프리미엄 ($20)"} 디브리핑 진행 확인
+            </div>
+            <div style={{ fontSize: 10, color: "#a1a1aa", marginBottom: 10, lineHeight: 1.6 }}>
+              Admin이 <strong style={{ color: "#fafafa" }}>{member.name}</strong>님의 게임에 대해 디브리핑을 진행합니다.<br/>
+              생성된 결과는 해당 회원의 데이터에 저장되어 회원 본인도 조회할 수 있습니다.<br/>
+              <span style={{ color: "#fbbf24" }}>유료 티어이므로 API 비용이 발생합니다.</span>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => setConfirmTier(null)} style={{
+                flex: 1, padding: "6px 12px", borderRadius: 6, border: "1px solid #27272a",
+                background: "transparent", color: "#a1a1aa", cursor: "pointer", fontSize: 11,
+              }}>취소</button>
+              <button onClick={() => handleAdminDebrief(confirmTier)} style={{
+                flex: 1, padding: "6px 12px", borderRadius: 6, border: "none",
+                background: confirmTier === "detail" ? "#3b82f6" : "#f59e0b",
+                color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700,
+              }}>진행 (API 호출)</button>
+            </div>
+          </div>
+        )}
+
+        {/* 에러 표시 */}
+        {debriefError && (
+          <div style={{ padding: 10, borderRadius: 6, background: "#7f1d1d30", border: "1px solid #ef444450", color: "#fca5a5", fontSize: 11, marginBottom: 10 }}>
+            ⚠️ {debriefError}
+          </div>
+        )}
+
+        {/* 디브리핑 결과 (방금 생성 또는 다시 보기) */}
+        {debriefResult && (
+          <div style={{ padding: 12, borderRadius: 8, background: "#111118", border: `2px solid ${
+            debriefResult.tier === "free" ? "#22c55e" :
+            debriefResult.tier === "detail" ? "#3b82f6" : "#f59e0b"
+          }`, marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#fafafa" }}>
+                {debriefResult.tier === "free" && "💬 요약 피드백"}
+                {debriefResult.tier === "detail" && "📝 상세 피드백 ($9)"}
+                {debriefResult.tier === "premium" && "💎 프리미엄 피드백 ($20)"}
+                {debriefResult.savedReplay && <span style={{ fontSize: 9, marginLeft: 6, color: "#71717a" }}>(저장본)</span>}
+                {!debriefResult.savedReplay && <span style={{ fontSize: 9, marginLeft: 6, color: "#86efac" }}>✅ 방금 생성</span>}
+              </div>
+              <button onClick={() => setDebriefResult(null)} style={{
+                padding: "3px 8px", borderRadius: 4, border: "none",
+                background: "#27272a", color: "#a1a1aa", cursor: "pointer", fontSize: 10,
+              }}>✕</button>
+            </div>
+
+            {/* 풀 분석 렌더링 */}
+            {debriefResult.analysis && (debriefResult.analysis.phases || debriefResult.analysis.lessons || debriefResult.analysis.financialLevel) && (
+              <div style={{ marginBottom: 16 }}>
+                <AnalysisReport
+                  analysis={debriefResult.analysis}
+                  turns={game.turnCount || turnLog.length}
+                />
+              </div>
+            )}
+
+            {/* 텍스트 피드백 */}
+            <div style={{
+              fontSize: 12, color: "#e4e4e7", lineHeight: 1.7,
+              whiteSpace: "pre-wrap", wordBreak: "break-word",
+              paddingTop: debriefResult.analysis ? 12 : 0,
+              borderTop: debriefResult.analysis ? "1px solid #27272a" : "none",
+              maxHeight: 400, overflowY: "auto",
+            }}>
+              {debriefResult.analysis && (
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#71717a", marginBottom: 8 }}>
+                  💬 코칭 메시지
+                </div>
+              )}
+              {debriefResult.text}
+            </div>
+          </div>
+        )}
+
+        {/* 저장된 디브리핑 기록 (간단 요약) */}
+        {(fb.free?.text || fb.detail?.text || fb.premium?.text) && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {fb.free?.text && (
+              <details style={{ padding: 10, borderRadius: 6, background: "#111118", border: "1px solid #27272a" }}>
+                <summary style={{ fontSize: 10, fontWeight: 600, color: "#22c55e", cursor: "pointer" }}>
+                  💬 요약 피드백 · {fb.free.generatedAt ? new Date(fb.free.generatedAt).toLocaleDateString("ko-KR") : ""}
+                  {fb.free.adminGenerated && <span style={{ color: "#fbbf24", marginLeft: 4 }}>👑 Admin 생성</span>}
+                </summary>
+                <div style={{ marginTop: 8, fontSize: 11, color: "#e4e4e7", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{fb.free.text}</div>
+              </details>
+            )}
+            {fb.detail?.text && (
+              <details style={{ padding: 10, borderRadius: 6, background: "#111118", border: "1px solid #27272a" }}>
+                <summary style={{ fontSize: 10, fontWeight: 600, color: "#3b82f6", cursor: "pointer" }}>
+                  📝 상세 피드백 ($9) · {fb.detail.generatedAt ? new Date(fb.detail.generatedAt).toLocaleDateString("ko-KR") : ""}
+                  {fb.detail.adminGenerated && <span style={{ color: "#fbbf24", marginLeft: 4 }}>👑 Admin 생성</span>}
+                </summary>
+                <div style={{ marginTop: 8, fontSize: 11, color: "#e4e4e7", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{fb.detail.text}</div>
+              </details>
+            )}
+            {fb.premium?.text && (
+              <details style={{ padding: 10, borderRadius: 6, background: "#111118", border: "1px solid #27272a" }}>
+                <summary style={{ fontSize: 10, fontWeight: 600, color: "#f59e0b", cursor: "pointer" }}>
+                  💎 프리미엄 피드백 ($20) · {fb.premium.generatedAt ? new Date(fb.premium.generatedAt).toLocaleDateString("ko-KR") : ""}
+                  {fb.premium.adminGenerated && <span style={{ color: "#fbbf24", marginLeft: 4 }}>👑 Admin 생성</span>}
+                </summary>
+                <div style={{ marginTop: 8, fontSize: 11, color: "#e4e4e7", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{fb.premium.text}</div>
+              </details>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }

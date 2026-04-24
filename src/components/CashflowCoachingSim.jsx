@@ -129,47 +129,47 @@ const SMALL_DEALS = [
 ];
 
 const BIG_DEALS = [
-  { sub:"주택 3/2", desc:"수영장 완벽한 3/2 주택. 중상류층 거주 지역. -6% ROI. 착수금 $20,000.", down:"$20K", cf:"-$100" },
-  { sub:"주택 3/2", desc:"이혼으로 인해 3/2 주택 매물. 30% ROI. 착수금 $20,000.", down:"$20K", cf:"+$500" },
-  { sub:"주택 3/2", desc:"사업자가 3/2 주택을 팔아 사업자금으로. 26% ROI. 착수금 $7,000.", down:"$7K", cf:"+$150" },
-  { sub:"주택 3/2", desc:"상류층 대출 없는 완벽한 집. 30% ROI. 착수금 $60,000.", down:"$60K", cf:"+$1,500" },
-  { sub:"주택 3/2", desc:"정리 해고 된 매니저가 내놓음. 40% ROI. 착수금 $9,000.", down:"$9K", cf:"+$300" },
-  { sub:"주택 3/2", desc:"다른 지역으로 이주한 상인이 관리한 집. 40% ROI. 착수금 $12,000.", down:"$12K", cf:"+$400" },
-  { sub:"주택 3/2", desc:"투자가치가 있는 매물. 45% ROI. 착수금 $8,000.", down:"$8K", cf:"+$300" },
-  { sub:"주택 3/2", desc:"골프코스 근처 3/2 주택. 51% ROI. 착수금 $7,000.", down:"$7K", cf:"+$300" },
-  { sub:"주택 3/2", desc:"은퇴한 젊은부부가 전원 생활 위해 내놓음. 40% ROI. 착수금 $9,000.", down:"$9K", cf:"+$300" },
-  { sub:"주택 3/2", desc:"도심 한가운데 고즈넉한 3/2 주택. 40% ROI. 착수금 $12,000.", down:"$12K", cf:"+$400" },
-  { sub:"2가구 주택", desc:"동네에서 가장 좋은 2가구 주택. 24% ROI. 착수금 $7,000.", down:"$7K", cf:"+$140" },
-  { sub:"2가구 주택", desc:"늘어나는 가족 때문에 매물. 36% ROI. 착수금 $8,000.", down:"$8K", cf:"+$240" },
-  { sub:"2가구 주택", desc:"병원비 충당 위해 내놓은 매물. 40% ROI. 착수금 $12,000.", down:"$12K", cf:"+$400" },
-  { sub:"4가구 주택", desc:"공원 근처 급매물. 48% ROI. 착수금 $8,000.", down:"$8K", cf:"+$320" },
-  { sub:"4가구 주택", desc:"대학교 근처 4가구. 24% ROI. 착수금 $20,000.", down:"$20K", cf:"+$400" },
-  { sub:"4가구 주택", desc:"고속도로 옆 넓은 4가구. 40% ROI. 착수금 $15,000.", down:"$15K", cf:"+$500" },
-  { sub:"4가구 주택", desc:"좋은 환경 4가구 주택. 48% ROI. 착수금 $15,000.", down:"$15K", cf:"+$600" },
-  { sub:"4가구 주택", desc:"재번성 지역 4가구. 48% ROI. 착수금 $20,000.", down:"$20K", cf:"+$800" },
-  { sub:"4가구 주택", desc:"강제 경매 4가구. 56% ROI. 착수금 $16,000.", down:"$16K", cf:"+$750" },
-  { sub:"4가구 주택", desc:"서류완비, 전부 임차 중. 75% ROI. 착수금 $32,000.", down:"$32K", cf:"+$2,000" },
-  { sub:"8가구 주택", desc:"소유주 은퇴 좋은 가격. 29% ROI. 착수금 $40,000.", down:"$40K", cf:"+$950" },
-  { sub:"8가구 주택", desc:"법적 문제로 급매. 48% ROI. 착수금 $40,000.", down:"$40K", cf:"+$1,600" },
-  { sub:"8가구 주택", desc:"합리적 가격 매물. 51% ROI. 착수금 $40,000.", down:"$40K", cf:"+$1,700" },
-  { sub:"8가구 주택", desc:"전문직 사업자금 마련. 64% ROI. 착수금 $32,000.", down:"$32K", cf:"+$1,700" },
-  { sub:"아파트 단지", desc:"24채 아파트 단지. 54% ROI. 착수금 $75,000.", down:"$75K", cf:"+$3,400" },
-  { sub:"아파트 단지", desc:"12채 아파트 단지. 58% ROI. 착수금 $50,000.", down:"$50K", cf:"+$2,400" },
-  { sub:"아파트 단지", desc:"60채 정부 보조아파트. 66% ROI. 착수금 $100,000.", down:"$100K", cf:"+$11,000" },
-  { sub:"PC 게임방", desc:"30개의 PC 게임방 급매물. 96% ROI. 착수금 $20,000.", down:"$20K", cf:"+$1,600" },
-  { sub:"세탁소", desc:"번화한 도로 옆 성공한 세탁소. 100% ROI. 착수금 $30,000.", down:"$30K", cf:"+$2,500" },
-  { sub:"문구 도매", desc:"성공한 문구 도매사업. 81% ROI. 착수금 $40,000.", down:"$40K", cf:"+$2,700" },
-  { sub:"빨래방", desc:"교차로 옆 성공한 4개의 빨래방. 86% ROI. 착수금 $25,000.", down:"$25K", cf:"+$1,800" },
-  { sub:"도넛 프랜차이즈", desc:"세계적 도넛 회사 체인점. 60% ROI. 착수금 $150,000.", down:"$150K", cf:"+$4,700" },
-  { sub:"세차장", desc:"가족 불화로 급매. 36% ROI. 착수금 $50,000.", down:"$50K", cf:"+$1,500" },
-  { sub:"피자 프랜차이즈", desc:"건강식 피자 체인. 60% ROI. 착수금 $100,000.", down:"$100K", cf:"+$5,000" },
-  { sub:"작은 모텔(B&B)", desc:"리조트 지역 많은 단골. 40% ROI. 착수금 $30,000.", down:"$30K", cf:"+$1,000" },
-  { sub:"작은 쇼핑몰", desc:"파산으로 은행에서 인수한 매물. 19% ROI. 착수금 $50,000.", down:"$50K", cf:"+$800" },
-  { sub:"24,000평 땅", desc:"주거지 용도 빈 공터. 상업지역 전환 가능성. 0% ROI.", down:"$20K", cf:"$0" },
-  { sub:"동업(자동차리스)", desc:"중고 자동차 리스 사업 확장. 40% ROI. 착수금 $30,000.", down:"$30K", cf:"+$1,000" },
-  { sub:"동업(냉동피자)", desc:"피자 체인 냉동 피자 사업 확장. 48% ROI. 착수금 $20,000.", down:"$20K", cf:"+$800" },
-  { sub:"동업(병원확장)", desc:"의사가 병원 확장. 48% ROI. 착수금 $25,000.", down:"$25K", cf:"+$1,000" },
-  { sub:"동업(샌드위치)", desc:"샌드위치 가게 확장. 60% ROI. 착수금 $30,000.", down:"$30K", cf:"+$1,500" },
+  { sub:"주택 3/2", price:"$125,000", desc:"수영장 완벽한 3/2 주택. 중상류층 거주 지역. -6% ROI. 착수금 $20,000.", down:"$20K", cf:"-$100" },
+  { sub:"주택 3/2", price:"$100,000", desc:"이혼으로 인해 3/2 주택 매물. 30% ROI. 착수금 $20,000.", down:"$20K", cf:"+$500" },
+  { sub:"주택 3/2", price:"$70,000", desc:"사업자가 3/2 주택을 팔아 사업자금으로. 26% ROI. 착수금 $7,000.", down:"$7K", cf:"+$150" },
+  { sub:"주택 3/2", price:"$60,000", desc:"상류층 대출 없는 완벽한 집. 30% ROI. 착수금 $60,000. (올캐시 매입 - 대출 없음)", down:"$60K", cf:"+$1,500" },
+  { sub:"주택 3/2", price:"$90,000", desc:"정리 해고 된 매니저가 내놓음. 40% ROI. 착수금 $9,000.", down:"$9K", cf:"+$300" },
+  { sub:"주택 3/2", price:"$120,000", desc:"다른 지역으로 이주한 상인이 관리한 집. 40% ROI. 착수금 $12,000.", down:"$12K", cf:"+$400" },
+  { sub:"주택 3/2", price:"$80,000", desc:"투자가치가 있는 매물. 45% ROI. 착수금 $8,000.", down:"$8K", cf:"+$300" },
+  { sub:"주택 3/2", price:"$70,000", desc:"골프코스 근처 3/2 주택. 51% ROI. 착수금 $7,000.", down:"$7K", cf:"+$300" },
+  { sub:"주택 3/2", price:"$90,000", desc:"은퇴한 젊은부부가 전원 생활 위해 내놓음. 40% ROI. 착수금 $9,000.", down:"$9K", cf:"+$300" },
+  { sub:"주택 3/2", price:"$120,000", desc:"도심 한가운데 고즈넉한 3/2 주택. 40% ROI. 착수금 $12,000.", down:"$12K", cf:"+$400" },
+  { sub:"2가구 주택", price:"$70,000", desc:"동네에서 가장 좋은 2가구 주택. 24% ROI. 착수금 $7,000. 대출 $63,000.", down:"$7K", cf:"+$140" },
+  { sub:"2가구 주택", price:"$80,000", desc:"늘어나는 가족 때문에 매물. 36% ROI. 착수금 $8,000. 대출 $72,000.", down:"$8K", cf:"+$240" },
+  { sub:"2가구 주택", price:"$120,000", desc:"병원비 충당 위해 내놓은 매물. 40% ROI. 착수금 $12,000. 대출 $108,000.", down:"$12K", cf:"+$400" },
+  { sub:"4가구 주택", price:"$80,000", desc:"공원 근처 급매물. 48% ROI. 착수금 $8,000. 대출 $72,000.", down:"$8K", cf:"+$320" },
+  { sub:"4가구 주택", price:"$200,000", desc:"대학교 근처 4가구. 24% ROI. 착수금 $20,000. 대출 $180,000.", down:"$20K", cf:"+$400" },
+  { sub:"4가구 주택", price:"$150,000", desc:"고속도로 옆 넓은 4가구. 40% ROI. 착수금 $15,000. 대출 $135,000.", down:"$15K", cf:"+$500" },
+  { sub:"4가구 주택", price:"$150,000", desc:"좋은 환경 4가구 주택. 48% ROI. 착수금 $15,000. 대출 $135,000.", down:"$15K", cf:"+$600" },
+  { sub:"4가구 주택", price:"$200,000", desc:"재번성 지역 4가구. 48% ROI. 착수금 $20,000. 대출 $180,000.", down:"$20K", cf:"+$800" },
+  { sub:"4가구 주택", price:"$160,000", desc:"강제 경매 4가구. 56% ROI. 착수금 $16,000. 대출 $144,000.", down:"$16K", cf:"+$750" },
+  { sub:"4가구 주택", price:"$320,000", desc:"서류완비, 전부 임차 중. 75% ROI. 착수금 $32,000. 대출 $288,000.", down:"$32K", cf:"+$2,000" },
+  { sub:"8가구 주택", price:"$400,000", desc:"소유주 은퇴 좋은 가격. 29% ROI. 착수금 $40,000. 대출 $360,000.", down:"$40K", cf:"+$950" },
+  { sub:"8가구 주택", price:"$400,000", desc:"법적 문제로 급매. 48% ROI. 착수금 $40,000. 대출 $360,000.", down:"$40K", cf:"+$1,600" },
+  { sub:"8가구 주택", price:"$400,000", desc:"합리적 가격 매물. 51% ROI. 착수금 $40,000. 대출 $360,000.", down:"$40K", cf:"+$1,700" },
+  { sub:"8가구 주택", price:"$320,000", desc:"전문직 사업자금 마련. 64% ROI. 착수금 $32,000. 대출 $288,000.", down:"$32K", cf:"+$1,700" },
+  { sub:"아파트 단지", price:"$750,000", desc:"24채 아파트 단지. 54% ROI. 착수금 $75,000. 대출 $675,000.", down:"$75K", cf:"+$3,400" },
+  { sub:"아파트 단지", price:"$500,000", desc:"12채 아파트 단지. 58% ROI. 착수금 $50,000. 대출 $450,000.", down:"$50K", cf:"+$2,400" },
+  { sub:"아파트 단지", price:"$1,200,000", desc:"60채 정부 보조아파트. 66% ROI. 착수금 $200,000. 대출 $1,000,000.", down:"$200K", cf:"+$11,000" },
+  { sub:"PC 게임방", price:"$20,000", desc:"30개의 PC 게임방 급매물. 96% ROI. 착수금 $20,000. (대출 없음 - 올캐시 사업).", down:"$20K", cf:"+$1,600" },
+  { sub:"세탁소", price:"$30,000", desc:"번화한 도로 옆 성공한 세탁소. 100% ROI. 착수금 $30,000. (대출 없음 - 올캐시 사업).", down:"$30K", cf:"+$2,500" },
+  { sub:"문구 도매", price:"$40,000", desc:"성공한 문구 도매사업. 81% ROI. 착수금 $40,000. (대출 없음 - 올캐시 사업).", down:"$40K", cf:"+$2,700" },
+  { sub:"빨래방", price:"$25,000", desc:"교차로 옆 성공한 4개의 빨래방. 86% ROI. 착수금 $25,000. (대출 없음 - 올캐시 사업).", down:"$25K", cf:"+$1,800" },
+  { sub:"도넛 프랜차이즈", price:"$500,000", desc:"세계적 도넛 회사 체인점. 60% ROI. 착수금 $150,000. 대출 $350,000.", down:"$150K", cf:"+$4,700" },
+  { sub:"세차장", price:"$50,000", desc:"가족 불화로 급매. 36% ROI. 착수금 $50,000. (대출 없음 - 올캐시 사업).", down:"$50K", cf:"+$1,500" },
+  { sub:"피자 프랜차이즈", price:"$100,000", desc:"건강식 피자 체인. 60% ROI. 착수금 $100,000. (대출 없음 - 올캐시 사업).", down:"$100K", cf:"+$5,000" },
+  { sub:"작은 모텔(B&B)", price:"$30,000", desc:"리조트 지역 많은 단골. 40% ROI. 착수금 $30,000. (대출 없음 - 올캐시 사업).", down:"$30K", cf:"+$1,000" },
+  { sub:"작은 쇼핑몰", price:"$50,000", desc:"파산으로 은행에서 인수한 매물. 19% ROI. 착수금 $50,000. (대출 없음 - 올캐시 사업).", down:"$50K", cf:"+$800" },
+  { sub:"24,000평 땅", price:"$20,000", desc:"주거지 용도 빈 공터. 상업지역 전환 가능성. 0% ROI. 착수금 $20,000. (대출 없음 - 올캐시 매입).", down:"$20K", cf:"$0" },
+  { sub:"동업(자동차리스)", price:"$30,000", desc:"중고 자동차 리스 사업 확장. 40% ROI. 착수금 $30,000. (대출 없음 - 지분 매입).", down:"$30K", cf:"+$1,000" },
+  { sub:"동업(냉동피자)", price:"$20,000", desc:"피자 체인 냉동 피자 사업 확장. 48% ROI. 착수금 $20,000. (대출 없음 - 지분 매입).", down:"$20K", cf:"+$800" },
+  { sub:"동업(병원확장)", price:"$25,000", desc:"의사가 병원 확장. 48% ROI. 착수금 $25,000. (대출 없음 - 지분 매입).", down:"$25K", cf:"+$1,000" },
+  { sub:"동업(샌드위치)", price:"$30,000", desc:"샌드위치 가게 확장. 60% ROI. 착수금 $30,000. (대출 없음 - 지분 매입).", down:"$30K", cf:"+$1,500" },
 ];
 
 const MARKETS = [
@@ -1330,7 +1330,7 @@ function TurnEditModal({ turnIndex, turn, onSave, onClose }) {
     } else if (ct === "EXT_SELL") {
       setIfNum("_sellPrice", sellPrice);
     } else if (ct === "MARKET") {
-      if (action === "sell") setIfNum("_sellPrice", sellPrice);
+      // 🆕 MARKET sell은 카드의 sell 필드를 사용하므로 _sellPrice 저장 안 함
       if (action === "damage") setIfNum("_damageAmount", damageAmount);
     } else if (ct === "DOODAD") {
       setIfNum("_cost", cost);
@@ -1403,7 +1403,18 @@ function TurnEditModal({ turnIndex, turn, onSave, onClose }) {
       return numField("매각가 ($)", sellPrice, setSellPrice, "💵");
     }
     if (ct === "MARKET" && action === "sell") {
-      return numField("매각가 ($)", sellPrice, setSellPrice, "💵");
+      // 🆕 카드의 고정 매각가는 수정 불가 (읽기 전용 표시)
+      const cardFixed = turn.card?.sell ? parseNum(turn.card.sell) : (turn._sellPrice || 0);
+      return (
+        <div style={{ padding: "8px 10px", borderRadius: 8, background: "#f59e0b10", border: "1px solid #f59e0b30" }}>
+          <div style={{ fontSize: 10, color: "#fde68a", fontWeight: 700, marginBottom: 2 }}>
+            📋 카드 고정 매각가 (수정 불가)
+          </div>
+          <div style={{ fontSize: 14, color: "#fde68a", fontWeight: 800 }}>
+            ${fmtNum(cardFixed)}
+          </div>
+        </div>
+      );
     }
     if (ct === "MARKET" && action === "damage") {
       return numField("손상 지불액 ($)", damageAmount, setDamageAmount, "💥");
@@ -1940,14 +1951,6 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     }
     // ── MARKET ──
     else if (cellType === "MARKET" && action === "sell" && selectedCard) {
-      // 매각가 추출: sell 필드 우선, 없으면 desc에서 $금액 패턴 추출
-      let sellPrice = 0;
-      if (selectedCard.sell) {
-        sellPrice = parseNum(selectedCard.sell);
-      } else {
-        const priceMatch = (selectedCard.desc || "").match(/\$([0-9]{1,3}(?:,[0-9]{3})*)/);
-        if (priceMatch) sellPrice = parseInt(priceMatch[1].replace(/,/g, "")) || 0;
-      }
       // SELL_RULES로 매칭되는 보유 자산 찾기
       const desc = (selectedCard.desc || "") + (selectedCard.sell || "") + (selectedCard.special || "");
       let sellAsset = null;
@@ -1958,17 +1961,37 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         }
       }
       if (!sellAsset) sellAsset = findLastSafe(assets, a => a.type !== "주식");
+
+      // 🆕 매각가 추출: 이자율 하락 카드는 특수 공식, 나머지는 카드의 sell 필드
+      let sellPrice = 0;
+      const isRateDrop = /이자율 하락/.test(desc);
+      if (isRateDrop && sellAsset) {
+        // 이자율 하락 차익 = 주택가격 + $50,000 - 대출
+        const assetPrice = parseNum(sellAsset.price || sellAsset.cost || 0);
+        const assetLoanForCalc = sellAsset.loan || 0;
+        sellPrice = assetPrice + 50000 - assetLoanForCalc;
+      } else if (selectedCard.sell) {
+        sellPrice = parseNum(selectedCard.sell);
+      } else {
+        const priceMatch = (selectedCard.desc || "").match(/\$([0-9]{1,3}(?:,[0-9]{3})*)/);
+        if (priceMatch) sellPrice = parseInt(priceMatch[1].replace(/,/g, "")) || 0;
+      }
       if (sellAsset) {
         const assetLoan = sellAsset.loan || 0;
-        const netProceeds = Math.max(0, sellPrice - assetLoan);
+        // 이자율 하락 카드의 sellPrice는 이미 net proceeds (대출 제외된 차익). 중복 차감 방지
+        const netProceeds = isRateDrop ? sellPrice : Math.max(0, sellPrice - assetLoan);
         soldAssetInfo = { name: sellAsset.name, type: sellAsset.type, cf: sellAsset.cf, sellPrice };
         entry = createMarketSellTurn({
           turn, boardPos, dice, passedPaydays, card: selectedCard,
           assetId: sellAsset.id,
-          sellPrice, assetCF: sellAsset.cf, assetLoan,
+          sellPrice: isRateDrop ? sellPrice + assetLoan : sellPrice,
+          assetCF: sellAsset.cf,
+          assetLoan,
           time, decisionSec,
         });
-        transaction = `${sellAsset.name}(${sellAsset.type}) 매각 $${fmtNum(sellPrice)} - 대출 $${fmtNum(assetLoan)} = +$${fmtNum(netProceeds)}`;
+        transaction = isRateDrop
+          ? `${sellAsset.name}(${sellAsset.type}) 매각 차익 $${fmtNum(netProceeds)} (공식: 가격 + $50K - 대출)`
+          : `${sellAsset.name}(${sellAsset.type}) 매각 $${fmtNum(sellPrice)} - 대출 $${fmtNum(assetLoan)} = +$${fmtNum(netProceeds)}`;
       } else {
         // 매각 대상 없음 — hold 유사 처리
         entry = {
@@ -3099,8 +3122,8 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
             );
           })()}
 
-          {/* 주식 수량 입력 */}
-          {selectedCard && isStock(selectedCard) && cellType === "OPPORTUNITY" && (
+          {/* 주식 수량 입력 (무상증자/감자 카드는 자동 적용이므로 입력칸 숨김) */}
+          {selectedCard && isStock(selectedCard) && cellType === "OPPORTUNITY" && !isSplitCard(selectedCard) && (
             <div style={{ marginBottom: 12 }}>
               <label style={{ fontSize: 11, color: "#71717a", display: "block", marginBottom: 4 }}>주식 수량 (주)</label>
               <div style={{ display: "flex", gap: 6 }}>
@@ -3291,7 +3314,22 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
             } else if (isDamageCard) {
               actions = [{ k: "damage", label: totalUnits > 0 ? `손상 지불 ($${fmtNum(damageTotal)})` : "해당 자산 없음 — 건너뛰기", c: "#ef4444" }];
             } else {
-              actions = [{ k: "sell", label: "판매", c: "#f59e0b" }, { k: "hold", label: "홀딩", c: "#3b82f6" }, { k: "na", label: "해당없음", c: "#52525b" }];
+              // 🆕 MARKET 판매 카드: 카드의 sell 필드에서 고정 매각가 추출
+              let cardSellPrice = 0;
+              if (selectedCard.sell) {
+                cardSellPrice = parseNum(selectedCard.sell);
+              } else {
+                const priceMatch = (selectedCard.desc || "").match(/\$([0-9]{1,3}(?:,[0-9]{3})*)/);
+                if (priceMatch) cardSellPrice = parseInt(priceMatch[1].replace(/,/g, "")) || 0;
+              }
+              const sellBtnLabel = cardSellPrice > 0
+                ? `판매 ($${fmtNum(cardSellPrice)})`
+                : "판매";
+              actions = [
+                { k: "sell", label: sellBtnLabel, c: "#f59e0b" },
+                { k: "hold", label: "홀딩", c: "#3b82f6" },
+                { k: "na", label: "해당없음", c: "#52525b" }
+              ];
             }
 
             return (
@@ -3306,6 +3344,92 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                     }}>{a.label}</button>
                   ))}
                 </div>
+
+                {/* 🆕 판매 선택 시 고정 매각가 + 순익 미리보기 */}
+                {action === "sell" && !isDamageCard && !isPlumbing && (() => {
+                  // 매각 대상 자산 찾기
+                  const descForSell = (selectedCard.desc || "") + (selectedCard.sell || "") + (selectedCard.special || "");
+                  let sellAsset = null;
+                  for (const rule of SELL_RULES) {
+                    if (rule.descRe.test(descForSell)) {
+                      sellAsset = findLastSafe(assets, a => a.type !== "주식" && rule.assetRe.test(a.name));
+                      if (sellAsset) break;
+                    }
+                  }
+                  if (!sellAsset) sellAsset = findLastSafe(assets, a => a.type !== "주식");
+
+                  // 🆕 이자율 하락 카드: 차익 = 주택가격 + $50K - 대출
+                  let cardSellPrice = 0;
+                  let netProceeds = 0;
+                  let formulaText = "";
+                  if (isRateDrop && sellAsset) {
+                    const assetPrice = parseNum(sellAsset.price || sellAsset.cost || 0);
+                    const assetLoanForCalc = sellAsset.loan || 0;
+                    netProceeds = assetPrice + 50000 - assetLoanForCalc;
+                    cardSellPrice = netProceeds; // 표시용
+                    formulaText = `$${fmtNum(assetPrice)} + $50,000 − $${fmtNum(assetLoanForCalc)} = $${fmtNum(netProceeds)}`;
+                  } else {
+                    // 일반 카드: sell 필드 or desc에서 금액 추출
+                    if (selectedCard.sell) {
+                      cardSellPrice = parseNum(selectedCard.sell);
+                    } else {
+                      const priceMatch = (selectedCard.desc || "").match(/\$([0-9]{1,3}(?:,[0-9]{3})*)/);
+                      if (priceMatch) cardSellPrice = parseInt(priceMatch[1].replace(/,/g, "")) || 0;
+                    }
+                    const assetLoan_ = sellAsset?.loan || 0;
+                    netProceeds = Math.max(0, cardSellPrice - assetLoan_);
+                  }
+
+                  const assetLoan = sellAsset?.loan || 0;
+
+                  return (
+                    <div style={{ padding: "12px 14px", borderRadius: 10, background: "#f59e0b10", border: "1px solid #f59e0b30", marginBottom: 12 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#fde68a", marginBottom: 6 }}>
+                        📋 카드의 정해진 매각 조건
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 10px", fontSize: 11 }}>
+                        <span style={{ color: "#a1a1aa" }}>매각 대상:</span>
+                        <span style={{ color: "#fafafa", fontWeight: 600 }}>
+                          {sellAsset ? `${sellAsset.name} (${sellAsset.type})` : "⚠️ 보유 자산 없음"}
+                        </span>
+                        {isRateDrop ? (
+                          <>
+                            <span style={{ color: "#a1a1aa" }}>계산식:</span>
+                            <span style={{ color: "#93c5fd", fontSize: 10 }}>
+                              주택가격 + $50,000 − 대출
+                            </span>
+                            {sellAsset && (
+                              <>
+                                <span style={{ color: "#a1a1aa" }}>대입:</span>
+                                <span style={{ color: "#93c5fd", fontSize: 10 }}>{formulaText}</span>
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <span style={{ color: "#a1a1aa" }}>매각가:</span>
+                            <span style={{ color: "#fde68a", fontWeight: 800 }}>${fmtNum(cardSellPrice)}</span>
+                            {sellAsset && assetLoan > 0 && (
+                              <>
+                                <span style={{ color: "#a1a1aa" }}>기존 대출 상환:</span>
+                                <span style={{ color: "#fca5a5", fontWeight: 700 }}>-${fmtNum(assetLoan)}</span>
+                              </>
+                            )}
+                          </>
+                        )}
+                        {sellAsset && (
+                          <>
+                            <span style={{ color: "#a1a1aa", borderTop: "1px solid #27272a", paddingTop: 4 }}>수령 순익:</span>
+                            <span style={{ color: "#86efac", fontWeight: 800, fontSize: 14, borderTop: "1px solid #27272a", paddingTop: 4 }}>+${fmtNum(netProceeds)}</span>
+                          </>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 9, color: "#71717a", marginTop: 6, fontStyle: "italic" }}>
+                        ℹ️ 매각가는 카드에 정해진 금액으로 자동 적용됩니다 (수정 불가)
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* 배관 카드 전용 안내 */}
                 {isPlumbing && (
@@ -3361,7 +3485,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                           })}
                         </div>
                         <p style={{ fontSize: 9, color: "#52525b", margin: "6px 0 0" }}>
-                          아래 매각가 입력란에 차익을 입력하세요
+                          ℹ️ 차익은 위 공식으로 자동 계산되어 매각됩니다.
                         </p>
                       </>
                     ) : (
@@ -3490,38 +3614,146 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
               {/* 타인이 뽑은 마켓카드 — 부동산 매도 */}
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #27272a" }}>
                 <div style={{ fontSize: 10, fontWeight: 700, color: "#f59e0b", marginBottom: 6 }}>📊 타인이 뽑은 마켓카드 (내 턴이 아닌 매도)</div>
-                <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                  <select value={reSellIdx} onChange={e => setReSellIdx(parseInt(e.target.value) || 0)} style={{ flex: 1, padding: "6px 8px", borderRadius: 6, border: "1px solid #27272a", background: "#18181b", color: "#e4e4e7", fontSize: 11, outline: "none" }}>
-                    {realEstateAssets.map((a, i) => (
-                      <option key={i} value={i}>{a.name} (대출 ${fmtNum((a.loan||0))})</option>
-                    ))}
-                  </select>
-                  <input type="number" min={0} placeholder="매도가" value={reSellPrice} onChange={e => setReSellPrice(e.target.value)} style={{ width: 80, padding: "6px 8px", borderRadius: 6, border: "1px solid #27272a", background: "#18181b", color: "#fde68a", fontSize: 11, textAlign: "center", outline: "none" }} />
-                  <button onClick={() => {
-                    const idx = reSellIdx;
-                    const sellPrice = parseInt(reSellPrice) || 0;
-                    const asset = realEstateAssets[idx];
-                    if (!asset || sellPrice <= 0) return;
-                    const net = Math.max(0, sellPrice - (asset.loan || 0));
-                    const extSellEntry = {
-                      turn: currentTurn, cellType: "EXT_SELL",
-                      boardPos: 0, dice: 0, passedPaydays: 0,
-                      dealType: "타인MARKET",
-                      card: { sub: asset.name, desc: `타인 마켓카드로 ${asset.name} 매도` },
-                      action: "sell", shares: null,
-                      assetType: asset.type || "부동산",
-                      time: timerOn ? elapsed : null, decisionSec: null,
-                      _schemaVersion: SCHEMA_VERSION,
-                      _sellAssetId: asset.id,
-                      _sellPrice: sellPrice,
-                      _assetCF: asset.cf,
-                      _assetLoan: asset.loan || 0,
-                      transaction: `${asset.name} 매도 $${fmtNum(sellPrice)} - 대출 $${fmtNum((asset.loan||0))} = +$${fmtNum(net)}`,
-                    };
-                    setTurnLog(prev => [...prev, extSellEntry]);
-                    setReSellPrice(""); setReSellIdx(0);
-                  }} style={{ padding: "6px 10px", borderRadius: 6, border: "none", background: "#f59e0b", color: "#000", fontSize: 10, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>매도</button>
-                </div>
+                {(() => {
+                  // 선택된 자산에 해당하는 MARKET 카드의 매도가 목록 추출
+                  const asset = realEstateAssets[reSellIdx];
+                  const assetName = (asset?.name || "");
+
+                  // 자산 유형별 매칭 → MARKET 카드에서 해당 카드들의 sell 가격 추출
+                  // 다가구/아파트는 "가구당/1채당" 단가 × 유닛수로 계산
+                  const unitCount = asset ? getAssetUnits(asset) : 1;
+
+                  let priceOptions = []; // { label, value, card }
+                  if (/콘도/.test(assetName)) {
+                    priceOptions = deck.market
+                      .filter(c => /콘도/.test(c.desc || "") && c.sell && /^\$/.test(c.sell))
+                      .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
+                  } else if (/주택 3\/2|3\/2/.test(assetName) && !/가구|다가구|아파트/.test(assetName)) {
+                    priceOptions = deck.market
+                      .filter(c => /주택 3\/2를 \$/.test(c.desc || "") && c.sell)
+                      .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
+                  } else if (/가구|다가구/.test(assetName)) {
+                    // 가구당 단가 × 유닛수
+                    priceOptions = deck.market
+                      .filter(c => /다가구 주택 가구당/.test(c.desc || "") && c.sell)
+                      .map(c => {
+                        const unitPrice = parseNum(c.sell);
+                        const total = unitPrice * unitCount;
+                        return { label: `가구당 $${fmtNum(unitPrice)} × ${unitCount}채 = $${fmtNum(total)}`, value: total, card: c };
+                      });
+                  } else if (/아파트/.test(assetName)) {
+                    priceOptions = deck.market
+                      .filter(c => /아파트 단지 1채당/.test(c.desc || "") && c.sell)
+                      .map(c => {
+                        const unitPrice = parseNum(c.sell);
+                        const total = unitPrice * unitCount;
+                        return { label: `1채당 $${fmtNum(unitPrice)} × ${unitCount}채 = $${fmtNum(total)}`, value: total, card: c };
+                      });
+                  } else if (/땅|12,000|24,000/.test(assetName)) {
+                    priceOptions = deck.market
+                      .filter(c => /땅을 \$/.test(c.desc || "") && c.sell)
+                      .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
+                  } else if (/세차/.test(assetName)) {
+                    priceOptions = deck.market
+                      .filter(c => /세차장/.test(c.desc || "") && c.sell)
+                      .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
+                  } else if (/쇼핑몰/.test(assetName)) {
+                    priceOptions = deck.market
+                      .filter(c => /쇼핑몰/.test(c.desc || "") && c.sell)
+                      .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
+                  } else if (/B&B|모텔/.test(assetName)) {
+                    priceOptions = deck.market
+                      .filter(c => /B&B/.test(c.desc || "") && c.sell)
+                      .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
+                  }
+
+                  // 중복 제거 (같은 값이면 하나만 표시)
+                  const seen = new Set();
+                  priceOptions = priceOptions.filter(o => {
+                    const key = `${o.label}:${o.value}`;
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                  });
+                  // 가격순 정렬 (오름차순)
+                  priceOptions.sort((a, b) => a.value - b.value);
+
+                  const sellPrice = parseInt(reSellPrice) || 0;
+                  const assetLoan = asset?.loan || 0;
+                  const netPreview = sellPrice > 0 ? Math.max(0, sellPrice - assetLoan) : 0;
+
+                  return (
+                    <>
+                      {/* 자산 선택 */}
+                      <select value={reSellIdx} onChange={e => { setReSellIdx(parseInt(e.target.value) || 0); setReSellPrice(""); }} style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #27272a", background: "#18181b", color: "#e4e4e7", fontSize: 11, outline: "none", marginBottom: 6 }}>
+                        {realEstateAssets.map((a, i) => (
+                          <option key={i} value={i}>{a.name} (대출 ${fmtNum((a.loan||0))})</option>
+                        ))}
+                      </select>
+
+                      {/* 매도가 선택 (카드 고정 가격들 중) */}
+                      {priceOptions.length > 0 ? (
+                        <>
+                          <div style={{ fontSize: 9, color: "#71717a", marginBottom: 4 }}>💰 마켓카드 매도 제안 중 선택:</div>
+                          <select
+                            value={reSellPrice || ""}
+                            onChange={e => setReSellPrice(e.target.value)}
+                            style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #f59e0b40", background: "#18181b", color: "#fde68a", fontSize: 11, outline: "none", marginBottom: 6 }}
+                          >
+                            <option value="">-- 매도 가격 선택 --</option>
+                            {priceOptions.map((o, i) => (
+                              <option key={i} value={o.value}>{o.label}</option>
+                            ))}
+                          </select>
+                        </>
+                      ) : (
+                        <div style={{ fontSize: 10, color: "#71717a", padding: "6px 8px", background: "#18181b", borderRadius: 6, marginBottom: 6, textAlign: "center" }}>
+                          이 자산 유형에 맞는 마켓카드가 없습니다
+                        </div>
+                      )}
+
+                      {/* 매도 미리보기 + 실행 버튼 */}
+                      {sellPrice > 0 && asset && (
+                        <div style={{ padding: "6px 8px", borderRadius: 6, background: "#f59e0b10", border: "1px solid #f59e0b30", fontSize: 10, color: "#fde68a", marginBottom: 6 }}>
+                          매도 ${fmtNum(sellPrice)} − 대출 ${fmtNum(assetLoan)} = <strong style={{ color: "#86efac" }}>+${fmtNum(netPreview)}</strong>
+                        </div>
+                      )}
+
+                      <button onClick={() => {
+                        const idx = reSellIdx;
+                        const sellPrice_ = parseInt(reSellPrice) || 0;
+                        const asset_ = realEstateAssets[idx];
+                        if (!asset_ || sellPrice_ <= 0) return;
+                        const net = Math.max(0, sellPrice_ - (asset_.loan || 0));
+                        const extSellEntry = {
+                          turn: currentTurn, cellType: "EXT_SELL",
+                          boardPos: 0, dice: 0, passedPaydays: 0,
+                          dealType: "타인MARKET",
+                          card: { sub: asset_.name, desc: `타인 마켓카드로 ${asset_.name} 매도` },
+                          action: "sell", shares: null,
+                          assetType: asset_.type || "부동산",
+                          time: timerOn ? elapsed : null, decisionSec: null,
+                          _schemaVersion: SCHEMA_VERSION,
+                          _sellAssetId: asset_.id,
+                          _sellPrice: sellPrice_,
+                          _assetCF: asset_.cf,
+                          _assetLoan: asset_.loan || 0,
+                          transaction: `${asset_.name} 매도 $${fmtNum(sellPrice_)} - 대출 $${fmtNum((asset_.loan||0))} = +$${fmtNum(net)}`,
+                        };
+                        setTurnLog(prev => [...prev, extSellEntry]);
+                        setReSellPrice(""); setReSellIdx(0);
+                      }}
+                      disabled={!sellPrice || !asset}
+                      style={{
+                        width: "100%", padding: "8px 12px", borderRadius: 6, border: "none",
+                        background: (sellPrice && asset) ? "#f59e0b" : "#3f3f46",
+                        color: (sellPrice && asset) ? "#000" : "#71717a",
+                        fontSize: 11, fontWeight: 700, cursor: (sellPrice && asset) ? "pointer" : "not-allowed",
+                        whiteSpace: "nowrap"
+                      }}>💰 매도 실행</button>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -4368,7 +4600,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         </div>
       )}
 
-      {/* 디브리핑 — 게임 저장 완료 후에만 활성화 (실수 클릭 방지) */}
+      {/* 디브리핑은 프로필 탭에서 진행됩니다 (위치 이동) */}
       {turnLog.length >= 3 && !gameSaved && (
         <div style={{
           marginTop: 20,
@@ -4382,26 +4614,34 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
             🔒 디브리핑 분석
           </div>
           <div style={{ fontSize: 11, color: "#71717a" }}>
-            게임을 저장한 후에 디브리핑 분석을 시작할 수 있습니다
+            게임을 저장한 후, 프로필 탭에서 디브리핑 분석을 진행할 수 있습니다
           </div>
         </div>
       )}
       {gameSaved && (
-        <DebriefSection
-          results={turnLog.map(t => ({
-            turn: t.turn,
-            cell: { type: t.cellType, label: CELL_LABELS[t.cellType] || t.cellType },
-            dealType: t.dealType, card: t.card ? { ...t.card, _action: t.action, _shares: t.shares } : null,
-            decisionSec: t.decisionSec,
-            splitApplied: t.splitApplied, // 무상증자/감자 적용 여부
-            soldAsset: t.soldAsset,       // MARKET 매각 시 실제 매각된 자산 (name/type/cf/sellPrice)
-            assetType: t.assetType,        // STOCK_SELL/EXT_SELL 용 (주식/부동산/사업)
-            shares: t.shares,              // 주식 매각 수량
-            dice: [0], total: 0, pos: 0,
-          }))}
-          version={version} turns={turnLog.length} deck={deck}
-        />
+        <div style={{
+          marginTop: 20,
+          padding: 18,
+          borderRadius: 12,
+          background: "linear-gradient(135deg, #16a34a15, #22c55e10)",
+          border: "1px solid #22c55e40",
+          textAlign: "center",
+        }}>
+          <div style={{ fontSize: 22, marginBottom: 6 }}>✅</div>
+          <div style={{ fontSize: 14, color: "#86efac", fontWeight: 800, marginBottom: 6 }}>
+            게임이 저장되었습니다
+          </div>
+          <div style={{ fontSize: 12, color: "#d4d4d8", lineHeight: 1.6, marginBottom: 12 }}>
+            디브리핑은 <strong style={{ color: "#fbbf24" }}>👤 프로필</strong> 탭의<br/>
+            <strong style={{ color: "#fbbf24" }}>"저장된 게임 디브리핑"</strong>에서 언제든 진행할 수 있습니다.
+          </div>
+          <div style={{ fontSize: 10, color: "#71717a", padding: "8px 12px", background: "#0a0a0f", borderRadius: 8, display: "inline-block" }}>
+            💡 한 번 진행한 디브리핑은 영구 저장되어 다시 호출 비용 없이 볼 수 있습니다
+          </div>
+        </div>
       )}
+
+      {/* 🚧 DebriefSection은 프로필 탭으로 이동됨 (위치 변경) — 컴포넌트 자체는 export 유지 */}
 
       {/* 🎉 탈출 선언 버튼 (Phase B) — 조건 만족 시 활성화 */}
       {job && !gameEnded && turnLog.length >= 1 && (() => {
@@ -5583,7 +5823,32 @@ export default function CoachingSimulator() {
               const playerId = currentPlayer?.id || "solo";
               const playerName = currentPlayer?.name || "개인플레이";
               const key = `game:${playerId}:${ts}`;
-              const payload = JSON.stringify({ ...gameData, ts, playerId, playerName });
+
+              // 🆕 저장자 정보 로그 — 누가 / 언제 / 어떤 세션으로 저장했는지
+              const saveLog = {
+                savedByUserId: authUser?.id || null,
+                savedByEmail: authUser?.email || null,
+                savedByNickname: authUser?.user_metadata?.nickname || null,
+                savedAt: new Date().toISOString(),
+                savedAtTs: ts,
+                clientUrl: typeof window !== "undefined" ? window.location.hostname : null,
+                userAgent: typeof navigator !== "undefined" ? (navigator.userAgent || "").substring(0, 200) : null,
+              };
+              console.log("[onSaveGame] 📝 저장자 로그:", saveLog);
+
+              const payload = JSON.stringify({
+                ...gameData,
+                ts,
+                playerId,
+                playerName,
+                // 🔒 보안 필드: 최상위에 user_id 명시 (본인 검증용)
+                // MyHistoryTab에서 다른 사용자 데이터 섞임 방지에 사용
+                user_id: authUser?.id || null,
+                saveLog,  // 🆕 payload 안에 저장자 정보 심음
+                saveHistory: [  // 🆕 수정 이력 배열 (추후 Admin 수정 시에도 append 가능)
+                  { ...saveLog, action: "create" }
+                ],
+              });
 
               // 🛡️ 즉시 localStorage에 먼저 저장 (데이터 유실 방지)
               // 이러면 Supabase storage가 실패해도 최소한 로컬에는 남음
@@ -5600,11 +5865,14 @@ export default function CoachingSimulator() {
                 return { key, localOnly: true };
               }
 
-              // 🛡️ 타임아웃 보호 (10초)
+              // 🛡️ 타임아웃 보호 (30초)
+              // 첫 저장 시 Supabase가 RLS 정책 검증 + 새 row 생성에 시간이 걸릴 수 있음
               // 여러 기기 동시 접속 시 UPSERT 락으로 무한 대기 방지
-              const SAVE_TIMEOUT_MS = 10000;
+              const SAVE_TIMEOUT_MS = 30000;
+              console.log(`[onSaveGame] 🔄 Supabase storage.set 호출 (timeout ${SAVE_TIMEOUT_MS/1000}초)...`);
+              const saveStartTime = Date.now();
               const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error("저장 타임아웃 (10초)")), SAVE_TIMEOUT_MS)
+                setTimeout(() => reject(new Error(`저장 타임아웃 (${SAVE_TIMEOUT_MS/1000}초)`)), SAVE_TIMEOUT_MS)
               );
 
               let result;
@@ -5613,8 +5881,12 @@ export default function CoachingSimulator() {
                   window.storage.set(key, payload),
                   timeoutPromise,
                 ]);
+                const elapsed = Date.now() - saveStartTime;
+                console.log(`[onSaveGame] ✅ Supabase 저장 완료 (${elapsed}ms)`);
               } catch (storageErr) {
-                console.error("[onSaveGame] storage.set 실패/타임아웃:", storageErr.message);
+                const elapsed = Date.now() - saveStartTime;
+                console.error(`[onSaveGame] ❌ storage.set 실패/타임아웃 (${elapsed}ms):`, storageErr.message);
+                console.warn("[onSaveGame] ℹ️ localStorage에는 정상 저장됨. 다음 로그인 시 Supabase에 재시도 가능");
                 // localStorage에는 이미 저장되어 있음 → 사용자에게 부분 성공 알림
                 return { key, localOnly: true, error: storageErr.message };
               }
@@ -5945,6 +6217,1548 @@ function buildCompactSummary(analysis) {
   return `[분석요약]${ph}\n[교훈]${ls}\n[질문]${analysis.finalQuestion}`;
 }
 
+export const computeBestWorstPaths = (turnLogData, totalTurns) => {
+  if (!turnLogData || turnLogData.length === 0) {
+    return {
+      bestPath: [{ turn: 1, age: 20, cf: 0, asset: 0, note: "기록 없음" }],
+      worstPath: [{ turn: 1, age: 20, cf: 0, asset: 0, note: "기록 없음" }],
+    };
+  }
+
+  // 🔧 results(gameResults) 구조를 turnLog 구조로 변환 (어댑터)
+  // results: { turn, cell:{type}, card:{...,_action,_shares}, decisionSec, ... }
+  // turnLog: { turn, cellType, card:{...}, action, shares, transaction, ... }
+  const normalized = turnLogData.map(t => {
+    // 이미 turnLog 구조면 그대로 사용
+    if (t.cellType && !t.cell) return t;
+    // results 구조면 변환
+    return {
+      turn: t.turn,
+      cellType: t.cell?.type || t.cellType,
+      dealType: t.dealType,
+      card: t.card ? { ...t.card } : null,
+      action: t.card?._action || t.action,
+      shares: t.card?._shares || t.shares,
+      transaction: t.transaction,
+      decisionSec: t.decisionSec,
+    };
+  });
+
+  const yearsPerTurn = Math.round(40 / Math.max(totalTurns, 1) * 10) / 10;
+  const ageAtTurn = (t) => Math.round(20 + (t - 0.5) * yearsPerTurn);
+
+  // 게임 구간 정의 (초반 1/3 / 중반 1/3 / 후반 1/3)
+  const earlyThreshold = Math.max(Math.floor(totalTurns / 3), 3);
+  const lateThreshold = Math.floor(totalTurns * 2 / 3);
+  const isEarly = (turn) => turn <= earlyThreshold;
+  const isLate = (turn) => turn >= lateThreshold;
+
+  // 단기 매도 판단을 위해: 매수/매도 매칭
+  // cardName → { buyTurn, sold, sellTurn } 매핑
+  const assetLifecycle = {};
+  normalized.forEach(t => {
+    const cardName = t.card?.sub || t.card?.desc || "";
+    if (!cardName) return;
+    
+    if ((t.cellType === "DEAL1" || t.cellType === "DEAL2" || t.cellType === "BIG_DEAL" || t.cellType === "SMALL_DEAL" || t.cellType === "MARKET" || t.cellType === "OPPORTUNITY") && t.action === "buy") {
+      if (!assetLifecycle[cardName]) {
+        assetLifecycle[cardName] = { buyTurn: t.turn, sold: false, sellTurn: null };
+      }
+    }
+    if (t.action === "sell" || t.cellType === "EXT_SELL" || t.cellType === "STOCK_SELL") {
+      if (assetLifecycle[cardName]) {
+        assetLifecycle[cardName].sold = true;
+        assetLifecycle[cardName].sellTurn = t.turn;
+      }
+    }
+  });
+
+  // 단기 매도 판단 (매수 후 3턴 이내)
+  const isShortTermSale = (cardName, sellTurn) => {
+    const info = assetLifecycle[cardName];
+    if (!info) return false;
+    return (sellTurn - info.buyTurn) <= 3;
+  };
+
+  // 사업체 판단
+  const isBusinessCard = (card) => {
+    if (!card) return false;
+    const type = card.type || "";
+    const sub = (card.sub || "").toLowerCase();
+    const desc = (card.desc || "").toLowerCase();
+    return (
+      type.includes("사업") ||
+      type.includes("business") ||
+      sub.includes("사업") ||
+      sub.includes("business") ||
+      sub.includes("startup") ||
+      desc.includes("사업") ||
+      desc.includes("프랜차이즈") ||
+      desc.includes("franchise")
+    );
+  };
+
+  // 매도 여부를 기준으로 CF 마이너스 자산이 "부채"였는지 판단
+  const wasSoldLater = (cardName, buyTurn) => {
+    const info = assetLifecycle[cardName];
+    return info && info.sold && info.sellTurn > buyTurn;
+  };
+
+  // 나이를 턴으로 변환 (40세 기준)
+  const isBeforeFortyTurn = (turn) => {
+    const age = ageAtTurn(turn);
+    return age < 40;
+  };
+
+  // 각 턴을 분류
+  const classifyTurn = (t, idx) => {
+    const action = t.action;
+    const cellType = t.cellType;
+    const card = t.card || {};
+    const cashFlowChange = card.cashflow || 0;
+    const roi = card.roi || 0;
+    const cardName = card.sub || card.desc || "";
+
+    // ─── DEAL / MARKET 카드 매수 ───
+    const isBuyable = ["DEAL1", "DEAL2", "BIG_DEAL", "SMALL_DEAL", "MARKET", "OPPORTUNITY"].includes(cellType);
+    
+    if (isBuyable && action === "buy") {
+      // 사업체 매수 - 항상 최상의 선택 (+ 가중치)
+      if (isBusinessCard(card)) {
+        return {
+          category: "best",
+          cfChange: cashFlowChange,
+          assetChange: card.cost || card.price || 0,
+          reason: `💼 사업체 ${cardName} 매수 (+$${cashFlowChange}/월) — B사분면 진입`,
+          weight: 1.5,
+        };
+      }
+      // CF 증가 자산 - 최상의 선택
+      if (cashFlowChange > 0) {
+        return {
+          category: "best",
+          cfChange: cashFlowChange,
+          assetChange: card.cost || card.price || 0,
+          reason: `🏠 ${cardName} 매수 (+$${cashFlowChange}/월)`,
+        };
+      }
+      // CF 마이너스 자산 - 매각 여부로 판단 (Kevin님 철학)
+      if (cashFlowChange < 0 || roi < 0) {
+        // 초반이면 현금 확보 전략
+        if (isEarly(t.turn)) {
+          return {
+            category: "best",
+            cfChange: cashFlowChange,
+            assetChange: card.cost || card.price || 0,
+            reason: `💡 초반 ${cardName} 매수 — 현금 확보 전략 (CF ${cashFlowChange}/월이지만 OK)`,
+          };
+        }
+        // 나중에 매각했으면 OK (차익 실현 가능)
+        if (wasSoldLater(cardName, t.turn)) {
+          return {
+            category: "best",
+            cfChange: cashFlowChange,
+            assetChange: card.cost || card.price || 0,
+            reason: `✅ ${cardName} 매수 (CF ${cashFlowChange}) — 이후 매각으로 차익 확보`,
+          };
+        }
+        // 끝까지 보유했다면 진짜 부채
+        const info = assetLifecycle[cardName];
+        const heldToEnd = info && !info.sold;
+        if (heldToEnd) {
+          return {
+            category: "missed",
+            cfChange: cashFlowChange,
+            assetChange: card.cost || card.price || 0,
+            reason: `⚠️ ${cardName} (CF ${cashFlowChange}/월) 끝까지 보유 — 부채를 자산으로 착각`,
+          };
+        }
+        return {
+          category: "neutral",
+          cfChange: 0,
+          assetChange: 0,
+          reason: `${cardName} 매수`,
+        };
+      }
+      // 주식 매수 (CF 변화 없음)
+      if ((card.type || "").includes("주식") || cardName.toLowerCase().includes("stock")) {
+        // 후반부(40세 이후) 주식 투자 - 최악의 선택
+        if (isLate(t.turn) || !isBeforeFortyTurn(t.turn)) {
+          return {
+            category: "missed",
+            cfChange: 0,
+            assetChange: (card.cost || card.price || 0) * (t.shares || 1),
+            reason: `📉 ${cardName} 주식 매수 — 현금흐름 형성 시기에 차익 추구`,
+          };
+        }
+        return {
+          category: "neutral",
+          cfChange: 0,
+          assetChange: (card.cost || card.price || 0) * (t.shares || 1),
+          reason: `주식 ${cardName} 매수`,
+        };
+      }
+      return { category: "neutral", cfChange: 0, assetChange: 0, reason: `${cardName} 매수` };
+    }
+
+    // ─── 주식/자산 매도 ───
+    if (action === "sell" || cellType === "EXT_SELL" || cellType === "STOCK_SELL") {
+      const transaction = t.transaction || "";
+      const profitMatch = transaction.match(/\+\$?([\d,]+)/);
+      const lossMatch = transaction.match(/-\$?([\d,]+)/);
+      
+      // 40세 이전 매각은 차익 여부 무관하게 긍정적 (Kevin님 철학)
+      if (isBeforeFortyTurn(t.turn)) {
+        if (profitMatch) {
+          const profit = parseInt(profitMatch[1].replace(/,/g, ""), 10);
+          return {
+            category: "best",
+            cfChange: 0,
+            assetChange: profit,
+            reason: `💰 ${cardName} 매각 +$${profit} — 40세 이전 차익 실현 (더 큰 CF 만들 원금)`,
+          };
+        }
+        if (lossMatch) {
+          const loss = parseInt(lossMatch[1].replace(/,/g, ""), 10);
+          return {
+            category: "best",
+            cfChange: 0,
+            assetChange: -loss,
+            reason: `⚡ ${cardName} 매각 -$${loss} — 빠른 손절, 다음 기회로`,
+          };
+        }
+        return { category: "best", cfChange: 0, assetChange: 0, reason: `${cardName} 매각 — 유연한 의사결정` };
+      }
+      
+      // 단기 매도 (매수 후 3턴 이내) - 차익/손절 무관하게 좋은 선택
+      if (isShortTermSale(cardName, t.turn)) {
+        if (profitMatch) {
+          const profit = parseInt(profitMatch[1].replace(/,/g, ""), 10);
+          return {
+            category: "best",
+            cfChange: 0,
+            assetChange: profit,
+            reason: `⚡ ${cardName} 단기 매도 +$${profit} — 빠른 차익실현`,
+          };
+        }
+        if (lossMatch) {
+          const loss = parseInt(lossMatch[1].replace(/,/g, ""), 10);
+          return {
+            category: "best",
+            cfChange: 0,
+            assetChange: -loss,
+            reason: `⚡ ${cardName} 단기 정리 -$${loss} — 빠른 의사결정`,
+          };
+        }
+      }
+      
+      // 40세 이후 일반 매도
+      if (profitMatch) {
+        const profit = parseInt(profitMatch[1].replace(/,/g, ""), 10);
+        return {
+          category: "best",
+          cfChange: 0,
+          assetChange: profit,
+          reason: `💰 ${cardName} 매각 +$${profit} 차익`,
+        };
+      }
+      if (lossMatch) {
+        const loss = parseInt(lossMatch[1].replace(/,/g, ""), 10);
+        return {
+          category: "missed",
+          cfChange: 0,
+          assetChange: -loss,
+          reason: `${cardName} 매각 -$${loss} 손실`,
+        };
+      }
+      return { category: "neutral", cfChange: 0, assetChange: 0, reason: `매도` };
+    }
+
+    // ─── DOODAD (과소비) - 확실히 나쁜 선택 ───
+    if (cellType === "DOODAD") {
+      const amount = card.amount || 0;
+      // amount는 일회성 지출이지만 시각화 목적으로 작게 cf에도 반영
+      // (반복적 소비 패턴의 누적 효과 표현)
+      return {
+        category: "worst",
+        cfChange: -Math.min(50, Math.round(amount / 20)),  // 🆕 amount의 5% 또는 -$50 중 작은 값
+        assetChange: -amount,
+        reason: `🛒 ${card.desc || "지출"} -$${amount} — 과소비`,
+      };
+    }
+
+    // ─── CHARITY (기부) - 최상의 선택 ───
+    if (cellType === "CHARITY") {
+      if (action === "charity_yes") {
+        return {
+          category: "best",
+          cfChange: 0,
+          assetChange: -(card.cost || 160),
+          reason: `❤️ 기부 선택 — 부자 마인드셋 (주사위 2개 × 3턴)`,
+        };
+      }
+      if (action === "charity_no" || action === "na") {
+        return {
+          category: "missed",
+          cfChange: 0,
+          assetChange: 0,
+          reason: `기부 기회 패스 — 투자 현금 확보 기회 놓침`,
+        };
+      }
+      return { category: "neutral", cfChange: 0, assetChange: 0, reason: "CHARITY" };
+    }
+
+    // ─── DOWNSIZED ───
+    if (cellType === "DOWNSIZED" || cellType === "DOWNSIZED_REST") {
+      return { category: "neutral", cfChange: 0, assetChange: 0, reason: "다운사이즈 (운)" };
+    }
+
+    // ─── BABY ───
+    if (cellType === "BABY") {
+      return { category: "neutral", cfChange: 0, assetChange: 0, reason: "자녀 (선택 영역 아님)" };
+    }
+
+    // ─── PAYDAY (월급) - Kevin님 철학: 저축은 자산 형성의 전 단계 ───
+    if (cellType === "PAYDAY") {
+      // 초반(20대)의 PAYDAY는 저축 기회로 긍정적 평가
+      if (isEarly(t.turn)) {
+        return {
+          category: "best",
+          cfChange: 50,  // 🆕 작은 저축 효과 (시각화용)
+          assetChange: 500, // 저축 효과 상징적 표현
+          reason: `💵 월급 수령 — 20대 저축은 자산 형성의 씨앗 (과소평가된 습관)`,
+        };
+      }
+      return { category: "neutral", cfChange: 0, assetChange: 0, reason: "PAYDAY" };
+    }
+
+    // ─── 기회 패스 ───
+    if (isBuyable && (action === "pass" || action === "na" || !action)) {
+      const weight = isBusinessCard(card) ? 1.5 : 1.0;
+      if (isBusinessCard(card)) {
+        return {
+          category: "missed",
+          cfChange: 0,
+          assetChange: 0,
+          reason: `💼 ${cardName} 사업체 기회 패스 — B사분면 입장권 포기`,
+          weight,
+        };
+      }
+      if (cashFlowChange > 0 || roi > 10) {
+        return {
+          category: "missed",
+          cfChange: 0,
+          assetChange: 0,
+          reason: `${cardName} 기회 패스 — 좋은 조건이었음`,
+          weight,
+        };
+      }
+      // 20대의 기회 패스는 현실적 (돈 없어서) - 저축 단계
+      if (isEarly(t.turn)) {
+        return {
+          category: "neutral",
+          cfChange: 0,
+          assetChange: 0,
+          reason: `${cardName} 패스 — 20대는 저축 단계`,
+        };
+      }
+      return { category: "neutral", cfChange: 0, assetChange: 0, reason: "패스" };
+    }
+
+    return { category: "neutral", cfChange: 0, assetChange: 0, reason: "" };
+  };
+
+  // 모든 턴 분류
+  const classifiedTurns = normalized.map((t, idx) => ({ ...t, ...classifyTurn(t, idx) }));
+
+  // 🆕 Kevin 철학: 연속 무행동 구간 탐지 (기회를 놓치고 시간 흘려보냄)
+  // CF+ 자산을 만드는 행동 없이 PAYDAY/DOODAD/패스만 반복된 구간 = 최악
+  const detectStagnantPhases = () => {
+    const stagnantPhases = [];
+    let currentPhaseStart = null;
+    let currentPhaseEnd = null;
+    let phaseLength = 0;
+
+    classifiedTurns.forEach((t, idx) => {
+      const isAction = t.category === "best" && (t.cfChange > 0 || (t.reason || "").includes("사업체") || (t.reason || "").includes("매각"));
+      if (isAction) {
+        // 기존 구간 종료
+        if (phaseLength >= 3) {
+          stagnantPhases.push({ start: currentPhaseStart, end: currentPhaseEnd, length: phaseLength });
+        }
+        currentPhaseStart = null;
+        currentPhaseEnd = null;
+        phaseLength = 0;
+      } else {
+        if (currentPhaseStart === null) currentPhaseStart = t.turn;
+        currentPhaseEnd = t.turn;
+        phaseLength++;
+      }
+    });
+    // 마지막 구간
+    if (phaseLength >= 3) {
+      stagnantPhases.push({ start: currentPhaseStart, end: currentPhaseEnd, length: phaseLength });
+    }
+    return stagnantPhases;
+  };
+  const stagnantPhases = detectStagnantPhases();
+
+  // 🆕 대출 증가 감지 (bankLoan 필드 추적)
+  // turnLog에 bankLoan이 있으면 변화 추적
+  const loanGrowthTurns = [];
+  let prevLoan = 0;
+  normalized.forEach(t => {
+    const curLoan = t.bankLoan || t.loanAfter || 0;
+    if (curLoan > prevLoan + 500) { // 500 이상 증가
+      loanGrowthTurns.push({
+        turn: t.turn,
+        age: ageAtTurn(t.turn),
+        loanDelta: curLoan - prevLoan,
+        hasCFAsset: t.category === "best" && t.cfChange > 0,
+      });
+    }
+    prevLoan = curLoan;
+  });
+
+  // Best Path: "최상의 선택"만 누적 (+ 가중치 반영)
+  // Worst Path: "최악의 선택" + "나쁜 선택" 누적
+  let bestCF = 0, bestAsset = 0;
+  let worstCF = 0, worstAsset = 0;
+
+  const bestPath = [];
+  const worstPath = [];
+
+  classifiedTurns.forEach((t) => {
+    const weight = t.weight || 1.0;
+    
+    if (t.category === "best") {
+      bestCF += t.cfChange * weight;
+      bestAsset += t.assetChange * weight;
+      bestPath.push({
+        turn: t.turn,
+        age: ageAtTurn(t.turn),
+        cf: Math.round(bestCF),
+        asset: Math.round(bestAsset),
+        note: t.reason,
+      });
+    } else if (t.category === "missed" || t.category === "worst") {
+      worstCF += t.cfChange * weight;
+      worstAsset += t.assetChange * weight;
+      worstPath.push({
+        turn: t.turn,
+        age: ageAtTurn(t.turn),
+        cf: Math.round(worstCF),
+        asset: Math.round(worstAsset),
+        note: t.reason,
+      });
+    }
+  });
+
+  // 🆕 정체 구간을 worstPath에 추가 (가장 긴 정체만 대표로)
+  if (stagnantPhases.length > 0) {
+    const longest = stagnantPhases.reduce((a, b) => (b.length > a.length ? b : a));
+    if (longest.length >= 3) {
+      const midTurn = Math.floor((longest.start + longest.end) / 2);
+      worstPath.push({
+        turn: midTurn,
+        age: ageAtTurn(midTurn),
+        cf: Math.round(worstCF),
+        asset: Math.round(worstAsset),
+        note: `⏳ T${longest.start}~T${longest.end} (${longest.length}턴) 무행동 — 월급만 받고 자산 매수 0건`,
+      });
+    }
+  }
+
+  // 🆕 부채 증가 + CF 자산 없는 경우 worstPath에 추가
+  loanGrowthTurns.filter(l => !l.hasCFAsset).forEach(l => {
+    worstPath.push({
+      turn: l.turn,
+      age: l.age,
+      cf: Math.round(worstCF),
+      asset: Math.round(worstAsset - l.loanDelta),
+      note: `💳 대출 $${l.loanDelta.toLocaleString()} 증가 — CF 자산 없는 대출은 부채`,
+    });
+  });
+
+  // 🆕 worstPath는 turn 순서로 재정렬 (정체/대출을 중간에 삽입했기 때문)
+  worstPath.sort((a, b) => a.turn - b.turn);
+
+  // 경로가 없으면 기본값 (시작점 추가)
+  const addStartPoint = (path) => {
+    if (path.length === 0 || path[0].turn > 1) {
+      path.unshift({ turn: 1, age: 20, cf: 0, asset: 0, note: "출발 (20세)" });
+    }
+    return path;
+  };
+
+  // 종료점 추가 (마지막 턴까지 이어지도록)
+  const addEndPoint = (path, lastCF, lastAsset) => {
+    if (path.length > 0 && path[path.length - 1].turn < totalTurns) {
+      path.push({
+        turn: totalTurns,
+        age: ageAtTurn(totalTurns),
+        cf: Math.round(lastCF),
+        asset: Math.round(lastAsset),
+        note: `${ageAtTurn(totalTurns)}세 — 누적 결과`,
+      });
+    }
+    return path;
+  };
+
+  addStartPoint(bestPath);
+  addStartPoint(worstPath);
+  addEndPoint(bestPath, bestCF, bestAsset);
+  addEndPoint(worstPath, worstCF, worstAsset);
+
+  // 모두 중립이면 기본 값 (교육적 메시지)
+  if (bestPath.length <= 2 && worstPath.length <= 2 && bestCF === 0 && worstCF === 0 && bestAsset === 0 && worstAsset === 0) {
+    return {
+      bestPath: [
+        { turn: 1, age: 20, cf: 0, asset: 0, note: "출발 (20세)" },
+        { turn: Math.floor(totalTurns / 3), age: ageAtTurn(Math.floor(totalTurns / 3)), cf: 100, asset: 5000, note: "저축 + 첫 자산 매수" },
+        { turn: Math.floor(totalTurns / 2), age: ageAtTurn(Math.floor(totalTurns / 2)), cf: 300, asset: 15000, note: "현금흐름 자산 확장" },
+        { turn: Math.floor(totalTurns * 2 / 3), age: ageAtTurn(Math.floor(totalTurns * 2 / 3)), cf: 600, asset: 35000, note: "사업체 매수 (B사분면)" },
+        { turn: totalTurns, age: ageAtTurn(totalTurns), cf: 1000, asset: 60000, note: "다양한 행동이 있었다면" },
+      ],
+      worstPath: [
+        { turn: 1, age: 20, cf: 0, asset: 0, note: "출발 (20세)" },
+        { turn: Math.floor(totalTurns / 3), age: ageAtTurn(Math.floor(totalTurns / 3)), cf: 0, asset: 0, note: "저축도 투자도 없음" },
+        { turn: Math.floor(totalTurns / 2), age: ageAtTurn(Math.floor(totalTurns / 2)), cf: 0, asset: 0, note: "기회 계속 패스" },
+        { turn: totalTurns, age: ageAtTurn(totalTurns), cf: 0, asset: 0, note: "행동 없이 시간만 흘렀다면" },
+      ],
+    };
+  }
+
+  // 경로 압축: 의미있는 turning points 유지하며 6-7개로
+  const compressPath = (path) => {
+    if (path.length <= 7) return path;
+    
+    // 첫 점, 마지막 점은 보존
+    const first = path[0];
+    const last = path[path.length - 1];
+    const middle = path.slice(1, -1);
+    
+    // 중간 점 중 "변화량이 큰" 순으로 5개 선택
+    const withDelta = middle.map((p, i) => {
+      const prev = i === 0 ? first : middle[i - 1];
+      const delta = Math.abs((p.cf - prev.cf) * 100) + Math.abs(p.asset - prev.asset);
+      return { ...p, _delta: delta };
+    });
+    
+    // 변화량 top 5 선택 후 턴 순서로 재정렬
+    const topChanges = withDelta
+      .sort((a, b) => b._delta - a._delta)
+      .slice(0, 5)
+      .sort((a, b) => a.turn - b.turn);
+    
+    return [first, ...topChanges.map(({ _delta, ...p }) => p), last];
+  };
+
+  return {
+    bestPath: compressPath(bestPath),
+    worstPath: compressPath(worstPath),
+  };
+};
+
+
+// ═══════════════════════════════════════════════════
+// 🎯 runFullAnalysis: 디브리핑 풀 분석 (export, 컴포넌트 외부에서 호출 가능)
+// ═══════════════════════════════════════════════════
+// 입력: simText (buildPromptText 결과), version, turns, results (turnLog)
+// 출력: analysis 객체 (phases, lessons, bestPath, worstPath, finalQuestion, timeAnalysis)
+// 에러 시 throw
+//
+// 사용처:
+// - DebriefSection.runAnalysis() 내부 (기존)
+// - MyHistoryTab.handleDebrief() 외부 (신규)
+export async function runFullAnalysis({ simText, version, turns, results }) {
+  if (!simText || !version || !turns || !results) {
+    throw new Error("runFullAnalysis: 필수 인자 누락");
+  }
+  if (typeof window === "undefined" || typeof fetch === "undefined") {
+    throw new Error("브라우저 환경에서만 호출 가능합니다.");
+  }
+
+  // 🆕 60초 timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
+  console.log(`[runFullAnalysis] API 호출 시작 — simText 길이=${(simText || "").length}`);
+
+  let response;
+  try {
+      response = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: MODEL_SONNET,
+          max_tokens: 8192,
+          system: `You are a CashFlow board game coaching expert (13 years, 5000+ sessions), deeply grounded in Robert Kiyosaki's teachings and Kevin's Korean educational experience. Respond with ONLY valid JSON. No markdown, no code blocks, no text before or after. Start with { end with }. No trailing commas. Korean content.
+
+CRITICAL INTERPRETATION RULES:
+- [이벤트] tag = event card (stock split/reverse split). Card appearance does NOT mean asset ownership.
+- [미보유→해당없음] = player did NOT own the stock, so event did NOT apply. Do NOT count as asset.
+- [보유중→적용됨] = player DID own the stock, so share count changed.
+- Asset ownership is determined ONLY by [구매] tag on deal cards (SMALL DEAL/BIG DEAL/Capital Gain/CashFlow Deal).
+
+═══════════════════════════════════════════════════
+🎓 KIYOSAKI PHILOSOPHY (내재화하여 분석에 자연스럽게 녹일 것):
+
+이것은 프롬프트에 인용하거나 "기요사키가 말했다"라고 표현하는 것이 아닙니다.
+이 철학을 "당신의 관점"으로 완전히 내재화하여, 모든 분석과 조언에 자연스럽게 배어들게 하세요.
+
+### 기본 10대 철학
+
+1. **ESBI 사분면**
+   - E(직장인): 안정 추구, 돈을 위해 일함 → "월급의 함정"
+   - S(자영업): 독립적이나 여전히 시간을 팔고 있음
+   - B(사업체 소유): 시스템을 가짐, 돈이 일하게 함 → 진정한 자유의 시작
+   - I(투자자): 돈이 돈을 낳게 함 → 부의 완성
+   → 사업체 카드는 단순한 게임 요소가 아니라 "B사분면으로 건너가는 다리"
+
+2. **자산 vs 부채의 정의**
+   - 자산 = 주머니에 돈을 넣어주는 것 (CF +)
+   - 부채 = 주머니에서 돈을 빼가는 것 (CF -)
+   - 많은 사람이 "자산"이라 믿는 집/차가 실은 부채
+   → CF 증가 매수 = 진짜 자산 획득의 순간
+
+3. **현금흐름이 왕**
+   - 자본이익(시세차익)은 일회성, 현금흐름은 지속
+   - 진짜 부 = passive income이 지출을 넘어서는 순간
+   - 주식 매매 차익보다 부동산/사업체의 월 현금흐름이 우선
+   → 후반부 주식 매수는 "현금흐름 구축 기회"를 놓친 것
+
+4. **부자는 덜 일하고 더 번다** — 돈의 방향을 바꾸는 것이 핵심
+
+5. **기부의 역설**
+   - "주면 돌아온다"는 단순 미덕이 아닌 부의 기술
+   - 기부는 현금흐름을 막지 않음 → 오히려 기회를 확장
+   - 움츠러드는 사고방식 vs 풍요의 사고방식
+   → 기부 선택 = 부자 마인드셋의 증거
+
+6. **실수는 교육** — 빠른 실패 > 느린 성공
+
+7. **두려움과 기회** — 두려움 때문에 기회를 놓친다 → 패스는 굴복
+
+8. **좋은 빚 vs 나쁜 빚**
+   - 나쁜 빚: 소비(DOODAD)를 위한 빚
+   - 좋은 빚: 자산 매수를 위한 빚 → 다른 사람이 내 빚을 갚아줌
+
+9. **금융 교육의 부재** — 캐쉬플로우 게임 = 자기 자신을 가르치는 가장 좋은 도구
+
+10. **행동이 전부** — "다음 게임에서 어떻게 다르게 할 것인가"가 진짜 학습
+
+═══════════════════════════════════════════════════
+💼 핵심 영역 1: 사업가 정신 / 기업가 사고
+
+### 사업 vs 직업의 근본적 차이
+- 직업: 내가 없으면 돈이 안 들어옴 (시간-돈 교환)
+- 사업: 내가 없어도 돈이 들어옴 (시스템이 일함)
+- 캐쉬플로우 게임의 사업체 카드 = "시스템 소유"의 시작
+
+### 기업가의 핵심 사고방식
+- **문제 = 기회**: 남들이 불평할 때, 기업가는 해결책을 만든다
+- **실패 = 데이터**: 실패는 끝이 아니라 배움의 시작
+- **리스크는 계산되는 것**: 무모함이 아닌 계산된 도전
+- **다른 사람의 돈(OPM)**: 내 돈이 아닌, 시스템과 레버리지
+- **다른 사람의 시간(OPT)**: 고용과 협업의 힘
+
+### 사업체를 평가하는 기준
+- 현금흐름 크기보다 "시스템이 얼마나 자동화되어 있는가"
+- ROI도 중요하지만 "내 시간이 얼마나 필요한가"가 더 중요
+- 시장의 방향성 vs 반짝 트렌드 구분
+
+### 게임에서의 적용
+- 사업체 매수 = B사분면 입장권 = 가장 가치 있는 선택
+- 사업체 패스 = "나는 아직 준비 안 됐어"의 두려움 표현
+- 첫 번째 사업체 = 가장 큰 심리적 장벽
+
+═══════════════════════════════════════════════════
+🎮 핵심 영역 2: 보드게임과 인생의 연결
+
+### 캐쉬플로우 게임의 진짜 목적
+- 이기기 위함이 아니라 "자신의 금융 사고방식을 발견하기 위함"
+- 게임판 위에서의 선택 = 실제 삶의 선택 패턴의 거울
+- 승리보다 "왜 그 선택을 했는가"가 중요
+
+### 매 게임이 "인생 예행연습"
+- 20대의 선택을 60대에 복기할 수는 없다
+- 하지만 게임에서는 40년을 2시간에 압축해서 살아볼 수 있음
+- 한 판 = 한 번의 인생 시뮬레이션
+
+### 실패해도 안전한 배움
+- 실제 돈 잃지 않고 금융 근육 훈련
+- 실수할수록 더 가치 있는 게임
+- "진짜 돈"을 잃기 전에 "게임 돈"으로 배우기
+
+### 반복의 힘
+- 한 번 하면 재미, 열 번 하면 통찰, 백 번 하면 체득
+- 매번 다른 카드 조합 → 매번 새로운 교훈
+- 반복할수록 나오는 "나만의 패턴" 인식
+
+### 디브리핑의 가치
+- 게임 자체보다 게임 후 성찰이 더 큰 배움
+- "내가 왜 그 순간 패스했지?" 같은 질문
+- 무의식적 패턴의 의식화
+
+═══════════════════════════════════════════════════
+🤝 핵심 영역 3: 공동체 / 팀 / 네트워크
+
+### 혼자 vs 함께의 차이
+- 혼자 공부 = 지식
+- 함께 공부 = 변화 + 지식
+- 부자들은 반드시 네트워크 안에서 자란다
+
+### 부자들의 인맥 특성
+- 같은 방향으로 성장하려는 사람들
+- 서로 기회를 공유하는 관계
+- "끌어올리는" 관계 vs "끌어내리는" 관계
+
+### 코칭딜러/모임의 가치
+- 혼자 게임해도 배움이 있지만, 함께하면 10배
+- 다른 사람의 선택을 보며 배우기
+- 자신의 사각지대 발견
+- 가르치면서 배우는 원리 (가장 깊은 학습)
+
+### 한국적 맥락
+- 한국인은 공동체 학습에 강함
+- 단 "비교"가 아닌 "동행"이 되어야 함
+- Kevin의 캐쉬플로우 모임 = 금융 공동체 선언
+
+### 왜 혼자 하면 안 되는가
+- 자기 관점에 갇힘
+- 지속성 떨어짐
+- 동기 부여 한계
+→ 진짜 변화는 공동체 안에서
+
+═══════════════════════════════════════════════════
+💰 핵심 영역 4: 패시브 인컴 구축 단계
+
+### 쥐 레이스 탈출의 수학
+- 단순 공식: **패시브 인컴 > 총 지출**
+- 하지만 실행은 복잡: 자산 구축 + 지출 관리 + 시간
+
+### 패시브 인컴 구축 단계 (0 → 10)
+**0단계**: 월급 의존 (대부분의 직장인)
+**1단계**: 지출 < 수입 (저축 시작)
+**2단계**: 첫 자산 매수 (소액 부동산/주식)
+**3단계**: 다수 자산 확보 (분산)
+**4단계**: 월 $100 패시브 인컴
+**5단계**: 월 $500 패시브 인컴
+**6단계**: 월 $1,000 패시브 인컴 (의미있는 전환점)
+**7단계**: 패시브 인컴이 지출의 50% (쥐 레이스 중반 탈출)
+**8단계**: 패시브 인컴 = 지출 (쥐 레이스 탈출!)
+**9단계**: 패시브 인컴 > 지출 (자유 + 저축)
+**10단계**: 패시브 인컴이 지출의 10배 (완전한 자유)
+
+### 각 단계의 핵심 과제
+- 0→1: 지출 통제 (DOODAD 피하기)
+- 1→2: 첫 투자의 두려움 극복
+- 2→4: 반복 + 확장 (매월 저축 → 매년 자산)
+- 4→6: 레버리지 사용 (부동산/대출)
+- 6→8: 사업체 매수 (B사분면 진입)
+- 8→10: 투자가로 전환 (I사분면)
+
+### 게임에서의 매핑
+- 초반 몇 턴: 0→2단계 (기초 쌓기)
+- 중반: 3→5단계 (자산 확대)
+- 후반: 6→8단계 (쥐 레이스 탈출 시도)
+- 쥐 레이스 탈출 = 8단계 완성
+
+### 시간의 중요성
+- 단계 건너뛰기 불가능
+- 하지만 단계 밟는 속도는 선택 가능
+- 평균 수십 년 → 전략적으로 10~15년 가능
+
+═══════════════════════════════════════════════════
+🏠 기타 영역: 부동산 투자 원칙
+- 현금흐름이 주, 시세차익은 보너스
+- 레버리지의 현명한 사용 (본인 자본 적게, 은행 자본 많이)
+- 입지 + 임대 수요 평가
+- 한국: "전세 신화"의 함정 — 진짜 자산은 월세가 꾸준히 들어오는 것
+
+📈 기타 영역: 주식 투자 원칙
+- 트레이딩(단기) vs 인베스팅(장기)
+- 차익 실현 매도 = 단기 자본이익
+- 배당주 = 소액 패시브 인컴
+- 주식은 "자산"이 되기 어려움 — 현금흐름이 약함
+- 후반부 주식 투자 = 현금흐름 구축 기회 상실
+
+💸 기타 영역: 세금과 법인
+- 개인 소득세 vs 법인세
+- 부자들의 "합법적 절세" 전략
+- 한국: 종합소득세와 양도세 이해
+- 법인 설립 타이밍
+
+🙏 기타 영역: 멘토링 / 교육자
+- 혼자 배우기의 한계
+- 좋은 멘토는 10년 단축
+- 가르치면서 배우는 원리 (강사가 더 배움)
+- Kevin의 13년 코칭 경험 반영
+
+⏰ 기타 영역: 시간 vs 돈의 관계
+- 시간은 유한, 돈은 무한
+- 복리의 힘 (일찍 시작 > 많이 투자)
+- 40년이라는 프레임: 20세 시작 vs 30세 시작의 차이
+- 시간을 줄이는 것 = 집중 + 레버리지
+
+📊 기타 영역: 인플레이션과 통화
+- 현금 보유의 숨은 비용 (매년 가치 감소)
+- 인플레이션 방어: 부동산, 금, 우량 주식
+- 한국의 부동산 집중 = 인플레이션 직관적 대응
+
+═══════════════════════════════════════════════════
+🇰🇷 한국 맥락 (Kevin의 13년 교육 경험):
+
+### Kevin의 핵심 통찰 (13년, 5,000회 강의)
+- 한국 직장인의 금융 사각지대
+- 부동산 과신 vs 현금흐름 무지
+- "월급 = 안정"이라는 신화
+- 창업 두려움이 강한 문화적 배경
+- 평범한 사람도 가능한 현실적 전략
+
+### 한국인 특유의 함정
+- 강남 아파트 신화 (자본이익 중독)
+- "공무원이 최고" 사고방식
+- 금융 = 어렵고 위험하다는 선입견
+- 돈 이야기의 터부시 (가정/친구 사이에서)
+- 빠른 결과 기대 (복리 이해 부족)
+
+### 공동체 학습의 힘
+- Kevin의 5,000회 강의 = 공동체 기반
+- 혼자 가면 빨리, 함께 가면 멀리
+- 서로의 선택을 보며 배우기
+- 비교가 아닌 동행
+
+### 행동 우선 철학
+- "완벽한 계획 세우다 평생 간다"
+- "먼저 시작하고 배워라"
+- 작은 실행이 모든 변화의 시작
+
+═══════════════════════════════════════════════════
+🎯 SELECTION EVALUATION GUIDE (국제캐쉬플로우강사협회 13년):
+
+### Kevin의 핵심 교육 원칙 (13년 현장에서 정립)
+
+1. **20대 초반의 저축은 자산 형성의 씨앗**
+   - 20대에는 좋은 기회가 와도 현금이 없어 잡을 수 없음
+   - 저축은 과소평가되지만 자산 축적의 직전 단계
+   - 20대의 PAYDAY/월급 = "씨앗 모으는 시간"
+   - 기회를 패스하는 것도 돈 없으면 어쩔 수 없는 선택 (자책 X)
+
+2. **40대 이전 매각은 CF 감소여도 최상의 선택**
+   - 젊을 때는 시세차익으로 원금 확보가 더 중요
+   - 차익으로 더 큰 CF 자산을 살 수 있기 때문
+   - "현금흐름만이 답"은 아님 — 시기별 전략 다름
+   - 차익 실현 = 다음 도약을 위한 발판
+
+3. **CF 마이너스 자산의 재평가**
+   - CF 마이너스 = 항상 나쁜 것이 아님
+   - 매각 가능성이 있다면 투자 기회
+   - 끝까지 보유만 "진짜 부채" (20년 CF-$100 = -$24,000)
+   - 매각 타이밍이 핵심
+
+### 분류 기준
+
+1. 최상의 선택 (encourage, celebrate):
+   - 사업체(Business/Startup/프랜차이즈) 매수 → B사분면 진입 (가중치 ↑)
+   - 기부 선택 → 부자 마인드셋
+   - CF 증가 자산 매수 → 진짜 자산 획득
+   - 40세 이전 자산 매각 → 차익 실현 (더 큰 CF 만들 원금)
+   - CF 마이너스 자산 매수 후 나중에 매각 → 유연한 전략
+   - 초반 CF 마이너스 자산 매수 → 현금 확보 전략
+   - 매수 후 단기 매도 (3턴 이내) → 빠른 의사결정
+   - 20대 PAYDAY = 저축 (자산 형성의 씨앗)
+
+2. 최악의 선택 ("최악"이라는 단어 사용 가능 - 직설적 피드백):
+   ⚠️ 최악의 선택의 핵심 2가지 유형:
+   
+   A) **기회를 잡지 않고 시간을 흘려보내는 선택** (가장 치명적):
+      - 좋은 기회(CF+ 자산)를 패스 → "가만히 있기"가 가장 큰 손실
+      - 사업체 기회 놓침 → B사분면 입장권 포기 (가중치 ↑)
+      - 기부 기회 패스 → 부자 마인드셋 학습 기회 상실
+      - 여러 턴 동안 아무 자산도 매수하지 않음 → "월급만 기다리는 삶"
+      - 후반부(40세+) 주식 매매만 → 현금흐름 파이프라인 구축 실패
+   
+   B) **부채를 계속 늘리는 선택**:
+      - DOODAD 과소비 → 주머니에서 돈이 빠져나감
+      - CF 마이너스 자산을 "끝까지" 보유 → 부채를 자산으로 착각
+      - 대출을 늘려도 그 돈으로 CF 자산을 만들지 않음
+      - 소비성 대출 (차, 집 등 CF 없는 자산)
+
+3. 중립:
+   - 자녀 추가 (BABY) → 선택 영역 아님
+   - 다운사이즈 (DOWNSIZED) → 운의 영역
+   - 20대 기회 패스 (자금 부족) → 현실적 한계 (저축 단계)
+
+TONE: 따뜻하지만 직설적. 기요사키식 명확한 피드백. "최악의 선택"을 부드럽게 포장하지 말 것. 기회를 놓친 것과 부채를 늘린 것은 분명히 지적. 단, 자책으로 이어지지 않게 "다음엔 어떻게"로 연결.
+
+교육 목적: 
+- 구체적 행동 변화 제안
+- 기요사키 철학 자연스럽게 녹이기
+- 20대의 저축도 인정
+- 유연한 전략 (CF vs 차익)
+- 시기별 다른 관점
+
+WRITING STYLE:
+- 기요사키 철학을 "당신의 시선"으로 녹여내세요 (인용 표현 금지)
+- "기요사키가 말했다" / "책에서 배웠듯" 같은 표현 사용 X
+- 대신 그 철학이 분석 자체에 배어있게
+- 한국 맥락과 Kevin의 교육 관점을 자연스럽게 반영
+- 구체적 게임 데이터와 철학을 연결
+- Kevin의 강의장에서 수강생에게 직접 들려주는 것처럼
+
+예시:
+  ❌ "기요사키는 B사분면이 부의 시작이라 말했다"
+  ✅ "35세, 당신은 월급이라는 파이프를 타던 시기에서 
+      직접 파이프를 만드는 사람으로 건너간 순간입니다"
+  ✅ "20대의 저축은 눈에 띄지 않지만, 
+      30대에 첫 자산을 살 수 있게 해주는 씨앗입니다"
+  ✅ "32세에 매각하며 CF+$130을 놓친 것처럼 보이지만,
+      그 차익으로 더 큰 기회를 노릴 수 있다면 좋은 선택입니다"
+═══════════════════════════════════════════════════`,
+          messages: [{
+            role: "user",
+            content: `Analyze this CashFlow ${version} game (${turns} turns). 
+CRITICAL: Map ALL ${turns} turns proportionally to a 40-year life (age 20~60). 1 turn = ${Math.round(40/turns*10)/10} years.
+${turns <= 10 ? `This is a SHORT game (${turns} turns). Even with few turns, map the full 40-year life journey. Fewer actions = more untapped potential. The coaching insight is: "What could you have done differently? What opportunities did you miss? The real game — and real life — rewards those who ACT, explore diverse strategies, and broaden their perspective."` : ""}
+
+SIMULATION DATA:
+${simText}
+
+Return EXACTLY this JSON:
+{
+  "phases": [
+${turns <= 8 ? `    {"title": "출발과 탐색", "age": "20~30세", "turns": "T1~T${Math.ceil(turns*0.3)}", "cards": "what happened", "verdict": "insight"},
+    {"title": "선택의 갈림길", "age": "30~40세", "turns": "T${Math.ceil(turns*0.3)+1}~T${Math.ceil(turns*0.6)}", "cards": "what happened", "verdict": "insight"},
+    {"title": "결과와 교훈", "age": "40~60세", "turns": "T${Math.ceil(turns*0.6)+1}~T${turns}", "cards": "what happened and what was missed", "verdict": "insight about unexplored opportunities"}`
+  : turns <= 12 ? `    {"title": "사회 초년생", "age": "20~30세", "turns": "T1~T${Math.ceil(turns*0.25)}", "cards": "summary", "verdict": "insight"},
+    {"title": "자산 형성기", "age": "30~38세", "turns": "T${Math.ceil(turns*0.25)+1}~T${Math.ceil(turns*0.5)}", "cards": "summary", "verdict": "insight"},
+    {"title": "성장과 전환", "age": "38~46세", "turns": "T${Math.ceil(turns*0.5)+1}~T${Math.ceil(turns*0.75)}", "cards": "summary", "verdict": "insight"},
+    {"title": "수확과 정리", "age": "46~60세", "turns": "T${Math.ceil(turns*0.75)+1}~T${turns}", "cards": "summary", "verdict": "insight"}`
+  : `    {"title": "사회 초년생", "age": "20~28세", "turns": "T1~T${Math.ceil(turns*0.2)}", "cards": "summary", "verdict": "insight"},
+    {"title": "자산 형성기", "age": "28~36세", "turns": "T${Math.ceil(turns*0.2)+1}~T${Math.ceil(turns*0.4)}", "cards": "summary", "verdict": "insight"},
+    {"title": "성장과 위기", "age": "36~44세", "turns": "T${Math.ceil(turns*0.4)+1}~T${Math.ceil(turns*0.6)}", "cards": "summary", "verdict": "insight"},
+    {"title": "성숙과 전환", "age": "44~52세", "turns": "T${Math.ceil(turns*0.6)+1}~T${Math.ceil(turns*0.8)}", "cards": "summary", "verdict": "insight"},
+    {"title": "수확과 정리", "age": "52~60세", "turns": "T${Math.ceil(turns*0.8)+1}~T${turns}", "cards": "summary", "verdict": "insight"}`}
+  ],
+  "bestPath": [{"turn":1,"age":20,"cf":0,"asset":0,"note":"최선"}],
+  "worstPath": [{"turn":1,"age":20,"cf":0,"asset":0,"note":"최악"}],
+  "lessons": ["lesson1", "lesson2", "lesson3", "lesson4", "lesson5"],
+  "finalQuestion": "debriefing question",
+  "timeAnalysis": {
+    "holdingPeriods": [{"asset":"name","buyTurn":1,"buyAge":20,"holdTurns":5,"holdYears":10,"totalCF":0,"insight":"analysis"}],
+    "decisionSpeed": [],
+    "opportunityCost": "one sentence",
+    "timeMessage": "core message about time and assets"
+  }
+}
+
+RULES:
+- phases: distribute ALL turns across phases proportionally. Empty phases should note "이 시기에는 행동이 없었다 — 기회를 놓치고 있었다" as verdict
+- bestPath/worstPath: 간단히 placeholder만 넣으세요 (코드에서 실제 데이터로 대체됨). 3~4개 entry로 충분.
+- lessons: 5 insights. For short games, emphasize: "다양한 전략 탐색", "행동의 중요성", "관점을 넓히는 것이 진짜 게임의 시작"
+- finalQuestion: thought-provoking, encourage action and broader perspective
+- timeAnalysis.timeMessage: emphasize that assets need TIME, and that the real wealth comes from taking action and exploring diverse approaches`
+          }]
+        })
+      });
+  } catch (fetchErr) {
+    clearTimeout(timeoutId);
+    if (fetchErr.name === "AbortError") {
+      throw new Error("분석 응답 시간 초과 (60초). 네트워크를 확인하거나 다시 시도해주세요.");
+    }
+    throw fetchErr;
+  }
+  clearTimeout(timeoutId);
+  console.log(`[runFullAnalysis] API 응답 수신 — status=${response.status}`);
+
+  try {
+      // HTTP 에러 체크
+      if (!response.ok) {
+        const errBody = await response.text().catch(() => "");
+        console.error("API HTTP error:", response.status, errBody.substring(0, 300));
+        throw new Error(`API 오류 (${response.status}). 잠시 후 다시 시도해주세요.`);
+      }
+
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonErr) {
+        console.error("Response JSON parse failed:", jsonErr);
+        throw new Error("API 응답 형식 오류. 재시도해주세요.");
+      }
+
+      if (data.content && data.content.length > 0) {
+        const raw = data.content.filter(c => c.type === "text").map(c => c.text).join("");
+        let jsonStr = raw;
+        // 코드블록 제거
+        jsonStr = jsonStr.replace(/```json\s*/g, "").replace(/```\s*/g, "");
+        // JSON 시작/끝 위치 찾기
+        const firstBrace = jsonStr.indexOf("{");
+        const lastBrace = jsonStr.lastIndexOf("}");
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+          jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
+        }
+        // trailing comma 제거
+        jsonStr = jsonStr.replace(/,\s*]/g, "]").replace(/,\s*}/g, "}");
+
+        // 잘린 JSON 보정
+        let openBrackets = 0, openBraces = 0;
+        for (const c of jsonStr) {
+          if (c === '{') openBraces++;
+          else if (c === '}') openBraces--;
+          else if (c === '[') openBrackets++;
+          else if (c === ']') openBrackets--;
+        }
+        if (openBrackets > 0 || openBraces > 0) {
+          const lastValid = Math.max(jsonStr.lastIndexOf('"'), jsonStr.lastIndexOf('}'), jsonStr.lastIndexOf(']'));
+          if (lastValid > 0) jsonStr = jsonStr.substring(0, lastValid + 1);
+          jsonStr = jsonStr.replace(/,\s*$/, "");
+          for (let b = 0; b < openBrackets; b++) jsonStr += "]";
+          for (let b = 0; b < openBraces; b++) jsonStr += "}";
+        }
+
+        try {
+          const parsed = JSON.parse(jsonStr);
+          if (parsed.phases && parsed.lessons) {
+            // 🎯 Best/Worst 경로를 코드 계산값으로 덮어쓰기 (외부 export 함수 사용)
+            const computed = computeBestWorstPaths(results, turns);
+            parsed.bestPath = computed.bestPath;
+            parsed.worstPath = computed.worstPath;
+            console.log("[runFullAnalysis] Best/Worst 경로 재계산 완료");
+            return parsed;  // ✅ 성공: analysis 객체 반환
+          } else {
+            throw new Error("분석 구조가 올바르지 않습니다. 재시도해주세요.");
+          }
+        } catch (parseErr) {
+          if (parseErr.message.includes("분석 구조")) throw parseErr;
+          console.error("JSON parse error:", parseErr);
+          console.error("Raw (first 300):", raw.substring(0, 300));
+          throw new Error(`AI 응답 파싱 실패 (${raw.length}자). 재시도해주세요.`);
+        }
+      } else if (data.error) {
+        console.error("API error:", data.error);
+        throw new Error(data.error.message || "API 오류가 발생했습니다.");
+      } else {
+        console.error("Unexpected response:", JSON.stringify(data).substring(0, 300));
+        throw new Error("예상치 못한 응답 형식입니다. 재시도해주세요.");
+      }
+  } catch (processErr) {
+    // fetch 성공 후 처리 단계 에러 재throw
+    throw processErr;
+  }
+}
+
+
+// ═══════════════════════════════════════════════════
+// 🎨 AnalysisReport: 디브리핑 풀 분석 렌더링 (export, 재사용 가능)
+// ═══════════════════════════════════════════════════
+// 사용처: DebriefSection 내부 + MyHistoryTab의 모달
+export function AnalysisReport({ analysis, turns }) {
+const [bestWorstTab, setBestWorstTab] = useState("cf");
+const phaseColors = ["#10b981","#3b82f6","#8b5cf6","#f59e0b","#ef4444"];
+if (!analysis) return null;
+  const bp = analysis.bestPath || [];
+  const wp = analysis.worstPath || [];
+  const hasPaths = bp.length > 0 && wp.length > 0;
+
+  // 🔧 턴 시간축 기반으로 bp/wp 정합성 맞추기
+  const allTurns = Array.from(new Set([
+    ...bp.map(b => b.turn),
+    ...wp.map(w => w.turn),
+  ])).sort((a, b) => a - b);
+
+  // ageAtTurn 공식: 40년을 totalTurns로 나누기 (computeBestWorstPaths와 동일)
+  const yearsPerTurn = Math.round(40 / Math.max(turns, 1) * 10) / 10;
+  const ageAtTurnUI = (t) => Math.round(20 + (t - 0.5) * yearsPerTurn);
+
+  // 각 턴에서 가장 최근(이전까지 누적된) 값 추출 헬퍼
+  const getValueAtTurn = (path, turn) => {
+    // 누적값만 반환 (age는 턴 기반으로 다시 계산)
+    let cf = 0, asset = 0, note = "";
+    for (const p of path) {
+      if (p.turn <= turn) {
+        cf = p.cf || 0;
+        asset = p.asset || 0;
+        note = p.note || "";
+      } else break;
+    }
+    return { cf, asset, note };
+  };
+
+  // 통합 시간축 데이터
+  const unifiedRows = allTurns.map(turn => {
+    const b = getValueAtTurn(bp, turn);
+    const w = getValueAtTurn(wp, turn);
+    const bEvent = bp.find(p => p.turn === turn);
+    const wEvent = wp.find(p => p.turn === turn);
+    return {
+      turn,
+      age: ageAtTurnUI(turn),  // 🔧 올바른 공식으로 계산
+      bCF: b.cf,
+      bAsset: b.asset,
+      wCF: w.cf,
+      wAsset: w.asset,
+      bNote: bEvent?.note || "",
+      wNote: wEvent?.note || "",
+    };
+  });
+
+  // 🔍 진단: bp/wp 데이터 상태 한 번만 로깅
+  if (typeof window !== "undefined" && !window.__lastAnalysisDebug) {
+    window.__lastAnalysisDebug = Date.now();
+    console.log("[AnalysisReport] bp:", bp);
+    console.log("[AnalysisReport] wp:", wp);
+    console.log("[AnalysisReport] unifiedRows:", unifiedRows);
+    setTimeout(() => { delete window.__lastAnalysisDebug; }, 2000);
+  }
+
+  // 🔧 max 값 계산 - bp/wp 모두 포함 (정합성)
+  const allCFValues = unifiedRows.flatMap(r => [Math.abs(r.bCF), Math.abs(r.wCF)]);
+  const allAssetValues = unifiedRows.flatMap(r => [Math.abs(r.bAsset), Math.abs(r.wAsset)]);
+  const maxCF = Math.max(...allCFValues, 100);
+  const maxAsset = Math.max(...allAssetValues, 1000);
+
+  // 최종 누적값
+  const lastRow = unifiedRows[unifiedRows.length - 1] || { bCF: 0, bAsset: 0, wCF: 0, wAsset: 0 };
+  const lastBest = { cf: lastRow.bCF, asset: lastRow.bAsset };
+  const lastWorst = { cf: lastRow.wCF, asset: lastRow.wAsset };
+
+  return (
+    <>
+      {/* ── 1. 전 생애 자산 흐름 요약 ── */}
+      <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #27272a", marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "#fafafa", marginBottom: 14 }}>📋 전 생애 자산 흐름 요약</div>
+        {(analysis.phases || []).map((p, i) => (
+          <div key={i} style={{ marginBottom: i < 4 ? 14 : 0, paddingBottom: i < 4 ? 14 : 0, borderBottom: i < 4 ? "1px solid #1e1e2e" : "none" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: phaseColors[i] + "20", color: phaseColors[i] }}>{p.title} ({p.age})</span>
+              <span style={{ fontSize: 10, color: "#52525b" }}>{p.turns}</span>
+            </div>
+            <p style={{ fontSize: 12, color: "#a1a1aa", margin: "4px 0", lineHeight: 1.5 }}>{p.cards}</p>
+            <p style={{ fontSize: 12, color: phaseColors[i], margin: 0, fontWeight: 600 }}>{p.verdict}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* ── 2. 최상의 선택 vs 최악의 선택 비교 그래프 ── */}
+      <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #27272a", marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "#fafafa", marginBottom: 6 }}>📈 최상의 선택 vs 최악의 선택</div>
+        <div style={{ fontSize: 11, color: "#71717a", marginBottom: 14 }}>같은 카드를 받았을 때, 선택에 따라 현금흐름이 어떻게 달라지는지 비교합니다.</div>
+        {hasPaths ? (<>
+        {/* 탭 */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          {[{ key:"cf", label:"월 현금흐름" }, { key:"asset", label:"누적 투자원금" }].map(t => (
+            <button key={t.key} onClick={() => setBestWorstTab(t.key)} style={{
+              padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer",
+              border: bestWorstTab === t.key ? "1px solid #3b82f6" : "1px solid #27272a",
+              background: bestWorstTab === t.key ? "#3b82f620" : "#18181b",
+              color: bestWorstTab === t.key ? "#93c5fd" : "#71717a",
+            }}>{t.label}</button>
+          ))}
+        </div>
+        {/* 범례 */}
+        <div style={{ display: "flex", gap: 12, marginBottom: 10, fontSize: 11, flexWrap: "wrap" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 14, height: 10, borderRadius: 2, background: "#22c55e" }}></span>
+            <span style={{ color: "#a1a1aa" }}>최상의 선택 (누적)</span>
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 14, height: 10, borderRadius: 2, background: "#ef4444" }}></span>
+            <span style={{ color: "#a1a1aa" }}>최악의 선택 (누적)</span>
+          </span>
+        </div>
+        <div style={{ marginBottom: 14, fontSize: 9, color: "#52525b", textAlign: "right" }}>
+          최대값: {bestWorstTab === "cf" ? `$${fmtNum(maxCF)}/월` : `$${fmtNum(maxAsset)}`} · 막대 길이는 비율
+        </div>
+
+        {/* 턴별 막대 */}
+        <div>
+          {unifiedRows.map((row, i) => {
+            const max = bestWorstTab === "cf" ? (maxCF || 1) : (maxAsset || 1);
+            const bVal = bestWorstTab === "cf" ? row.bCF : row.bAsset;
+            const wVal = bestWorstTab === "cf" ? row.wCF : row.wAsset;
+            const bW = bVal === 0 ? 0 : Math.max(2, (Math.abs(bVal) / max) * 100);
+            const wW = wVal === 0 ? 0 : Math.max(2, (Math.abs(wVal) / max) * 100);
+            const fmt = v => {
+              if (v === 0) return "—";
+              return bestWorstTab === "cf"
+                ? (v >= 0 ? `+$${fmtNum(Math.round(v))}` : `-$${fmtNum(Math.abs(Math.round(v)))}`)
+                : (v >= 0 ? `$${fmtNum(Math.round(v))}` : `-$${fmtNum(Math.abs(Math.round(v)))}`);
+            };
+            return (
+              <div key={i} style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 9, color: "#52525b", minWidth: 52 }}>T{row.turn} {row.age}세</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 3, minHeight: 10 }}>
+                      {bW > 0 ? (
+                        <div style={{ height: 10, borderRadius: 3, background: "#22c55e", width: `${bW}%` }}></div>
+                      ) : (
+                        <div style={{ height: 10, width: 20, borderLeft: "2px dotted #52525b" }}></div>
+                      )}
+                      <span style={{ fontSize: 9, color: bVal === 0 ? "#52525b" : "#86efac", whiteSpace: "nowrap", fontWeight: 700 }}>{fmt(bVal)}</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, minHeight: 10 }}>
+                      {wW > 0 ? (
+                        <div style={{ height: 10, borderRadius: 3, background: wVal < 0 ? "#ef4444" : "#ef444480", width: `${wW}%` }}></div>
+                      ) : (
+                        <div style={{ height: 10, width: 20, borderLeft: "2px dotted #52525b" }}></div>
+                      )}
+                      <span style={{ fontSize: 9, color: wVal === 0 ? "#52525b" : "#fca5a5", whiteSpace: "nowrap", fontWeight: 700 }}>{fmt(wVal)}</span>
+                    </div>
+                  </div>
+                </div>
+                {row.bNote && (
+                  <div style={{ paddingLeft: 58, fontSize: 9, color: "#4ade80", marginTop: 3 }}>▲ {row.bNote}</div>
+                )}
+                {row.wNote && (
+                  <div style={{ paddingLeft: 58, fontSize: 9, color: "#f87171", marginTop: 1 }}>▼ {row.wNote}</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 격차 요약 */}
+        <div style={{ marginTop: 16, padding: 14, borderRadius: 10, background: "#18181b", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ textAlign: "center", flex: 1 }}>
+            <div style={{ fontSize: 9, color: "#86efac", fontWeight: 700, marginBottom: 4 }}>최상의 선택</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: "#22c55e" }}>
+              {bestWorstTab === "cf"
+                ? `${lastBest.cf >= 0 ? "+" : ""}$${fmtNum(Math.round(lastBest.cf))}/월`
+                : `$${fmtNum(Math.round(lastBest.asset))}`}
+            </div>
+          </div>
+          <div style={{ fontSize: 18, color: "#52525b", fontWeight: 700 }}>vs</div>
+          <div style={{ textAlign: "center", flex: 1 }}>
+            <div style={{ fontSize: 9, color: "#fca5a5", fontWeight: 700, marginBottom: 4 }}>최악의 선택</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: "#ef4444" }}>
+              {bestWorstTab === "cf"
+                ? `${lastWorst.cf >= 0 ? "+" : ""}$${fmtNum(Math.round(lastWorst.cf))}/월`
+                : `$${fmtNum(Math.round(lastWorst.asset))}`}
+            </div>
+          </div>
+        </div>
+        <div style={{ textAlign: "center", marginTop: 10, padding: 10, background: "#18181b", borderRadius: 8 }}>
+          <span style={{ fontSize: 12, color: "#fafafa", fontWeight: 700 }}>
+            같은 카드, 다른 선택 —{" "}
+            {bestWorstTab === "cf"
+              ? <>월 현금흐름 격차: <span style={{ color: "#fbbf24" }}>${fmtNum(Math.abs(Math.round(lastBest.cf - lastWorst.cf)))}</span></>
+              : <>누적 투자원금 격차: <span style={{ color: "#fbbf24" }}>${fmtNum(Math.abs(Math.round(lastBest.asset - lastWorst.asset)))}</span></>
+            }
+          </span>
+        </div>
+        </>) : (
+          <div style={{ padding: "20px 0", textAlign: "center" }}>
+            <p style={{ fontSize: 13, color: "#71717a", marginBottom: 8 }}>비교 데이터가 생성되지 않았습니다.</p>
+            <p style={{ fontSize: 10, color: "#52525b" }}>
+              최상 경로 {bp.length}개 · 최악 경로 {wp.length}개
+            </p>
+            {bp.length === 0 && wp.length === 0 && (
+              <p style={{ fontSize: 10, color: "#52525b", marginTop: 6 }}>
+                턴 기록이 부족하거나 분석에 오류가 있을 수 있습니다. 다시 분석을 시도해주세요.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── 3. 5가지 교훈 + 최종 질문 ── */}
+      <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #27272a", marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "#fafafa", marginBottom: 14 }}>💡 이 게임이 가르쳐 준 5가지</div>
+        {(analysis.lessons || []).map((lesson, i) => (
+          <div key={i} style={{ display: "flex", gap: 10, marginBottom: i < 4 ? 12 : 0 }}>
+            <span style={{ fontSize: 16, fontWeight: 900, color: "#f59e0b", minWidth: 20, textAlign: "center" }}>{i + 1}</span>
+            <p style={{ fontSize: 13, lineHeight: 1.7, color: "#d4d4d8", margin: 0 }}>{lesson}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* ── 4. 시간 분석 (턴 기반 + 결정 속도) ── */}
+      {analysis.timeAnalysis && (
+        <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #a78bfa30", marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "#a78bfa", marginBottom: 14 }}>⏱ 시간 분석 — 자산에 시간을 줘야 합니다</div>
+
+          {/* 보유 기간 분석 */}
+          {analysis.timeAnalysis.holdingPeriods && analysis.timeAnalysis.holdingPeriods.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#c4b5fd", marginBottom: 8 }}>자산 보유 기간 & 누적 현금흐름</div>
+              {analysis.timeAnalysis.holdingPeriods.map((h, i) => (
+                <div key={i} style={{ padding: "10px 12px", borderRadius: 10, background: "#1a1a2e", marginBottom: 6 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#e4e4e7" }}>{h.asset}</span>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: "#a78bfa20", color: "#c4b5fd" }}>{h.holdYears}년 보유</span>
+                      <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: "#22c55e20", color: "#86efac" }}>${fmtNum((h.totalCF || 0))}</span>
+                    </div>
+                  </div>
+                  <p style={{ fontSize: 11, color: "#a1a1aa", margin: 0, lineHeight: 1.5 }}>{h.insight}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 결정 속도 분석 */}
+          {analysis.timeAnalysis.decisionSpeed && analysis.timeAnalysis.decisionSpeed.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#c4b5fd", marginBottom: 8 }}>결정 속도 분석</div>
+              {analysis.timeAnalysis.decisionSpeed.map((d, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, background: "#1a1a2e", marginBottom: 4 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#27272a", color: "#a1a1aa" }}>T{d.turn}</span>
+                  <span style={{ fontSize: 11, color: "#e4e4e7", flex: 1 }}>{d.card}</span>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: d.seconds <= 10 ? "#86efac" : d.seconds <= 20 ? "#fde68a" : "#fca5a5" }}>{d.seconds}초</span>
+                  <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4,
+                    background: d.action === "buy" ? "#22c55e20" : d.action === "pass" ? "#ef444420" : "#f59e0b20",
+                    color: d.action === "buy" ? "#86efac" : d.action === "pass" ? "#fca5a5" : "#fde68a",
+                  }}>{d.action === "buy" ? "구매" : d.action === "sell" ? "판매" : "패스"}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 기회비용 */}
+          {analysis.timeAnalysis.opportunityCost && (
+            <div style={{ padding: "10px 14px", borderRadius: 10, background: "#ef444410", border: "1px solid #ef444420", marginBottom: 12 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#fca5a5", marginBottom: 4 }}>놓친 기회의 비용</div>
+              <p style={{ fontSize: 12, color: "#e4e4e7", margin: 0, lineHeight: 1.6 }}>{analysis.timeAnalysis.opportunityCost}</p>
+            </div>
+          )}
+
+          {/* 시간의 힘 메시지 */}
+          {analysis.timeAnalysis.timeMessage && (
+            <div style={{ padding: "12px 14px", borderRadius: 10, borderLeft: "3px solid #a78bfa", background: "#a78bfa08" }}>
+              <p style={{ fontSize: 13, color: "#e4e4e7", margin: 0, lineHeight: 1.7, fontWeight: 500 }}>{analysis.timeAnalysis.timeMessage}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── 💰 6 Levels of Wealth — 당신의 현 위치 ── */}
+      {analysis.financialLevel && (() => {
+        const fl = analysis.financialLevel;
+        const levels = [
+          { n: 1, name: "의존", icon: "⚓", color: "#ef4444" },
+          { n: 2, name: "생존", icon: "⛺", color: "#f59e0b" },
+          { n: 3, name: "안정", icon: "🌱", color: "#22c55e" },
+          { n: 4, name: "안정성", icon: "🛡️", color: "#10b981" },
+          { n: 5, name: "자유", icon: "🦅", color: "#3b82f6" },
+          { n: 6, name: "풍요", icon: "👑", color: "#a855f7" },
+        ];
+        return (
+          <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: `1px solid ${fl.color}40`, marginBottom: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: "#fafafa", marginBottom: 6 }}>💰 6 Levels of Wealth — 당신의 현 위치</div>
+            <div style={{ fontSize: 11, color: "#71717a", marginBottom: 14 }}>게임 결과(자산 · 현금흐름 · 지출 · 비상금)를 바탕으로 진단한 현재 단계입니다.</div>
+
+            {/* 6단계 진행도 바 */}
+            <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
+              {levels.map(L => (
+                <div key={L.n} style={{
+                  flex: 1, padding: "10px 4px", borderRadius: 8, textAlign: "center",
+                  background: L.n === fl.level ? `${L.color}30` : (L.n < fl.level ? `${L.color}15` : "#0a0a0f"),
+                  border: L.n === fl.level ? `2px solid ${L.color}` : "1px solid #27272a",
+                }}>
+                  <div style={{ fontSize: 16, marginBottom: 2, opacity: L.n <= fl.level ? 1 : 0.3 }}>{L.icon}</div>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: L.n === fl.level ? L.color : (L.n < fl.level ? "#a1a1aa" : "#3f3f46") }}>L{L.n}</div>
+                  <div style={{ fontSize: 8, color: L.n === fl.level ? "#fafafa" : "#52525b", marginTop: 1 }}>{L.name}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* 현재 단계 상세 */}
+            <div style={{ padding: "14px 16px", borderRadius: 10, background: `${fl.color}10`, borderLeft: `4px solid ${fl.color}`, marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 22 }}>{fl.icon}</span>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: fl.color }}>Level {fl.level}: {fl.levelName}</div>
+                  <div style={{ fontSize: 9, color: "#71717a", fontStyle: "italic" }}>{fl.english}</div>
+                </div>
+              </div>
+              <p style={{ fontSize: 12, color: "#d4d4d8", margin: "8px 0 12px", lineHeight: 1.6 }}>{fl.status}</p>
+              {fl.kpi && (
+                <div style={{ display: "flex", gap: 8, fontSize: 9, marginBottom: 10 }}>
+                  <span style={{ padding: "4px 8px", borderRadius: 4, background: "#27272a", color: "#a1a1aa" }}>현재: {fl.kpi.current}</span>
+                  <span style={{ padding: "4px 8px", borderRadius: 4, background: `${fl.color}20`, color: fl.color, fontWeight: 700 }}>다음: {fl.kpi.target}</span>
+                </div>
+              )}
+            </div>
+
+            {/* 지침 */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#fafafa", marginBottom: 8 }}>📋 이 단계에서 해야 할 행동</div>
+              <ol style={{ paddingLeft: 20, margin: 0 }}>
+                {(fl.guidance || []).map((g, i) => (
+                  <li key={i} style={{ fontSize: 12, color: "#d4d4d8", lineHeight: 1.7, marginBottom: 6 }}>{g}</li>
+                ))}
+              </ol>
+            </div>
+
+            {/* 다음 단계 안내 */}
+            {fl.nextStep && (
+              <div style={{ padding: "12px 14px", borderRadius: 8, background: "linear-gradient(135deg, #3b82f615, #8b5cf615)", border: "1px solid #3b82f630" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#93c5fd", marginBottom: 4 }}>🎯 다음 단계로 가는 길</div>
+                <p style={{ fontSize: 12, color: "#e4e4e7", margin: 0, lineHeight: 1.6 }}>{fl.nextStep}</p>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── 🛡️ 시장에 흔들리지 않는 '나만의 계획' 원칙 (모든 단계 공통) ── */}
+      {analysis.financialLevel && (
+        <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #27272a", marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "#fafafa", marginBottom: 6 }}>🛡️ 시장에 흔들리지 않는 3가지 원칙</div>
+          <div style={{ fontSize: 11, color: "#71717a", marginBottom: 14 }}>어느 단계에 있든 흔들리지 않게 만들어주는 핵심 원칙입니다.</div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ padding: "12px 14px", borderRadius: 8, background: "#0a0a0f", borderLeft: "3px solid #fbbf24" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#fbbf24", marginBottom: 4 }}>1. 기준점의 내재화</div>
+              <p style={{ fontSize: 11, color: "#d4d4d8", margin: 0, lineHeight: 1.6 }}>성공의 기준을 시장 지수나 친구의 수익률이 아니라, <strong style={{ color: "#fde68a" }}>'어제의 나보다 얼마나 더 탄탄해졌는가'</strong>에 두세요.</p>
+            </div>
+            <div style={{ padding: "12px 14px", borderRadius: 8, background: "#0a0a0f", borderLeft: "3px solid #22c55e" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#22c55e", marginBottom: 4 }}>2. 시간의 주권 되찾기</div>
+              <p style={{ fontSize: 11, color: "#d4d4d8", margin: 0, lineHeight: 1.6 }}>경제적 자유의 본질은 <strong style={{ color: "#86efac" }}>'하기 싫은 일을 하지 않아도 되는 상태'</strong>입니다. 내가 통제할 수 있는 범위(지출 관리, 자기 계발)에 집중하세요.</p>
+            </div>
+            <div style={{ padding: "12px 14px", borderRadius: 8, background: "#0a0a0f", borderLeft: "3px solid #3b82f6" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#3b82f6", marginBottom: 4 }}>3. 자산보다 중요한 '시스템'</div>
+              <p style={{ fontSize: 11, color: "#d4d4d8", margin: 0, lineHeight: 1.6 }}>통장 잔고를 늘리는 것보다, 어떤 상황에서도 나를 지켜줄 <strong style={{ color: "#93c5fd" }}>재무적 시스템(보험·비상금·자동 저축)</strong>을 구축하세요. 시스템이 견고하면 하락장에 오히려 기회를 잡을 수 있습니다.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ padding: "20px", borderRadius: 14, textAlign: "center", background: "linear-gradient(135deg, #3b82f610, #8b5cf610)", border: "1px solid #3b82f630", marginBottom: 20 }}>
+        <p style={{ fontSize: 12, fontWeight: 700, color: "#93c5fd", margin: "0 0 6px" }}>최종 디브리핑 질문</p>
+        <p style={{ fontSize: 15, fontWeight: 800, color: "#fafafa", margin: 0, lineHeight: 1.7 }}>{analysis.finalQuestion}</p>
+      </div>
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// 💰 6 Levels of Wealth (경제적 성장 6단계) 진단
+// ═══════════════════════════════════════════════════
+// 게임 결과(자산/CF/지출/현금/대출)로부터 현재 단계 자동 판정
+// 단계별 가이드 + 다음 단계로 가는 행동 지침 제공
+//
+// 입력: { passiveIncome, totalExpense, cash, assets, bankLoan, savingMonths }
+// 출력: { level, levelName, color, status, guidance[], nextStep }
+export function diagnoseFinancialLevel({ passiveIncome = 0, totalExpense = 1, cash = 0, assets = [], bankLoan = 0, jobName = "" }) {
+  const expense = Math.max(totalExpense, 1);
+  const cfRatio = passiveIncome / expense;          // 수동소득 / 지출
+  const savingMonths = cash / expense;              // 비상금 개월 수
+  const hasAssets = (assets || []).length > 0;
+  const hasCFAsset = (assets || []).some(a => (a.cf || 0) > 0);
+
+  // 단계 판정 로직 (보수적, 실제 재무 상태 우선)
+  // Level 6: 풍요 — 수동소득이 지출의 5배 이상 (게임 내에선 사실상 도달 어려움)
+  if (cfRatio >= 5) {
+    return {
+      level: 6,
+      levelName: "재정적 풍요",
+      english: "Financial Abundance",
+      color: "#a855f7",
+      icon: "👑",
+      status: "원하는 것보다 훨씬 많은 수입이 자동으로 들어오는 단계입니다. 돈에 대해 더 이상 걱정하거나 계산할 필요가 없습니다.",
+      guidance: [
+        "자신의 꿈을 온전히 실현하고, 사회적 기여나 유산(Legacy)을 남기는 삶을 사세요.",
+        "진정한 자유를 누리며 자아실현에 집중하십시오.",
+      ],
+      nextStep: "이미 최상위 단계입니다. 이제는 '받은 부'를 어떻게 의미있게 쓸 것인가가 중요합니다.",
+      kpi: { current: `수동소득 ${cfRatio.toFixed(1)}배 > 지출`, target: "유지 + 사회 환원" },
+    };
+  }
+  // Level 5: 자유 — 수동소득 ≥ 지출의 2배 (게임 탈출 조건 + 충분한 여유)
+  if (cfRatio >= 2) {
+    return {
+      level: 5,
+      levelName: "경제적 자유",
+      english: "Financial Freedom",
+      color: "#3b82f6",
+      icon: "🦅",
+      status: "노동을 하지 않아도 현재의 생활 수준을 유지할 수 있는 단계입니다. 노동이 '생존'이 아닌 '선택'이 되었습니다.",
+      guidance: [
+        "수동적 소득이 지출의 2배를 지속적으로 상회하면 즉시 은퇴가 가능합니다.",
+        "이제 '하기 싫은 일을 하지 않을' 권리를 가지셨습니다.",
+        "다음 단계는 더 큰 부 + 사회 기여, 즉 '풍요(Abundance)'로 가는 것입니다.",
+      ],
+      nextStep: "포트폴리오를 다각화하고, 자녀 교육·기부·새 사업 등 의미있는 영역에 자본을 배분하세요.",
+      kpi: { current: `수동소득 ${cfRatio.toFixed(1)}배 > 지출`, target: "5배 이상 → Level 6" },
+    };
+  }
+  // Level 4: 안정성 — 근로+수동 > 지출 2배, CF 자산 있음
+  if (cfRatio >= 1 || (hasCFAsset && cfRatio >= 0.5)) {
+    return {
+      level: 4,
+      levelName: "금융 안정성",
+      english: "Financial Security",
+      color: "#10b981",
+      icon: "🛡️",
+      status: "수동 소득 채널이 확보되어 심리적, 경제적 여유가 생긴 단계입니다. 쥐 레이스를 이미 탈출했거나 곧 탈출할 위치입니다.",
+      guidance: [
+        "본격적인 자산 배분을 시작하세요 (사업, 주식, 펀드, 채권 등).",
+        "**현금 흐름(Cash Flow)**이 발생하는 자산에 투자하여 안정성을 극대화하세요.",
+        "단순히 통장 잔고를 늘리는 것보다, 어떤 상황에서도 나를 지켜줄 **재무적 시스템**(보험, 비상금, 자동 저축)을 구축하세요.",
+      ],
+      nextStep: "수동 소득을 지출의 2배로 끌어올리는 것이 다음 목표입니다. 이미 시스템은 작동하고 있으니, 자산을 추가로 매입해 CF를 키우세요.",
+      kpi: { current: `수동소득 ${cfRatio.toFixed(1)}배`, target: `2배 이상 → Level 5 (경제적 자유)` },
+    };
+  }
+  // Level 3: 안정 — CF 자산 있고 저축 있음, 그러나 아직 노동 의존
+  if (hasCFAsset || (hasAssets && savingMonths >= 6)) {
+    return {
+      level: 3,
+      levelName: "재정적 안정",
+      english: "Financial Stability",
+      color: "#22c55e",
+      icon: "🌱",
+      status: "먹고사는 데 충분하고 삶의 질이 좋아졌지만, 여전히 본인의 노동(근로 소득)에 의존하는 단계입니다. 첫 자산을 통해 시스템의 시작을 만들었습니다.",
+      guidance: [
+        "남는 돈으로 **수동적 소득(Passive Income)**을 만드는 시스템(사업, 투자 등)에 집중하세요.",
+        "수입의 10~15%를 활용해 생명·건강 보험 등 개인 리스크를 방어하세요.",
+        "성공의 기준을 '시장 지수'나 '친구의 수익률'이 아니라, **'어제의 나보다 얼마나 더 탄탄해졌는가'**에 두세요.",
+      ],
+      nextStep: "수동 소득이 지출에 가까워지면 Level 4. 사업체·다가구 부동산 같은 큰 CF 자산을 노리세요.",
+      kpi: { current: `CF 자산 ${(assets||[]).filter(a => a.cf > 0).length}개 보유`, target: `수동소득 = 지출 → Level 4` },
+    };
+  }
+  // Level 2: 생존 — 저축은 있으나 자산이 없음 (비상금 단계)
+  if (savingMonths >= 3 || cash >= 3000) {
+    return {
+      level: 2,
+      levelName: "경제적 생존",
+      english: "Financial Survival",
+      color: "#f59e0b",
+      icon: "⛺",
+      status: "갑작스러운 위기에도 버틸 수 있는 최소한의 방어막을 구축한 단계입니다. 비상금이 마련되어 있어 충동적 결정에서 자유롭습니다.",
+      guidance: [
+        "월 지출의 6~12배에 달하는 금액을 비상금으로 저축하세요. (현재 약 " + savingMonths.toFixed(1) + "개월 분)",
+        "비상금이 마련될 때까지는 부채 상환을 서두르기보다 현금 보유에 집중하세요.",
+        "1단계에서 2단계로 넘어온 것만으로도 엄청난 성취입니다. 이제 첫 자산을 매입할 준비가 되었습니다.",
+      ],
+      nextStep: "첫 CF 자산(소액 부동산 또는 작은 사업체)을 매입해 Level 3로 올라가세요.",
+      kpi: { current: `비상금 약 ${savingMonths.toFixed(1)}개월분`, target: `첫 CF 자산 매입 → Level 3` },
+    };
+  }
+  // Level 1: 의존 — 저축도 자산도 없음, 노동 소득에 100% 의존
+  return {
+    level: 1,
+    levelName: "경제적 의존",
+    english: "Active Income Only",
+    color: "#ef4444",
+    icon: "⚓",
+    status: "수입이 지출과 비슷하거나 적어, 소득이 생기면 곧장 비용으로 나가는 구조입니다. 당장 일을 그만두면 생계가 위태로운 상태입니다.",
+    guidance: [
+      "**절대로 무리한 투자를 하지 마세요.** 첫 단계는 방어막을 만드는 것입니다.",
+      "지출 관리와 소득 증대에 집중하세요. 들어오는 돈보다 나가는 돈을 줄이는 것이 우선입니다.",
+      "가장 중요한 것은 본인의 능력을 키우는 **'지식 투자'**입니다. 책·강의·코칭 모임 등에 시간을 쏟으세요.",
+    ],
+    nextStep: "월 지출의 3~6개월분 비상금을 모으는 것이 첫 목표. 그래야 Level 2로 올라가고, 충동적 결정에서 벗어날 수 있습니다.",
+    kpi: { current: `비상금 ${savingMonths.toFixed(1)}개월분`, target: `3개월분 이상 → Level 2` },
+  };
+}
+
 export function generateFreeFeedback(results, turns) {
   let dealCount = 0, doodadCount = 0, marketCount = 0, paydayCount = 0, charityCount = 0, babyCount = 0;
   let bestCard = null, bestROI = -Infinity;
@@ -6007,18 +7821,88 @@ export async function generatePaidFeedback({ tier, version, turns, simText, extr
   const model = tier === 2 ? MODEL_OPUS : MODEL_SONNET;
   const detail = FEEDBACK_DETAIL[tier] || FEEDBACK_DETAIL[1];
   const maxTokens = FEEDBACK_MAX_TOKENS[tier] || 2500;
-  const response = await fetch("/api/feedback", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model, max_tokens: maxTokens,
-      system: SYSTEM_PROMPT,
-      messages: [{
-        role: "user",
-        content: `캐쉬플로우${version} ${turns}턴 디브리핑 총평.\n${simText}\n${extraContext}\n${detail}`,
-      }],
-    }),
-  });
+
+  // 🆕 유료 피드백 전용: 6 Levels of Wealth + 3원칙 코칭 가이드
+  const PAID_COACHING_FRAMEWORK = `
+═══════════════════════════════════════════════════
+💰 6 Levels of Wealth (경제적 성장 6단계) — 반드시 활용할 것
+═══════════════════════════════════════════════════
+이 프레임워크는 유료 코칭의 핵심 차별화 요소입니다.
+반드시 분석에 다음을 포함시키세요:
+
+1️⃣ 게임 결과로부터 플레이어의 현재 단계를 진단
+   - L1 경제적 의존(Active Income Only): 수입=지출, 저축 거의 없음, 노동 100% 의존
+   - L2 경제적 생존(Financial Survival): 비상금 6~12개월분 확보 단계
+   - L3 재정적 안정(Financial Stability): 수입이 지출의 2배 이상, 첫 자산 보유, 그러나 노동 의존
+   - L4 금융 안정성(Financial Security): 근로+수동 소득 > 지출 2배, CF 자산 다수
+   - L5 경제적 자유(Financial Freedom): 수동 소득 ≥ 지출의 2배 (게임 탈출 + 여유)
+   - L6 재정적 풍요(Financial Abundance): 수동 소득 >> 지출, 사회 환원/유산 단계
+
+2️⃣ 단계별 행동 지침 제시 — 현재 단계에 맞는 구체적 행동
+   - L1: 절대 무리한 투자 금지. 지출 관리 + 소득 증대 + '지식 투자'
+   - L2: 월 지출의 6~12배 비상금 모으기. 부채 상환보다 현금 보유 우선
+   - L3: 남는 돈으로 수동적 소득 시스템 구축. 보험으로 리스크 방어
+   - L4: 본격적 자산 배분(사업/주식/펀드/채권). CF 발생 자산 우선
+   - L5: 노동이 '선택'이 되는 단계. 포트폴리오 다각화
+   - L6: 자아실현, 사회 기여, Legacy 남기는 삶
+
+3️⃣ 다음 단계로 가는 경로 명시
+   - "당신은 현재 L2에서 L3로 가고 있다. 첫 CF 자산을 매입하면 도약한다"
+   - 구체적 KPI 제시 (수동소득 목표, 자산 개수, 비상금 개월수)
+
+🛡️ 추가로 다음 3원칙도 적절히 인용하세요:
+
+원칙 1. 기준점의 내재화
+   성공의 기준을 시장 지수나 친구의 수익률이 아니라
+   '어제의 나보다 얼마나 더 탄탄해졌는가'에 두는 것
+
+원칙 2. 시간의 주권 되찾기
+   경제적 자유의 본질은 '하기 싫은 일을 하지 않아도 되는 상태'
+   내가 통제할 수 있는 범위(지출 관리, 자기 계발)에 집중
+
+원칙 3. 자산보다 중요한 '시스템'
+   재무적 시스템(보험, 비상금, 자동 저축)이 견고하면
+   하락장에 오히려 기회를 잡을 수 있는 여유가 생긴다
+
+═══════════════════════════════════════════════════
+중요: 위 프레임워크는 유료 콘텐츠의 가치를 만드는 핵심입니다.
+스토리텔링 안에 자연스럽게 녹이되, 반드시 다음 3가지를 명시:
+  ① 현재 어느 단계에 있는지
+  ② 그 단계에서 해야 할 행동
+  ③ 다음 단계로 가는 길
+═══════════════════════════════════════════════════
+`;
+
+  // 🆕 60초 timeout 추가 (무한 대기 방지)
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+  console.log(`[generatePaidFeedback] API 호출 시작 — tier=${tier}, model=${model}, simText 길이=${(simText || "").length}`);
+
+  let response;
+  try {
+    response = await fetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model, max_tokens: maxTokens,
+        system: SYSTEM_PROMPT,
+        messages: [{
+          role: "user",
+          content: `캐쉬플로우${version} ${turns}턴 디브리핑 총평.\n${simText}\n${extraContext}\n\n${PAID_COACHING_FRAMEWORK}\n\n${detail}`,
+        }],
+      }),
+    });
+  } catch (e) {
+    clearTimeout(timeoutId);
+    if (e.name === "AbortError") {
+      throw new Error("API 응답 시간 초과 (60초). 네트워크 상태를 확인하거나 다시 시도해주세요.");
+    }
+    throw e;
+  }
+  clearTimeout(timeoutId);
+  console.log(`[generatePaidFeedback] API 응답 수신 — status=${response.status}`);
   if (!response.ok) {
     const err = new Error(`API 오류 (${response.status})`);
     err.status = response.status;
@@ -6026,6 +7910,7 @@ export async function generatePaidFeedback({ tier, version, turns, simText, extr
   }
   const data = await response.json();
   if (!data.content) throw new Error("예상치 못한 응답입니다.");
+  console.log(`[generatePaidFeedback] ✅ 응답 처리 완료`);
   return data.content.filter(c => c.type === "text").map(c => c.text).join("\n");
 }
 
@@ -6036,7 +7921,7 @@ const TIERS = [
   { label: "프리미엄 피드백", chars: "5,000자", price: "$20", color: "#f59e0b", sub: "전문 코칭 리포트 + 맞춤 전략", model: "Opus" },
 ];
 
-function DebriefSection({ results, version, turns, deck }) {
+function DebriefSection({ results, version, turns, deck, gameSnapshot }) {
   const [mode, setMode] = useState(null);
   const [tier, setTier] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -6112,7 +7997,14 @@ function DebriefSection({ results, version, turns, deck }) {
         // 이로써 "게임 기록 보기" 모달에서 턴별 상세가 표시됨
         turnLog: Array.isArray(results) ? results : [],
         turnCount: turns,
-        // 최종 스냅샷이 있다면 함께 (deck 외부에서 접근 가능 여부 확인)
+        // 🆕 게임 스냅샷 (자산/현금/대출 등) — 모달의 요약 카드에 표시
+        assets: gameSnapshot?.assets || [],
+        cash: gameSnapshot?.cash ?? 0,
+        totalCF: gameSnapshot?.totalCF ?? 0,
+        bankLoan: gameSnapshot?.bankLoan ?? 0,
+        loanInterest: gameSnapshot?.loanInterest ?? 0,
+        babies: gameSnapshot?.babies ?? 0,
+        job: gameSnapshot?.job || "",
         savedAt: "debriefing",
       };
       const payloadStr = JSON.stringify(data);
@@ -6339,12 +8231,12 @@ function DebriefSection({ results, version, turns, deck }) {
       const cardName = t.card?.sub || t.card?.desc || "";
       if (!cardName) return;
       
-      if ((t.cellType === "DEAL1" || t.cellType === "DEAL2" || t.cellType === "BIG_DEAL" || t.cellType === "SMALL_DEAL" || t.cellType === "MARKET") && t.action === "buy") {
+      if ((t.cellType === "DEAL1" || t.cellType === "DEAL2" || t.cellType === "BIG_DEAL" || t.cellType === "SMALL_DEAL" || t.cellType === "MARKET" || t.cellType === "OPPORTUNITY") && t.action === "buy") {
         if (!assetLifecycle[cardName]) {
           assetLifecycle[cardName] = { buyTurn: t.turn, sold: false, sellTurn: null };
         }
       }
-      if (t.action === "sell" || t.cellType === "EXT_SELL") {
+      if (t.action === "sell" || t.cellType === "EXT_SELL" || t.cellType === "STOCK_SELL") {
         if (assetLifecycle[cardName]) {
           assetLifecycle[cardName].sold = true;
           assetLifecycle[cardName].sellTurn = t.turn;
@@ -6399,7 +8291,7 @@ function DebriefSection({ results, version, turns, deck }) {
       const cardName = card.sub || card.desc || "";
 
       // ─── DEAL / MARKET 카드 매수 ───
-      const isBuyable = ["DEAL1", "DEAL2", "BIG_DEAL", "SMALL_DEAL", "MARKET"].includes(cellType);
+      const isBuyable = ["DEAL1", "DEAL2", "BIG_DEAL", "SMALL_DEAL", "MARKET", "OPPORTUNITY"].includes(cellType);
       
       if (isBuyable && action === "buy") {
         // 사업체 매수 - 항상 최상의 선택 (+ 가중치)
@@ -6481,7 +8373,7 @@ function DebriefSection({ results, version, turns, deck }) {
       }
 
       // ─── 주식/자산 매도 ───
-      if (action === "sell" || cellType === "EXT_SELL") {
+      if (action === "sell" || cellType === "EXT_SELL" || cellType === "STOCK_SELL") {
         const transaction = t.transaction || "";
         const profitMatch = transaction.match(/\+\$?([\d,]+)/);
         const lossMatch = transaction.match(/-\$?([\d,]+)/);
@@ -6558,7 +8450,7 @@ function DebriefSection({ results, version, turns, deck }) {
         const amount = card.amount || 0;
         return {
           category: "worst",
-          cfChange: 0,
+          cfChange: -Math.min(50, Math.round(amount / 20)),  // 🆕 작은 cf 영향 (시각화용)
           assetChange: -amount,
           reason: `🛒 ${card.desc || "지출"} -$${amount} — 과소비`,
         };
@@ -6601,7 +8493,7 @@ function DebriefSection({ results, version, turns, deck }) {
         if (isEarly(t.turn)) {
           return {
             category: "best",
-            cfChange: 0,
+            cfChange: 50,  // 🆕 작은 저축 효과 (시각화용)
             assetChange: 500, // 저축 효과 상징적 표현
             reason: `💵 월급 수령 — 20대 저축은 자산 형성의 씨앗 (과소평가된 습관)`,
           };

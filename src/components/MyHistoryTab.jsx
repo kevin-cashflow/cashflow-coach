@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { generateFreeFeedback, generatePaidFeedback, buildPromptText } from "./CashflowCoachingSim";
+import { generateFreeFeedback, generatePaidFeedback, buildPromptText, computeBestWorstPaths, runFullAnalysis, AnalysisReport, diagnoseFinancialLevel } from "./CashflowCoachingSim";
 import {
   saveEternalDebrief,
   getAllEternalDebriefs,
@@ -29,6 +29,9 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
   const [debriefModal, setDebriefModal] = useState(null);
   // 게임 기록 모달: 게임 객체 전체 (턴 로그, 자산, 자금 등 표시용)
   const [recordModal, setRecordModal] = useState(null);
+  // 🆕 보안 필터 통계
+  const [filteredOutCount, setFilteredOutCount] = useState(0);
+  const [legacyAllowedCount, setLegacyAllowedCount] = useState(0);
 
   // 언마운트 체크용 ref (React state 업데이트 경고 방지)
   const isMountedRef = useRef(true);
@@ -53,6 +56,16 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
     }
     setLoading(true);
     setError("");
+
+    // 🛡️ 마스터 안전장치: 30초 후 무조건 setLoading(false)
+    // 어떤 이유로든 loadGames가 hang하면 사용자가 영원히 로딩 화면 보지 않도록
+    const masterTimeoutId = setTimeout(() => {
+      if (isMountedRef.current) {
+        console.warn("[MyHistoryTab] ⏰ 마스터 타임아웃 (30초) — setLoading(false) 강제");
+        setLoading(false);
+        setError("로딩이 너무 오래 걸립니다. 새로고침 또는 재시도 버튼을 눌러주세요.");
+      }
+    }, 30000);
 
     // 각 storage 호출마다 새로운 타임아웃 Promise 생성 (15초)
     const makeTimeout = () => new Promise((_, reject) =>
@@ -179,6 +192,8 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
             };
 
             // 원본 키(k)를 그대로 유지. 저장 시에도 이 키를 씀.
+            const turnLogArr = Array.isArray(d.turnLog) ? d.turnLog : [];
+            console.log(`[MyHistoryTab] 📂 debrief 로드: ${k} → 턴 ${turnLogArr.length}개 (turns 필드: ${d.turns || 0})`);
             return {
               key: k,
               source: "legacy-debrief",
@@ -188,12 +203,12 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
               time: d.time,
               version: d.version || "캐쉬플로우",
               job: d.job || "(이전 디브리핑)",
-              turnCount: d.turnCount || d.turns || (Array.isArray(d.turnLog) ? d.turnLog.length : 0),
+              turnCount: d.turnCount || d.turns || turnLogArr.length,
               simText: d.simText || "",
               isLegacyDebrief: true,
               _legacyRaw: d,
               // 🆕 턴 로그 및 최종 스냅샷 복원 (새 디브리핑 저장본에서 사용)
-              turnLog: Array.isArray(d.turnLog) ? d.turnLog : [],
+              turnLog: turnLogArr,
               assets: Array.isArray(d.assets) ? d.assets : [],
               cash: d.cash ?? 0,
               totalCF: d.totalCF ?? 0,
@@ -370,11 +385,61 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
         return tb - ta;
       });
 
-      safeSetGames(preserved);
+      // 🆕 🔒 보안 필터: 본인의 데이터만 허용
+      // 3단계 검증 (storage layer나 RLS에서 누수가 있어도 클라이언트에서 한 번 더 필터):
+      //   1순위: g.user_id === authUser.id (payload에 명시적 심어진 보안 필드)
+      //   2순위: g.saveLog.savedByUserId === authUser.id (저장 로그 기반)
+      //   3순위: g.playerId === authUser.id (플레이어 ID 기반, 과거 저장 형식)
+      //   4순위: 위 필드가 하나도 없는 완전 레거시 데이터는 허용 (기존 데이터 보호)
+      //   그 외(다른 사람이 저장한 게 명확한 것)는 제외
+      const myUserId = authUser?.id ? String(authUser.id) : null;
+      const beforeFilter = preserved.length;
+      let filteredOut = 0;
+      let legacyAllowed = 0;
+      const filtered = myUserId
+        ? preserved.filter(g => {
+            // 1순위: 최상위 user_id (새로 저장되는 데이터)
+            const directUid = g.user_id ? String(g.user_id) : null;
+            if (directUid) {
+              const match = directUid === myUserId;
+              if (!match) filteredOut++;
+              return match;
+            }
+            // 2순위: saveLog
+            const savedByUid = g.saveLog?.savedByUserId ? String(g.saveLog.savedByUserId) : null;
+            if (savedByUid) {
+              const match = savedByUid === myUserId;
+              if (!match) filteredOut++;
+              return match;
+            }
+            // 3순위: playerId (과거 방식, solo/user id 로 저장되었을 수 있음)
+            const playerUid = g.playerId && g.playerId !== "solo" ? String(g.playerId) : null;
+            if (playerUid) {
+              const match = playerUid === myUserId;
+              if (!match) filteredOut++;
+              return match;
+            }
+            // 4순위: 완전 레거시 (어떤 식별자도 없음) → 일단 허용 + 로그
+            legacyAllowed++;
+            console.warn(`[MyHistoryTab] ⚠️ 식별자 없는 레거시 게임 허용: ${g.key} (playerId=${g.playerId})`);
+            return true;
+          })
+        : preserved;
+      if (filteredOut > 0) {
+        console.warn(`[MyHistoryTab] 🔒 보안 필터: 다른 사용자 게임 ${filteredOut}건 제외 (${beforeFilter} → ${filtered.length})`);
+      }
+      if (legacyAllowed > 0) {
+        console.warn(`[MyHistoryTab] ℹ️ 식별자 없는 레거시 게임 ${legacyAllowed}건 허용됨 (본인 것인지 확인 필요)`);
+      }
+      setFilteredOutCount(filteredOut);
+      setLegacyAllowedCount(legacyAllowed);
+
+      safeSetGames(filtered);
     } catch (e) {
       console.error("[MyHistoryTab] 게임 이력 조회 실패:", e);
       setError(e.message || "게임 이력을 불러올 수 없습니다.");
     } finally {
+      clearTimeout(masterTimeoutId);  // 🛡️ 마스터 타임아웃 해제
       setLoading(false);
     }
   }, [authUser]);
@@ -492,24 +557,16 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authUser?.id]); // authUser가 바뀔 때만 (로그아웃/재로그인 시)
 
-  // ── 브라우저 탭 복귀 시 자동 복구 ──
-  // 다른 브라우저 보다가 돌아올 때, storage 조회가 멈춰있거나 세션 토큰이 만료된 경우 대비
+  // ── 브라우저 탭 복귀 시 자동 복구 (보수적: 정말 필요할 때만) ──
+  // 사용자가 다른 브라우저 갔다 와도 화면이 그대로 유지되어야 함
+  // 자동 재로드는 사용자 경험을 해침 → 다음 두 경우에만 동작:
+  //   1. 디브리핑 진행 중이었으면 백그라운드 결과 확인 (이건 필요)
+  //   2. 그 외에는 화면 그대로 유지 (loadGames 자동 재호출 X)
   useEffect(() => {
     const handleVisibilityChange = async () => {
       // 탭이 다시 활성화되었을 때
       if (document.visibilityState === "visible") {
-        console.log("[MyHistoryTab] 탭 복귀 감지");
-        // 로딩 상태에서 멈춰있으면 취소하고 재시도
-        if (loading) {
-          console.log("[MyHistoryTab] 로딩 중 탭 복귀 → 재시도");
-          if (isMountedRef.current) {
-            setLoading(false);
-            setTimeout(() => {
-              if (isMountedRef.current) loadGames();
-            }, 100);
-          }
-          return;
-        }
+        console.log("[MyHistoryTab] 탭 복귀 감지 (자동 재로드 안 함)");
 
         // 디브리핑 진행 중이었다면 → storage에서 최신 결과 확인
         // (탭이 백그라운드에서도 fetch는 완료되고 storage에 저장되었을 수 있음)
@@ -546,27 +603,13 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
       }
     };
 
-    const handleFocus = () => {
-      // 윈도우 포커스 돌아올 때도 체크
-      if (loading) {
-        console.log("[MyHistoryTab] 포커스 복귀 + 로딩 중 → 재시도");
-        if (isMountedRef.current) {
-          setLoading(false);
-          setTimeout(() => {
-            if (isMountedRef.current) loadGames();
-          }, 100);
-        }
-      }
-    };
-
+    // 🚫 focus 핸들러 제거 (자동 재로드 방지)
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("focus", handleFocus);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("focus", handleFocus);
     };
-  }, [loading, loadGames, debriefModal, safeSetDebriefModal, safeSetGames]);
+  }, [debriefModal, safeSetDebriefModal, safeSetGames]);
 
   const formatDate = (iso) => {
     if (!iso) return "";
@@ -577,7 +620,7 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
   // ── 게임 데이터 업데이트 (디브리핑 결과 저장) ──
   // ⚠️ 이 함수의 목적: 한 번 저장된 디브리핑은 절대로 유실되지 않도록 보장
   // 전략: 3중 저장 (메모리 + localStorage + window.storage) + 검증
-  const updateGameDebrief = async (gameKey, tier, feedbackText) => {
+  const updateGameDebrief = async (gameKey, tier, feedbackText, fullAnalysis = null) => {
     try {
       const game = games.find(g => g.key === gameKey);
       if (!game) {
@@ -589,16 +632,38 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
         analysisAt: null,
         feedback: { free: null, detail: null, premium: null },
       };
+
+      // 🆕 디브리핑 저장자 로그
+      const debriefSaveLog = {
+        savedByUserId: authUser?.id || null,
+        savedByEmail: authUser?.email || null,
+        savedByNickname: authUser?.user_metadata?.nickname || null,
+        savedAt: new Date().toISOString(),
+        tier,
+        isAdmin: false,  // MyHistoryTab은 본인 수행
+      };
+      console.log("[updateGameDebrief] 📝 저장자 로그:", debriefSaveLog);
+
       const updatedFeedback = { ...debriefData.feedback };
       updatedFeedback[tier] = {
         text: feedbackText,
         generatedAt: new Date().toISOString(),
+        saveLog: debriefSaveLog,  // 🆕 디브리핑 별 저장 로그
       };
+      // 🆕 풀 analysis가 새로 생성됐으면 업데이트, 아니면 기존 값 유지
+      const analysisToSave = fullAnalysis || debriefData.analysis;
       const updatedGame = {
         ...game,
         debriefData: {
           ...debriefData,
+          analysis: analysisToSave,
+          analysisAt: fullAnalysis ? new Date().toISOString() : debriefData.analysisAt,
           feedback: updatedFeedback,
+          // 🆕 디브리핑 수정 이력 누적
+          editHistory: [
+            ...(debriefData.editHistory || []),
+            { ...debriefSaveLog, action: `debrief_${tier}` },
+          ].slice(-50),  // 최근 50개만 유지
         },
       };
 
@@ -611,6 +676,8 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
         finalPayload = {
           ..._legacyRaw,
           debriefDataExtended: updatedFeedback,
+          // 🆕 풀 analysis도 레거시에 저장
+          ...(analysisToSave && { analysis: analysisToSave }),
           ...(tier === "free"    && { feedbackTier: 0, feedback: feedbackText }),
           ...(tier === "detail"  && { feedbackTier: 1, feedback: feedbackText }),
           ...(tier === "premium" && { feedbackTier: 2, feedback: feedbackText }),
@@ -706,6 +773,7 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
         game: currentGame,
         tier,
         text: existing.text,
+        analysis: currentGame.debriefData?.analysis || null, // 🆕 풀 분석도 같이
         generatedAt: existing.generatedAt,
         loading: false,
         error: null,
@@ -745,8 +813,10 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
 
     try {
       let result;
+      let fullAnalysis = null; // 🆕 풀 분석 결과 (phases, lessons, bestPath, worstPath, finalQuestion 등)
+
       if (tier === "free") {
-        // 무료: 동기, 즉시 생성 (비용 없음)
+        // 무료: 동기 텍스트 + 풀 분석 (API 호출 1회)
         const results = currentGame.gameResults || (currentGame.turnLog || []).map(t => ({
           turn: t.turn,
           cell: { type: t.cellType, label: t.cellType },
@@ -756,9 +826,34 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
           splitApplied: t.splitApplied,
           dice: [0], total: 0, pos: 0,
         }));
+        // 1) 텍스트 한 단락 (즉시, 무료)
         result = generateFreeFeedback(results, currentGame.turnCount || 0);
+
+        // 2) 🆕 풀 분석도 같이 진행 (그래프 + 5단계 + 5가지 교훈)
+        // 이미 저장된 analysis가 있으면 재호출하지 않음 (재호출 비용 방지)
+        const cachedAnalysis = currentGame.debriefData?.analysis;
+        if (cachedAnalysis && cachedAnalysis.phases && cachedAnalysis.lessons) {
+          console.log("[handleDebrief] 캐시된 analysis 재사용 (재호출 없음)");
+          fullAnalysis = cachedAnalysis;
+        } else if (results.length > 0) {
+          try {
+            const simText = currentGame.simText || buildPromptText(results, currentGame.version, currentGame.turnCount || 0);
+            console.log("[handleDebrief] 무료 디브리핑 - runFullAnalysis 호출 시작");
+            fullAnalysis = await runFullAnalysis({
+              simText,
+              version: currentGame.version,
+              turns: currentGame.turnCount || 0,
+              results,
+            });
+            console.log("[handleDebrief] runFullAnalysis 성공 - phases:", fullAnalysis?.phases?.length, "lessons:", fullAnalysis?.lessons?.length);
+            // 무료 분기에서는 6단계 진단을 하지 않음 (유료 차별화)
+          } catch (analysisErr) {
+            // 풀 분석 실패해도 무료 텍스트는 표시 (graceful degradation)
+            console.warn("[handleDebrief] 풀 분석 실패 (텍스트만 사용):", analysisErr.message);
+          }
+        }
       } else {
-        // 상세/프리미엄: API 호출
+        // 상세/프리미엄: API 호출 + 6단계 진단
         const numericTier = tier === "detail" ? 1 : 2;
         let simText = currentGame.simText;
         if (!simText) {
@@ -784,13 +879,39 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
           turns: currentGame.turnCount || 0,
           simText,
         });
+
+        // 🆕 유료 전용: 6 Levels of Wealth 자동 진단 추가
+        try {
+          const passiveIncome = (currentGame.assets || [])
+            .filter(a => a.type !== "주식")
+            .reduce((sum, a) => sum + (a.cf || 0), 0);
+          const totalExpense = currentGame.totalCF !== undefined && currentGame.totalCF < 0
+            ? Math.abs(currentGame.totalCF) + passiveIncome
+            : 1000;
+          const financialLevel = diagnoseFinancialLevel({
+            passiveIncome,
+            totalExpense,
+            cash: currentGame.cash || 0,
+            assets: currentGame.assets || [],
+            bankLoan: currentGame.bankLoan || 0,
+            jobName: currentGame.job || "",
+          });
+          // 기존 analysis가 있으면 financialLevel만 추가, 없으면 새로 생성
+          fullAnalysis = currentGame.debriefData?.analysis
+            ? { ...currentGame.debriefData.analysis, financialLevel }
+            : { financialLevel };
+          console.log(`[handleDebrief] 💰 유료(${tier}) 6단계 진단:`, financialLevel.level, financialLevel.levelName);
+        } catch (levelErr) {
+          console.warn("[handleDebrief] 6단계 진단 실패:", levelErr.message);
+        }
       }
 
       // 저장 (1회만) — storage 저장은 언마운트돼도 실행됨
-      await updateGameDebrief(currentGame.key, tier, result);
+      await updateGameDebrief(currentGame.key, tier, result, fullAnalysis);
       safeSetDebriefModal(prev => prev ? {
         ...prev,
         text: result,
+        analysis: fullAnalysis, // 🆕 풀 분석을 모달에 전달 (Step C에서 렌더링)
         generatedAt: new Date().toISOString(),
         loading: false,
         savedReplay: false,
@@ -893,6 +1014,94 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
 
       {!loading && !error && games.length > 0 && (
         <div>
+          {/* 🆕 보안 필터 알림 (다른 사용자 게임 제외됨) */}
+          {filteredOutCount > 0 && (
+            <div style={{
+              padding: "8px 12px", borderRadius: 6, marginBottom: 10,
+              background: "#3b82f615", border: "1px solid #3b82f630",
+              fontSize: 10, color: "#93c5fd", display: "flex", alignItems: "center", gap: 6,
+            }}>
+              🔒 보안: 다른 사용자의 게임 <strong>{filteredOutCount}건</strong>이 자동으로 제외되었습니다. (내 게임만 표시)
+            </div>
+          )}
+
+          {/* 🆕 레거시 데이터 안내 (식별자 없는 오래된 게임) */}
+          {legacyAllowedCount > 0 && (
+            <div style={{
+              padding: "10px 12px", borderRadius: 6, marginBottom: 10,
+              background: "#fbbf2410", border: "1px solid #fbbf2430",
+              fontSize: 10, color: "#fde68a",
+            }}>
+              <div style={{ marginBottom: 6 }}>
+                ⚠️ 식별자가 없는 오래된 게임 <strong>{legacyAllowedCount}건</strong>이 있습니다.
+                <br/>
+                <span style={{ color: "#fca5a5" }}>
+                  이 데이터는 현재 로그인 이전에 저장되었거나 다른 계정의 게임일 수 있습니다.
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  if (!window.confirm(`식별자가 없는 오래된 게임 ${legacyAllowedCount}건을 브라우저에서 삭제하시겠습니까?\n\n⚠️ Supabase 서버에 저장된 데이터는 그대로 유지됩니다.\n⚠️ 브라우저 localStorage와 IndexedDB의 로컬 캐시만 삭제됩니다.\n\n정말 삭제하려면 확인을 눌러주세요.`)) return;
+
+                  // 식별자 없는 게임 찾아서 localStorage에서 삭제
+                  let removedLocal = 0;
+                  const toRemove = [];
+                  if (typeof localStorage !== "undefined") {
+                    for (let i = 0; i < localStorage.length; i++) {
+                      const k = localStorage.key(i);
+                      if (!k) continue;
+                      // game: 또는 debrief: 로 시작하고, value에 user_id/saveLog 없음
+                      if (k.startsWith("game:") || k.startsWith("debrief:")) {
+                        try {
+                          const v = localStorage.getItem(k);
+                          if (!v) continue;
+                          const d = JSON.parse(v);
+                          const hasUid = d.user_id || d.saveLog?.savedByUserId || (d.playerId && d.playerId !== "solo");
+                          if (!hasUid) toRemove.push(k);
+                        } catch {}
+                      }
+                    }
+                    for (const k of toRemove) {
+                      localStorage.removeItem(k);
+                      removedLocal++;
+                    }
+                  }
+                  // 영구 저장도 정리
+                  let removedEternal = 0;
+                  if (typeof localStorage !== "undefined") {
+                    const ek = [];
+                    for (let i = 0; i < localStorage.length; i++) {
+                      const k = localStorage.key(i);
+                      if (k && k.startsWith("debrief-永:")) {
+                        // 대응되는 게임이 식별자 없으면 삭제
+                        try {
+                          const v = localStorage.getItem(k);
+                          if (v) {
+                            const d = JSON.parse(v);
+                            // gameInfo에 playerId가 없거나 solo면 레거시로 판단
+                            if (!d?.gameInfo || !d.gameInfo.playerId || d.gameInfo.playerId === "solo") {
+                              ek.push(k);
+                            }
+                          }
+                        } catch {}
+                      }
+                    }
+                    for (const k of ek) {
+                      localStorage.removeItem(k);
+                      removedEternal++;
+                    }
+                  }
+                  alert(`✅ 정리 완료\n\n- localStorage: ${removedLocal}건\n- 영구 저장: ${removedEternal}건\n\n페이지를 새로고침합니다.`);
+                  window.location.reload();
+                }}
+                style={{
+                  padding: "4px 10px", borderRadius: 4, border: "1px solid #fbbf2450",
+                  background: "#fbbf2420", color: "#fde68a", cursor: "pointer",
+                  fontSize: 10, fontWeight: 700,
+                }}
+              >🗑️ 오래된 데이터 정리</button>
+            </div>
+          )}
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {games.map((g) => {
             const debriefData = g.debriefData || { feedback: {} };
@@ -1017,7 +1226,7 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
    디브리핑 결과 표시 모달
 ═══════════════════════════════════════════════════ */
 function DebriefResultModal({ modal, onClose }) {
-  const { game, tier, text, generatedAt, loading, error, savedReplay } = modal;
+  const { game, tier, text, analysis, generatedAt, loading, error, savedReplay } = modal;
 
   const TIER_LABEL = {
     free: { icon: "💬", name: "요약 피드백", color: "#22c55e" },
@@ -1226,6 +1435,179 @@ function DebriefResultModal({ modal, onClose }) {
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
 
+    // 🆕 analysis(5단계 + Best/Worst 그래프 + 5가지 교훈)를 HTML로 변환
+    const fmtNumLocal = (n) => new Intl.NumberFormat("en-US").format(n || 0);
+    const turns = game?.turnCount || (game?.turnLog || []).length || 0;
+    const phaseColors = ["#10b981", "#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444"];
+
+    let analysisHtml = "";
+    if (analysis && (analysis.phases || analysis.lessons)) {
+      // 1) 전 생애 자산 흐름 요약 (5단계 phases)
+      if (Array.isArray(analysis.phases) && analysis.phases.length > 0) {
+        analysisHtml += `<div class="section">
+          <h2 class="section-title">📋 전 생애 자산 흐름 요약</h2>
+          <div class="phases">`;
+        analysis.phases.forEach((p, i) => {
+          const c = phaseColors[i] || "#666";
+          analysisHtml += `
+            <div class="phase">
+              <div class="phase-header">
+                <span class="phase-tag" style="background:${c}20;color:${c};">${escapeHtml(p.title || "")} (${escapeHtml(p.age || "")})</span>
+                <span class="phase-turns">${escapeHtml(p.turns || "")}</span>
+              </div>
+              <div class="phase-cards">${escapeHtml(p.cards || "")}</div>
+              <div class="phase-verdict" style="color:${c};">${escapeHtml(p.verdict || "")}</div>
+            </div>`;
+        });
+        analysisHtml += `</div></div>`;
+      }
+
+      // 2) 최상의 선택 vs 최악의 선택 그래프
+      const bp = analysis.bestPath || [];
+      const wp = analysis.worstPath || [];
+      if (bp.length > 0 && wp.length > 0) {
+        const allTurns = Array.from(new Set([...bp.map(b => b.turn), ...wp.map(w => w.turn)])).sort((a, b) => a - b);
+        const yearsPerTurn = Math.round(40 / Math.max(turns, 1) * 10) / 10;
+        const ageAtTurn = (t) => Math.round(20 + (t - 0.5) * yearsPerTurn);
+        const getValueAtTurn = (path, turn) => {
+          let cf = 0, asset = 0, note = "";
+          for (const p of path) {
+            if (p.turn <= turn) { cf = p.cf || 0; asset = p.asset || 0; note = p.note || ""; }
+            else break;
+          }
+          return { cf, asset, note };
+        };
+        const rows = allTurns.map(t => {
+          const b = getValueAtTurn(bp, t);
+          const w = getValueAtTurn(wp, t);
+          const bEv = bp.find(p => p.turn === t);
+          const wEv = wp.find(p => p.turn === t);
+          return { turn: t, age: ageAtTurn(t), bCF: b.cf, wCF: w.cf, bNote: bEv?.note || "", wNote: wEv?.note || "" };
+        });
+        const maxCF = Math.max(...rows.flatMap(r => [Math.abs(r.bCF), Math.abs(r.wCF)]), 100);
+        const lastRow = rows[rows.length - 1] || { bCF: 0, wCF: 0 };
+
+        analysisHtml += `<div class="section">
+          <h2 class="section-title">📈 최상의 선택 vs 최악의 선택 (월 현금흐름)</h2>
+          <div class="legend">
+            <span class="legend-item"><span class="legend-bar" style="background:#22c55e;"></span> 최상의 선택 (누적)</span>
+            <span class="legend-item"><span class="legend-bar" style="background:#ef4444;"></span> 최악의 선택 (누적)</span>
+          </div>
+          <table class="graph-table">`;
+        rows.forEach(r => {
+          const bW = r.bCF === 0 ? 0 : Math.max(2, (Math.abs(r.bCF) / maxCF) * 100);
+          const wW = r.wCF === 0 ? 0 : Math.max(2, (Math.abs(r.wCF) / maxCF) * 100);
+          const fmtV = (v) => v === 0 ? "—" : (v >= 0 ? `+$${fmtNumLocal(Math.round(v))}` : `-$${fmtNumLocal(Math.abs(Math.round(v)))}`);
+          analysisHtml += `
+            <tr>
+              <td class="g-turn">T${r.turn} ${r.age}세</td>
+              <td class="g-bar">
+                <div class="bar-row">
+                  ${bW > 0 ? `<div class="bar best" style="width:${bW}%"></div>` : `<span class="bar-empty">—</span>`}
+                  <span class="bar-val best-val">${fmtV(r.bCF)}</span>
+                </div>
+                <div class="bar-row">
+                  ${wW > 0 ? `<div class="bar worst" style="width:${wW}%"></div>` : `<span class="bar-empty">—</span>`}
+                  <span class="bar-val worst-val">${fmtV(r.wCF)}</span>
+                </div>
+                ${r.bNote ? `<div class="note best-note">▲ ${escapeHtml(r.bNote)}</div>` : ""}
+                ${r.wNote ? `<div class="note worst-note">▼ ${escapeHtml(r.wNote)}</div>` : ""}
+              </td>
+            </tr>`;
+        });
+        analysisHtml += `</table>
+          <div class="comparison">
+            <div class="comp-box best-box"><div class="comp-label">최상의 선택</div><div class="comp-val">${lastRow.bCF >= 0 ? "+" : ""}$${fmtNumLocal(Math.round(lastRow.bCF))}/월</div></div>
+            <div class="comp-vs">VS</div>
+            <div class="comp-box worst-box"><div class="comp-label">최악의 선택</div><div class="comp-val">${lastRow.wCF >= 0 ? "+" : ""}$${fmtNumLocal(Math.round(lastRow.wCF))}/월</div></div>
+          </div>
+          <p class="comp-gap">같은 카드, 다른 선택 — 월 현금흐름 격차: <strong>$${fmtNumLocal(Math.abs(lastRow.bCF - lastRow.wCF))}</strong></p>
+        </div>`;
+      }
+
+      // 3) 5가지 교훈
+      if (Array.isArray(analysis.lessons) && analysis.lessons.length > 0) {
+        analysisHtml += `<div class="section">
+          <h2 class="section-title">💡 이 게임이 가르쳐 준 5가지</h2>
+          <ol class="lessons">`;
+        analysis.lessons.forEach((lesson) => {
+          analysisHtml += `<li>${escapeHtml(lesson)}</li>`;
+        });
+        analysisHtml += `</ol></div>`;
+      }
+
+      // 4) 💰 6 Levels of Wealth — 당신의 현 위치
+      if (analysis.financialLevel) {
+        const fl = analysis.financialLevel;
+        const levels = [
+          { n: 1, name: "의존", icon: "⚓" },
+          { n: 2, name: "생존", icon: "⛺" },
+          { n: 3, name: "안정", icon: "🌱" },
+          { n: 4, name: "안정성", icon: "🛡️" },
+          { n: 5, name: "자유", icon: "🦅" },
+          { n: 6, name: "풍요", icon: "👑" },
+        ];
+        let levelBar = '<div class="level-bar">';
+        levels.forEach(L => {
+          const isCurrent = L.n === fl.level;
+          const isPast = L.n < fl.level;
+          levelBar += `<div class="level-cell ${isCurrent ? "current" : (isPast ? "past" : "future")}" style="${isCurrent ? `border-color:${fl.color};background:${fl.color}20;` : ""}">
+            <div class="level-icon">${L.icon}</div>
+            <div class="level-num" style="${isCurrent ? `color:${fl.color};` : ""}">L${L.n}</div>
+            <div class="level-name">${L.name}</div>
+          </div>`;
+        });
+        levelBar += '</div>';
+
+        analysisHtml += `<div class="section level-section">
+          <h2 class="section-title">💰 6 Levels of Wealth — 당신의 현 위치</h2>
+          ${levelBar}
+          <div class="level-detail" style="border-left-color:${fl.color};background:${fl.color}10;">
+            <div class="level-header">
+              <span class="level-big-icon">${fl.icon}</span>
+              <div>
+                <div class="level-title" style="color:${fl.color};">Level ${fl.level}: ${escapeHtml(fl.levelName)}</div>
+                <div class="level-eng">${escapeHtml(fl.english)}</div>
+              </div>
+            </div>
+            <p class="level-status">${escapeHtml(fl.status)}</p>
+            ${fl.kpi ? `<div class="level-kpi">
+              <span class="kpi-now">현재: ${escapeHtml(fl.kpi.current)}</span>
+              <span class="kpi-target" style="background:${fl.color}20;color:${fl.color};">다음: ${escapeHtml(fl.kpi.target)}</span>
+            </div>` : ""}
+            <div class="level-guidance">
+              <div class="guidance-label">📋 이 단계에서 해야 할 행동</div>
+              <ol>
+                ${(fl.guidance || []).map(g => `<li>${escapeHtml(g)}</li>`).join("")}
+              </ol>
+            </div>
+            ${fl.nextStep ? `<div class="level-next">
+              <div class="next-label">🎯 다음 단계로 가는 길</div>
+              <p>${escapeHtml(fl.nextStep)}</p>
+            </div>` : ""}
+          </div>
+        </div>`;
+
+        // 5) 🛡️ 시장에 흔들리지 않는 3가지 원칙 (모든 단계 공통)
+        analysisHtml += `<div class="section">
+          <h2 class="section-title">🛡️ 시장에 흔들리지 않는 3가지 원칙</h2>
+          <div class="principles">
+            <div class="principle"><div class="p-num" style="color:#d97706;">1. 기준점의 내재화</div><p>성공의 기준을 시장 지수나 친구의 수익률이 아니라, <strong>'어제의 나보다 얼마나 더 탄탄해졌는가'</strong>에 두세요.</p></div>
+            <div class="principle"><div class="p-num" style="color:#16a34a;">2. 시간의 주권 되찾기</div><p>경제적 자유의 본질은 <strong>'하기 싫은 일을 하지 않아도 되는 상태'</strong>입니다. 내가 통제할 수 있는 범위(지출 관리, 자기 계발)에 집중하세요.</p></div>
+            <div class="principle"><div class="p-num" style="color:#2563eb;">3. 자산보다 중요한 '시스템'</div><p>통장 잔고를 늘리는 것보다, 어떤 상황에서도 나를 지켜줄 <strong>재무적 시스템(보험·비상금·자동 저축)</strong>을 구축하세요.</p></div>
+          </div>
+        </div>`;
+      }
+
+      // 6) 최종 디브리핑 질문
+      if (analysis.finalQuestion) {
+        analysisHtml += `<div class="section final-q">
+          <p class="final-label">최종 디브리핑 질문</p>
+          <p class="final-text">${escapeHtml(analysis.finalQuestion)}</p>
+        </div>`;
+      }
+    }
+
     const html = `<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -1284,6 +1666,79 @@ function DebriefResultModal({ modal, onClose }) {
       word-break: break-word;
       color: #222;
     }
+    /* 🆕 analysis 섹션 스타일 */
+    .section { margin: 24px 0; padding: 16px; background: #fafafa; border-radius: 8px; page-break-inside: avoid; }
+    .section-title { font-size: 14px; font-weight: 800; color: #1a1a1a; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 2px solid #e5e5e5; }
+    .phases { display: flex; flex-direction: column; gap: 10px; }
+    .phase { padding: 10px; background: white; border-radius: 6px; border-left: 3px solid #ddd; }
+    .phase-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .phase-tag { padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+    .phase-turns { font-size: 10px; color: #888; }
+    .phase-cards { font-size: 11px; color: #555; margin-bottom: 4px; line-height: 1.6; }
+    .phase-verdict { font-size: 11px; font-weight: 600; line-height: 1.6; }
+    .legend { display: flex; gap: 16px; margin-bottom: 12px; font-size: 10px; }
+    .legend-item { display: inline-flex; align-items: center; gap: 4px; }
+    .legend-bar { display: inline-block; width: 14px; height: 8px; border-radius: 2px; }
+    .graph-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+    .graph-table td { padding: 6px 0; vertical-align: top; }
+    .g-turn { font-size: 10px; color: #666; width: 70px; padding-right: 8px; font-weight: 600; }
+    .g-bar { width: auto; }
+    .bar-row { display: flex; align-items: center; gap: 6px; min-height: 12px; margin-bottom: 2px; }
+    .bar { height: 8px; border-radius: 2px; }
+    .bar.best { background: #22c55e; }
+    .bar.worst { background: #ef4444; }
+    .bar-empty { display: inline-block; width: 14px; color: #999; font-size: 9px; }
+    .bar-val { font-size: 9px; font-weight: 700; white-space: nowrap; }
+    .best-val { color: #16a34a; }
+    .worst-val { color: #dc2626; }
+    .note { font-size: 9px; margin: 2px 0; padding-left: 4px; line-height: 1.4; }
+    .best-note { color: #16a34a; }
+    .worst-note { color: #dc2626; }
+    .comparison { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 12px 0; padding: 12px; background: white; border-radius: 6px; }
+    .comp-box { text-align: center; padding: 8px 12px; }
+    .comp-label { font-size: 10px; color: #888; margin-bottom: 4px; }
+    .comp-val { font-size: 18px; font-weight: 800; }
+    .best-box .comp-val { color: #16a34a; }
+    .worst-box .comp-val { color: #dc2626; }
+    .comp-vs { font-size: 14px; font-weight: 700; color: #999; }
+    .comp-gap { text-align: center; font-size: 11px; color: #555; margin: 8px 0 0; }
+    .lessons { padding-left: 20px; margin: 0; }
+    .lessons li { font-size: 12px; line-height: 1.7; color: #333; margin-bottom: 8px; padding-left: 4px; }
+    /* 🆕 6 Levels 스타일 */
+    .level-section { background: #f9fafb; }
+    .level-bar { display: flex; gap: 4px; margin-bottom: 14px; }
+    .level-cell { flex: 1; padding: 8px 4px; border-radius: 6px; text-align: center; border: 1px solid #ddd; background: #fafafa; }
+    .level-cell.current { font-weight: 700; }
+    .level-cell.past { background: #f0f9f4; }
+    .level-cell.future { opacity: 0.4; }
+    .level-icon { font-size: 14px; margin-bottom: 2px; }
+    .level-num { font-size: 9px; font-weight: 700; color: #666; }
+    .level-name { font-size: 8px; color: #888; margin-top: 1px; }
+    .level-detail { padding: 14px 16px; border-radius: 8px; border-left: 4px solid #ddd; margin-bottom: 12px; }
+    .level-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .level-big-icon { font-size: 22px; }
+    .level-title { font-size: 14px; font-weight: 800; }
+    .level-eng { font-size: 9px; color: #888; font-style: italic; }
+    .level-status { font-size: 12px; color: #444; line-height: 1.6; margin: 8px 0 12px; }
+    .level-kpi { display: flex; gap: 6px; font-size: 9px; margin-bottom: 12px; flex-wrap: wrap; }
+    .kpi-now { padding: 3px 8px; border-radius: 4px; background: #f0f0f0; color: #666; }
+    .kpi-target { padding: 3px 8px; border-radius: 4px; font-weight: 700; }
+    .level-guidance { margin-bottom: 10px; }
+    .guidance-label { font-size: 11px; font-weight: 700; color: #333; margin-bottom: 6px; }
+    .level-guidance ol { padding-left: 20px; margin: 0; }
+    .level-guidance li { font-size: 11px; line-height: 1.6; color: #444; margin-bottom: 4px; }
+    .level-next { padding: 10px 12px; border-radius: 6px; background: #eff6ff; border: 1px solid #dbeafe; }
+    .next-label { font-size: 10px; font-weight: 700; color: #2563eb; margin-bottom: 4px; }
+    .level-next p { font-size: 11px; color: #444; margin: 0; line-height: 1.5; }
+    .principles { display: flex; flex-direction: column; gap: 8px; }
+    .principle { padding: 10px 12px; background: white; border-radius: 6px; border-left: 3px solid #e5e5e5; }
+    .principle .p-num { font-size: 11px; font-weight: 700; margin-bottom: 4px; }
+    .principle p { font-size: 10px; color: #444; margin: 0; line-height: 1.5; }
+    .DUMMY_HOOK { display: none; }
+    .final-q { background: #eff6ff; border-left: 4px solid #3b82f6; }
+    .final-label { font-size: 11px; font-weight: 700; color: #3b82f6; margin: 0 0 6px; }
+    .final-text { font-size: 14px; font-weight: 700; color: #1a1a1a; line-height: 1.7; margin: 0; }
+    .feedback-divider { margin: 30px 0 16px; padding-top: 16px; border-top: 2px solid #e5e5e5; font-size: 12px; font-weight: 700; color: ${meta.color}; }
     .footer {
       margin-top: 40px;
       padding-top: 16px;
@@ -1364,6 +1819,9 @@ function DebriefResultModal({ modal, onClose }) {
     </tr>` : ""}
   </table>
 
+  ${analysisHtml}
+
+  ${analysisHtml ? `<div class="feedback-divider">💬 코칭 메시지</div>` : ""}
   <div class="content">${escapeHtml(text)}</div>
 
   <div class="footer">
@@ -1456,12 +1914,32 @@ function DebriefResultModal({ modal, onClose }) {
           )}
 
           {!loading && !error && text && (
-            <div style={{
-              fontSize: 13, color: "#e4e4e7", lineHeight: 1.7,
-              whiteSpace: "pre-wrap", wordBreak: "break-word",
-            }}>
-              {text}
-            </div>
+            <>
+              {/* 🆕 풀 분석 (5단계 + Best/Worst 그래프 + 5가지 교훈) — analysis가 있을 때만 */}
+              {analysis && (analysis.phases || analysis.lessons) && (
+                <div style={{ marginBottom: 20 }}>
+                  <AnalysisReport
+                    analysis={analysis}
+                    turns={game?.turnCount || (game?.turnLog || []).length || 0}
+                  />
+                </div>
+              )}
+
+              {/* 텍스트 피드백 (요약/상세/프리미엄) */}
+              <div style={{
+                fontSize: 13, color: "#e4e4e7", lineHeight: 1.7,
+                whiteSpace: "pre-wrap", wordBreak: "break-word",
+                paddingTop: analysis ? 20 : 0,
+                borderTop: analysis ? "1px solid #27272a" : "none",
+              }}>
+                {analysis && (
+                  <div style={{ fontSize: 11, fontWeight: 700, color: meta.color, marginBottom: 12 }}>
+                    💬 코칭 메시지
+                  </div>
+                )}
+                {text}
+              </div>
+            </>
           )}
         </div>
 

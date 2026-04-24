@@ -80,25 +80,10 @@ export default function ProfileTab({ authUser }) {
     };
   }, [authUser]);
 
-  // 브라우저 탭 복귀 시 로딩 멈춰있으면 재시도
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible" && loading && authUser) {
-        console.log("[ProfileTab] 탭 복귀 - 로딩 재시도");
-        setLoading(false);
-        setTimeout(() => {
-          loadProfile().finally(() => setLoading(false));
-        }, 100);
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("focus", handleVisibilityChange);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("focus", handleVisibilityChange);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, authUser]);
+  // 브라우저 탭 복귀 시 자동 재로드 비활성화 (사용자 경험 우선)
+  // 로딩이 멈춰있어도 사용자가 명시적으로 새로고침하지 않는 한 그대로 유지
+  // (무한 로딩으로 보이는 문제 방지)
+  // 필요한 경우 페이지 새로고침으로 사용자가 직접 갱신 가능
 
   const loadProfile = async () => {
     setLoading(true);
