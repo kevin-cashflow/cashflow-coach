@@ -32,6 +32,10 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
   // 🆕 보안 필터 통계
   const [filteredOutCount, setFilteredOutCount] = useState(0);
   const [legacyAllowedCount, setLegacyAllowedCount] = useState(0);
+  // 🆕 localStorage에만 있는 게임 (Supabase 동기화 필요)
+  const [localOnlyGames, setLocalOnlyGames] = useState([]);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
 
   // 언마운트 체크용 ref (React state 업데이트 경고 방지)
   const isMountedRef = useRef(true);
@@ -75,6 +79,24 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
     try {
       if (!window.storage) {
         throw new Error("storage가 준비되지 않았습니다.");
+      }
+
+      // 🆕 Supabase 세션 refresh 시도 (Auth session missing 대응)
+      // 세션 만료 상태면 window.storage.list가 빈 결과 반환 → 세션 먼저 갱신
+      try {
+        const sb = (typeof window !== "undefined" && window.supabase) || null;
+        if (sb && sb.auth?.refreshSession) {
+          console.log("[MyHistoryTab] 🔄 Supabase 세션 refresh 시도...");
+          await Promise.race([
+            sb.auth.refreshSession(),
+            new Promise((_, rej) => setTimeout(() => rej(new Error("refresh timeout")), 3000)),
+          ]).then(
+            () => console.log("[MyHistoryTab] ✅ 세션 refresh 완료"),
+            (e) => console.warn("[MyHistoryTab] 세션 refresh 실패 (무시):", e.message)
+          );
+        }
+      } catch (e) {
+        console.warn("[MyHistoryTab] 세션 refresh 시도 중 예외 (무시):", e.message);
       }
 
       console.log("[MyHistoryTab] 로드 시작...");
@@ -125,7 +147,17 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
 
         const results = await Promise.all(fetchPromises);
         for (const game of results) {
-          if (game) gameMap.set(game.key, game);
+          if (game) {
+            gameMap.set(game.key, game);
+            // 🔍 디버그: game:* 로드 시 turnLog 상태
+            const tl = Array.isArray(game.turnLog) ? game.turnLog.length : -1;
+            const tc = game.turnCount || 0;
+            if (tc > 0 && tl !== tc) {
+              console.warn(`[MyHistoryTab] ⚠️ ${game.key} turnCount=${tc}인데 turnLog=${tl} (불일치!)`);
+            } else if (tc > 0) {
+              console.log(`[MyHistoryTab] ✅ ${game.key} turnLog ${tl}개 / turnCount=${tc}`);
+            }
+          }
         }
       } catch (e) {
         console.warn("[MyHistoryTab] storage 조회 실패 (계속 진행):", e.message);
@@ -435,6 +467,36 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
       setLegacyAllowedCount(legacyAllowed);
 
       safeSetGames(filtered);
+
+      // 🆕 localStorage에만 저장되고 Supabase에 없는 게임 감지
+      // 현재 로드된 filtered에 있는 키들을 제외하고, localStorage에만 있는 본인 게임 찾기
+      try {
+        if (typeof localStorage !== "undefined" && myUserId) {
+          const loadedKeys = new Set(filtered.map(g => g.key));
+          const localOnly = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (!k || !k.startsWith("game:")) continue;
+            if (loadedKeys.has(k)) continue;  // 이미 Supabase에 있음
+            try {
+              const v = localStorage.getItem(k);
+              if (!v) continue;
+              const d = JSON.parse(v);
+              // 본인 것인지 확인 (user_id 또는 saveLog)
+              const uid = d.user_id || d.saveLog?.savedByUserId || null;
+              if (uid && String(uid) === myUserId) {
+                localOnly.push({ key: k, payload: v, data: d });
+              }
+            } catch {}
+          }
+          if (localOnly.length > 0) {
+            console.warn(`[MyHistoryTab] 🔄 localStorage에만 저장된 본인 게임 ${localOnly.length}건 감지 (Supabase 동기화 필요)`);
+          }
+          setLocalOnlyGames(localOnly);
+        }
+      } catch (e) {
+        console.warn("[MyHistoryTab] localOnly 감지 실패:", e);
+      }
     } catch (e) {
       console.error("[MyHistoryTab] 게임 이력 조회 실패:", e);
       setError(e.message || "게임 이력을 불러올 수 없습니다.");
@@ -765,6 +827,119 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
     // ⚠️ 1회 출력 후 재요청 절대 금지: games state 최신값 기준으로 재확인
     const currentGame = games.find(g => g.key === game.key) || game;
 
+    // 🆕 "analysis" 티어 전용 처리 (총평 = 전 생애 자산 흐름 + 그래프 + 5가지 교훈)
+    if (tier === "analysis") {
+      const cachedAnalysis = currentGame.debriefData?.analysis;
+      // 저장된 analysis가 있고 phases도 있으면 즉시 표시
+      if (cachedAnalysis && cachedAnalysis.phases && cachedAnalysis.lessons) {
+        console.log("[handleDebrief] 📋 총평 캐시된 analysis 재사용");
+        safeSetDebriefModal({
+          game: currentGame,
+          tier: "analysis",
+          text: "",  // 총평은 텍스트 없고 그래프/phases만
+          analysis: cachedAnalysis,
+          generatedAt: currentGame.debriefData?.feedback?.analysis?.generatedAt || null,
+          loading: false,
+          error: null,
+          savedReplay: true,
+        });
+        return;
+      }
+
+      // 새로 생성 - 확인 팝업
+      const confirmed = window.confirm(
+        `📋 총평 분석 (무료)\n\n` +
+        `AI가 당신의 플레이를 4단계(사회 초년생 → 자산 형성기 → 성장과 전환 → 수확과 정리)로 나누어 분석합니다.\n` +
+        `최상의 선택 vs 최악의 선택 비교 그래프와 5가지 교훈이 포함됩니다.\n\n` +
+        `⏱️ 생성 시간: 약 1~2분\n` +
+        `⚠️ 생성 중 화면을 닫지 마세요.\n\n` +
+        `진행하시겠습니까?`
+      );
+      if (!confirmed) {
+        console.log("[MyHistoryTab] analysis 사용자 취소");
+        return;
+      }
+
+      console.log("[MyHistoryTab] 📋 총평 신규 진행 시작");
+      safeSetDebriefModal({
+        game: currentGame,
+        tier: "analysis",
+        text: "",
+        loading: true,
+        error: null,
+        savedReplay: false,
+      });
+
+      try {
+        const results = currentGame.gameResults || (currentGame.turnLog || []).map(t => ({
+          turn: t.turn,
+          cell: { type: t.cellType, label: t.cellType },
+          dealType: t.dealType,
+          card: t.card ? { ...t.card, _action: t.action, _shares: t.shares } : null,
+          decisionSec: t.decisionSec,
+          splitApplied: t.splitApplied,
+          dice: [0], total: 0, pos: 0,
+        }));
+
+        if (results.length === 0) {
+          throw new Error("턴 기록이 없어 총평을 생성할 수 없습니다.");
+        }
+
+        const simText = currentGame.simText || buildPromptText(results, currentGame.version, currentGame.turnCount || 0);
+        console.log("[handleDebrief] 📋 총평 runFullAnalysis 호출 시작");
+        const fullAnalysis = await runFullAnalysis({
+          simText,
+          version: currentGame.version,
+          turns: currentGame.turnCount || 0,
+          results,
+        });
+        console.log("[handleDebrief] ✅ 총평 생성 성공 - phases:", fullAnalysis?.phases?.length, "lessons:", fullAnalysis?.lessons?.length);
+
+        // 모달 즉시 업데이트
+        safeSetDebriefModal({
+          game: currentGame,
+          tier: "analysis",
+          text: "",
+          analysis: fullAnalysis,
+          generatedAt: new Date().toISOString(),
+          loading: false,
+          error: null,
+          savedReplay: false,
+        });
+
+        // Supabase에 저장 (재호출 방지)
+        try {
+          await updateGameDebrief(currentGame.key, "analysis", "", fullAnalysis);
+          console.log("[handleDebrief] ✅ 총평 저장 완료");
+          // games state에도 analysis 반영
+          safeSetGames(prev => prev.map(g => g.key === currentGame.key ? {
+            ...g,
+            debriefData: {
+              ...(g.debriefData || {}),
+              analysis: fullAnalysis,
+              feedback: {
+                ...(g.debriefData?.feedback || {}),
+                analysis: { text: "", generatedAt: new Date().toISOString() }
+              }
+            }
+          } : g));
+        } catch (saveErr) {
+          console.warn("[handleDebrief] 총평 저장 실패 (화면 표시는 계속):", saveErr.message);
+        }
+      } catch (err) {
+        console.error("[handleDebrief] 총평 실패:", err);
+        safeSetDebriefModal({
+          game: currentGame,
+          tier: "analysis",
+          text: "",
+          loading: false,
+          error: err.message || "총평 생성 중 오류가 발생했습니다.",
+          savedReplay: false,
+        });
+      }
+      return;
+    }
+
     // ─── 이미 저장된 피드백은 즉시 표시 (API 호출 없음) ───
     const existing = currentGame.debriefData?.feedback?.[tier];
     if (existing?.text) {
@@ -785,12 +960,14 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
     // ─── 유료 티어 확인 팝업 (상세 $9, 프리미엄 $20) ───
     if (tier === "detail" || tier === "premium") {
       const tierInfo = tier === "detail"
-        ? { name: "상세 피드백", price: "$9", desc: "AI가 당신의 플레이를 상세히 분석하여\n구조적인 피드백과 개선 방향을 제시합니다." }
-        : { name: "프리미엄 피드백", price: "$20", desc: "최고 수준의 AI 분석으로\n기요사키 철학 기반의 심층 조언을 받을 수 있습니다.\n\n가장 깊이 있는 통찰을 제공합니다." };
+        ? { name: "상세 피드백", price: "$9", desc: "AI가 당신의 플레이를 상세히 분석하여\n구조적인 피드백과 개선 방향을 제시합니다.", timeNote: "⏱️ 생성 시간: 약 30초~1분" }
+        : { name: "프리미엄 피드백", price: "$20", desc: "최고 수준의 AI 분석으로\n기요사키 철학 기반의 심층 조언을 받을 수 있습니다.\n\n가장 깊이 있는 통찰을 제공합니다.", timeNote: "⏱️ 생성 시간: 약 1~2분 (최고 모델 사용)" };
 
       const confirmed = window.confirm(
         `📝 ${tierInfo.name} (${tierInfo.price})\n\n${tierInfo.desc}\n\n` +
-        `⚠️ 한 번 생성되면 영구 저장되어 이후 재호출 없이 언제든 다시 보실 수 있습니다.\n\n` +
+        `${tierInfo.timeNote}\n` +
+        `⚠️ 생성 중 화면을 닫지 마세요.\n\n` +
+        `한 번 생성되면 영구 저장되어 이후 재호출 없이 언제든 다시 보실 수 있습니다.\n\n` +
         `진행하시겠습니까?`
       );
 
@@ -904,6 +1081,37 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
         } catch (levelErr) {
           console.warn("[handleDebrief] 6단계 진단 실패:", levelErr.message);
         }
+
+        // 🆕 유료 전용: phases/lessons 없으면 runFullAnalysis도 시도 (전 생애 흐름 + 5가지 교훈)
+        // graceful: 실패해도 텍스트 + 6단계 진단은 보이도록
+        if (!fullAnalysis?.phases || !fullAnalysis?.lessons) {
+          try {
+            const results = currentGame.gameResults || (currentGame.turnLog || []).map(t => ({
+              turn: t.turn,
+              cell: { type: t.cellType, label: t.cellType },
+              dealType: t.dealType,
+              card: t.card ? { ...t.card, _action: t.action, _shares: t.shares } : null,
+              decisionSec: t.decisionSec,
+              splitApplied: t.splitApplied,
+              dice: [0], total: 0, pos: 0,
+            }));
+            if (results.length > 0) {
+              console.log(`[handleDebrief] 유료(${tier}) runFullAnalysis 추가 호출 시작`);
+              const analysisResult = await runFullAnalysis({
+                simText,
+                version: currentGame.version,
+                turns: currentGame.turnCount || 0,
+                results,
+              });
+              console.log(`[handleDebrief] ✅ 유료(${tier}) 풀 분석 성공 - phases:`, analysisResult?.phases?.length, "lessons:", analysisResult?.lessons?.length);
+              // 기존 fullAnalysis (financialLevel 포함) + 풀 분석 병합
+              fullAnalysis = { ...(fullAnalysis || {}), ...analysisResult, financialLevel: fullAnalysis?.financialLevel };
+            }
+          } catch (analysisErr) {
+            // 풀 분석 실패해도 유료 텍스트 + 6단계 진단은 표시 (graceful degradation)
+            console.warn(`[handleDebrief] 유료(${tier}) 풀 분석 실패 (텍스트/6단계만 유지):`, analysisErr.message);
+          }
+        }
       }
 
       // 저장 (1회만) — storage 저장은 언마운트돼도 실행됨
@@ -950,6 +1158,7 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
   // 티어 정의 (유료/무료 피드백)
   const TIER_META = [
     { key: "free", icon: "💬", label: "요약", price: "무료", color: "#22c55e" },
+    { key: "analysis", icon: "📋", label: "총평", price: "무료", color: "#a855f7" },
     { key: "detail", icon: "📝", label: "상세", price: "$9", color: "#3b82f6" },
     { key: "premium", icon: "💎", label: "프리미엄", price: "$20", color: "#f59e0b" },
   ];
@@ -996,6 +1205,123 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
         </div>
       )}
 
+      {/* 🆕 (games가 0이어도) localStorage-only 게임 동기화 배너 */}
+      {!loading && !error && localOnlyGames.length > 0 && games.length === 0 && (
+        <div style={{
+          padding: "14px 16px", borderRadius: 8, marginBottom: 12,
+          background: "#ef444415", border: "1px solid #ef444440",
+          fontSize: 11, color: "#fca5a5",
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+            ⚠️ 서버 저장 실패한 게임 <strong>{localOnlyGames.length}건</strong> 감지
+          </div>
+          <div style={{ marginBottom: 8, color: "#fde68a", lineHeight: 1.5 }}>
+            브라우저에는 저장되었으나 Supabase 서버 업로드에 실패했습니다.<br/>
+            아래 버튼으로 재시도하세요.
+          </div>
+          <div style={{ fontSize: 10, color: "#71717a", marginBottom: 10, paddingLeft: 8, borderLeft: "2px solid #ef444430" }}>
+            {localOnlyGames.slice(0, 5).map((g, i) => (
+              <div key={i}>
+                · {g.data.version || "캐쉬플로우"} · {g.data.job || "-"} · {(g.data.turnLog || []).length}턴
+                {g.data.dateTime ? ` · ${new Date(g.data.dateTime).toLocaleString("ko-KR")}` : ""}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button
+              onClick={async () => {
+                if (!window.confirm(`${localOnlyGames.length}건의 게임을 Supabase 서버에 업로드합니다.\n건당 최대 30초 소요될 수 있습니다. 진행하시겠습니까?`)) return;
+                setSyncing(true);
+                setSyncResult(null);
+                const result = { success: 0, failed: 0, errors: [] };
+                try {
+                  const sb = (typeof window !== "undefined" && window.supabase) || null;
+                    if (sb && sb.auth?.refreshSession) {
+                    await Promise.race([
+                      sb.auth.refreshSession(),
+                      new Promise((_, rej) => setTimeout(() => rej(new Error("refresh timeout")), 5000)),
+                    ]).catch(() => {});
+                  }
+                } catch {}
+                for (const g of localOnlyGames) {
+                  try {
+                    if (!window.storage || typeof window.storage.set !== "function") {
+                      result.failed++;
+                      result.errors.push({ key: g.key, error: "window.storage 사용 불가" });
+                      continue;
+                    }
+                    const timeoutPromise = new Promise((_, rej) =>
+                      setTimeout(() => rej(new Error("타임아웃 (30초)")), 30000)
+                    );
+                    const res = await Promise.race([
+                      window.storage.set(g.key, g.payload),
+                      timeoutPromise,
+                    ]);
+                    if (res) { result.success++; }
+                    else { result.failed++; result.errors.push({ key: g.key, error: "저장 응답 없음" }); }
+                  } catch (e) {
+                    result.failed++;
+                    result.errors.push({ key: g.key, error: e.message });
+                  }
+                }
+                setSyncResult(result);
+                setSyncing(false);
+                if (result.success > 0) setTimeout(() => loadGames?.(), 1500);
+              }}
+              disabled={syncing}
+              style={{
+                padding: "10px 16px", borderRadius: 6, border: "none",
+                background: syncing ? "#3f3f46" : "#ef4444",
+                color: syncing ? "#71717a" : "#fff",
+                fontSize: 12, fontWeight: 700, cursor: syncing ? "not-allowed" : "pointer",
+              }}
+            >{syncing ? "🔄 동기화 중..." : "🔄 서버에 동기화 (재시도)"}</button>
+            <button
+              onClick={() => {
+                if (!window.confirm(`⚠️ Supabase 서버 저장에 실패한 로컬 게임 ${localOnlyGames.length}건을 브라우저에서 삭제합니다.\n\n삭제 후 복구 불가. 정말 삭제하시겠습니까?`)) return;
+                if (!window.confirm(`한 번 더 확인: 영구 삭제됩니다.`)) return;
+                let removed = 0;
+                for (const g of localOnlyGames) {
+                  try { localStorage.removeItem(g.key); removed++; } catch {}
+                }
+                alert(`${removed}건이 로컬에서 삭제되었습니다.`);
+                setLocalOnlyGames([]);
+              }}
+              disabled={syncing}
+              style={{
+                padding: "10px 16px", borderRadius: 6, border: "1px solid #3f3f46",
+                background: "transparent", color: "#71717a",
+                fontSize: 12, fontWeight: 600, cursor: syncing ? "not-allowed" : "pointer",
+              }}
+            >🗑️ 로컬에서만 삭제</button>
+          </div>
+          {syncResult && (
+            <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 6, background: "#0a0a0f", fontSize: 11 }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                {syncResult.success > 0 && <span style={{ color: "#86efac" }}>✅ 성공 {syncResult.success}건</span>}
+                {syncResult.success > 0 && syncResult.failed > 0 && <span style={{ color: "#71717a" }}> · </span>}
+                {syncResult.failed > 0 && <span style={{ color: "#fca5a5" }}>❌ 실패 {syncResult.failed}건</span>}
+              </div>
+              {syncResult.failed > 0 && syncResult.errors.length > 0 && (
+                <>
+                  <div style={{ fontSize: 10, color: "#71717a", paddingLeft: 8 }}>
+                    {syncResult.errors.slice(0, 3).map((e, i) => (
+                      <div key={i}>· {e.error}</div>
+                    ))}
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 10, color: "#fbbf24", lineHeight: 1.5 }}>
+                    💡 실패가 계속되면: <br/>
+                    1. 브라우저 DevTools (F12) → Application → Storage → <strong>Clear site data</strong><br/>
+                    2. 모든 탭 닫고 재접속 → 재로그인<br/>
+                    3. 다시 동기화 시도
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {!loading && !error && games.length === 0 && (
         <div style={{
           padding: 40, borderRadius: 12, background: "#111118",
@@ -1005,15 +1331,179 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
           <div style={{ fontSize: 14, fontWeight: 700, color: "#a1a1aa", marginBottom: 6 }}>
             아직 저장된 게임이 없습니다
           </div>
-          <div style={{ fontSize: 11, color: "#71717a" }}>
+          <div style={{ fontSize: 11, color: "#71717a", marginBottom: 16 }}>
             플레이 모드에서 게임을 진행하고<br/>
             "💾 게임 저장" 버튼을 누르세요
+          </div>
+          {/* 🆕 수동 새로고침 버튼 (세션 만료 등으로 목록이 0개로 뜬 경우 대응) */}
+          <button
+            onClick={() => loadGames?.()}
+            style={{
+              padding: "8px 16px", borderRadius: 6, border: "1px solid #3f3f46",
+              background: "#18181b", color: "#93c5fd",
+              fontSize: 11, fontWeight: 600, cursor: "pointer",
+            }}
+          >🔄 목록 새로고침</button>
+          <div style={{ fontSize: 9, color: "#52525b", marginTop: 8 }}>
+            방금 저장한 게임이 안 보이면 새로고침을 눌러주세요
           </div>
         </div>
       )}
 
       {!loading && !error && games.length > 0 && (
         <div>
+          {/* 🆕 상단 유틸리티 바: 새로고침 버튼 */}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+            <button
+              onClick={() => loadGames?.()}
+              title="목록을 Supabase에서 다시 불러옵니다"
+              style={{
+                padding: "4px 10px", borderRadius: 4, border: "1px solid #3f3f46",
+                background: "#18181b", color: "#93c5fd",
+                fontSize: 10, fontWeight: 600, cursor: "pointer",
+              }}
+            >🔄 새로고침</button>
+          </div>
+
+          {/* 🆕 localStorage에만 있는 게임 동기화 (Supabase 저장 실패한 게임) */}
+          {localOnlyGames.length > 0 && (
+            <div style={{
+              padding: "12px 14px", borderRadius: 8, marginBottom: 12,
+              background: "#ef444410", border: "1px solid #ef444440",
+              fontSize: 10, color: "#fca5a5",
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+                ⚠️ 서버 저장 실패한 게임 <strong>{localOnlyGames.length}건</strong> 감지
+              </div>
+              <div style={{ marginBottom: 8, color: "#fde68a", lineHeight: 1.5 }}>
+                이 게임들은 브라우저에는 저장되었지만 Supabase 서버에 업로드되지 않았습니다.
+                <br/>
+                서버 저장이 완료되어야 다른 기기에서도 볼 수 있습니다.
+              </div>
+              <div style={{ fontSize: 9, color: "#71717a", marginBottom: 8, paddingLeft: 8, borderLeft: "2px solid #ef444430" }}>
+                {localOnlyGames.slice(0, 3).map((g, i) => (
+                  <div key={i}>
+                    · {g.data.version || "캐쉬플로우"} · {g.data.job || "-"} · {(g.data.turnLog || []).length}턴
+                    {g.data.dateTime ? ` · ${new Date(g.data.dateTime).toLocaleString("ko-KR")}` : ""}
+                  </div>
+                ))}
+                {localOnlyGames.length > 3 && <div>· ... 외 {localOnlyGames.length - 3}건</div>}
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button
+                  onClick={async () => {
+                    if (!window.confirm(`${localOnlyGames.length}건의 게임을 Supabase 서버에 다시 업로드합니다.\n\n⚠️ 이 작업에는 시간이 걸릴 수 있습니다 (건당 최대 30초).\n진행하시겠습니까?`)) return;
+
+                    setSyncing(true);
+                    setSyncResult(null);
+                    const result = { success: 0, failed: 0, errors: [] };
+
+                    // Supabase 세션 재확인 (락 해제 시도)
+                    try {
+                      const sb = (typeof window !== "undefined" && window.supabase) || null;
+                    if (sb && sb.auth?.refreshSession) {
+                        console.log("[Sync] Supabase 세션 refresh 시도...");
+                        await Promise.race([
+                          sb.auth.refreshSession(),
+                          new Promise((_, rej) => setTimeout(() => rej(new Error("refresh timeout")), 5000)),
+                        ]).catch(e => console.warn("[Sync] refresh 실패 (무시):", e.message));
+                      }
+                    } catch {}
+
+                    // 각 게임 순차 업로드
+                    for (const g of localOnlyGames) {
+                      try {
+                        console.log(`[Sync] ${g.key} 업로드 시작...`);
+                        if (!window.storage || typeof window.storage.set !== "function") {
+                          result.failed++;
+                          result.errors.push({ key: g.key, error: "window.storage 사용 불가" });
+                          continue;
+                        }
+                        const timeoutPromise = new Promise((_, rej) =>
+                          setTimeout(() => rej(new Error("타임아웃 (30초)")), 30000)
+                        );
+                        const res = await Promise.race([
+                          window.storage.set(g.key, g.payload),
+                          timeoutPromise,
+                        ]);
+                        if (res) {
+                          result.success++;
+                          console.log(`[Sync] ✅ ${g.key} 업로드 성공`);
+                        } else {
+                          result.failed++;
+                          result.errors.push({ key: g.key, error: "저장 응답 없음" });
+                        }
+                      } catch (e) {
+                        result.failed++;
+                        result.errors.push({ key: g.key, error: e.message });
+                        console.error(`[Sync] ❌ ${g.key} 업로드 실패:`, e.message);
+                      }
+                    }
+
+                    setSyncResult(result);
+                    setSyncing(false);
+
+                    if (result.success > 0) {
+                      // 성공한 게임이 있으면 목록 재로드
+                      setTimeout(() => {
+                        loadGames?.();
+                      }, 1500);
+                    }
+                  }}
+                  disabled={syncing}
+                  style={{
+                    padding: "8px 14px", borderRadius: 6, border: "none",
+                    background: syncing ? "#3f3f46" : "#ef4444",
+                    color: syncing ? "#71717a" : "#fff",
+                    fontSize: 11, fontWeight: 700, cursor: syncing ? "not-allowed" : "pointer",
+                  }}
+                >{syncing ? "🔄 동기화 중..." : "🔄 서버에 동기화 (재시도)"}</button>
+                <button
+                  onClick={() => {
+                    if (!window.confirm(`⚠️ 주의\n\nSupabase 서버 저장에 실패한 로컬 게임 ${localOnlyGames.length}건을 브라우저에서 삭제합니다.\n\n삭제 후에는 복구가 불가능합니다.\n정말 삭제하시겠습니까?`)) return;
+                    if (!window.confirm(`정말로 확실합니까? 이 게임들은 영구 삭제됩니다.`)) return;
+                    let removed = 0;
+                    for (const g of localOnlyGames) {
+                      try { localStorage.removeItem(g.key); removed++; } catch {}
+                    }
+                    alert(`${removed}건이 로컬에서 삭제되었습니다.`);
+                    setLocalOnlyGames([]);
+                  }}
+                  disabled={syncing}
+                  style={{
+                    padding: "8px 14px", borderRadius: 6, border: "1px solid #3f3f46",
+                    background: "transparent", color: "#71717a",
+                    fontSize: 11, fontWeight: 600, cursor: syncing ? "not-allowed" : "pointer",
+                  }}
+                >🗑️ 로컬에서만 삭제</button>
+              </div>
+
+              {/* 동기화 결과 */}
+              {syncResult && (
+                <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 6, background: "#0a0a0f", fontSize: 10 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                    {syncResult.success > 0 && <span style={{ color: "#86efac" }}>✅ 성공 {syncResult.success}건</span>}
+                    {syncResult.success > 0 && syncResult.failed > 0 && <span style={{ color: "#71717a" }}> · </span>}
+                    {syncResult.failed > 0 && <span style={{ color: "#fca5a5" }}>❌ 실패 {syncResult.failed}건</span>}
+                  </div>
+                  {syncResult.failed > 0 && syncResult.errors.length > 0 && (
+                    <div style={{ fontSize: 9, color: "#71717a", paddingLeft: 8 }}>
+                      {syncResult.errors.slice(0, 3).map((e, i) => (
+                        <div key={i}>· {e.key}: {e.error}</div>
+                      ))}
+                      {syncResult.errors.length > 3 && <div>· ... 외 {syncResult.errors.length - 3}건</div>}
+                    </div>
+                  )}
+                  {syncResult.failed > 0 && (
+                    <div style={{ marginTop: 6, fontSize: 9, color: "#fbbf24", lineHeight: 1.5 }}>
+                      💡 실패가 계속되면: 브라우저 DevTools → Application → Storage → Clear site data 후 재로그인
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* 🆕 보안 필터 알림 (다른 사용자 게임 제외됨) */}
           {filteredOutCount > 0 && (
             <div style={{
@@ -1162,16 +1652,46 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
                   </button>
                 </div>
 
-                {/* AI 피드백 3종 */}
-                <div style={{ display: "flex", gap: 6 }}>
-                  {TIER_META.map(({ key, icon, label, price, color }) => {
+                {/* 🆕 총평 버튼 (전체 너비) */}
+                {(() => {
+                  const tierInfo = TIER_META.find(t => t.key === "analysis");
+                  if (!tierInfo) return null;
+                  const { key, icon, label, color } = tierInfo;
+                  const done = !!(g.debriefData?.analysis?.phases?.length || g.debriefData?.analysis?.lessons?.length);
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => handleDebrief(g, key)}
+                      style={{
+                        width: "100%", padding: "10px 12px", borderRadius: 8, marginBottom: 6,
+                        border: `1px solid ${done ? color + "60" : color + "30"}`,
+                        background: done ? color + "20" : "transparent",
+                        color: done ? color : "#a1a1aa",
+                        cursor: "pointer",
+                        fontSize: 11, fontWeight: 700,
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                        transition: "all 0.2s",
+                      }}
+                    >
+                      <span style={{ fontSize: 14 }}>{icon}</span>
+                      <span>{label}</span>
+                      <span style={{ fontSize: 9, color: done ? color : "#52525b", fontWeight: 600, marginLeft: 4 }}>
+                        {done ? "· 📄 다시 보기" : "· ▶ 무료"}
+                      </span>
+                    </button>
+                  );
+                })()}
+
+                {/* AI 피드백 3종 (요약/상세/프리미엄) - 3등분 grid */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                  {TIER_META.filter(t => t.key !== "analysis").map(({ key, icon, label, price, color }) => {
                     const done = !!fb[key]?.text;
                     return (
                       <button
                         key={key}
                         onClick={() => handleDebrief(g, key)}
                         style={{
-                          flex: 1, padding: "8px 4px", borderRadius: 8,
+                          padding: "10px 6px", borderRadius: 8,
                           border: `1px solid ${done ? color + "60" : color + "30"}`,
                           background: done ? color + "20" : "transparent",
                           color: done ? color : "#a1a1aa",
@@ -1230,6 +1750,7 @@ function DebriefResultModal({ modal, onClose }) {
 
   const TIER_LABEL = {
     free: { icon: "💬", name: "요약 피드백", color: "#22c55e" },
+    analysis: { icon: "📋", name: "총평 분석", color: "#a855f7" },
     detail: { icon: "📝", name: "상세 피드백 ($9)", color: "#3b82f6" },
     premium: { icon: "💎", name: "프리미엄 피드백 ($20)", color: "#f59e0b" },
   };
@@ -1913,10 +2434,10 @@ function DebriefResultModal({ modal, onClose }) {
             </div>
           )}
 
-          {!loading && !error && text && (
+          {!loading && !error && (text || (tier === "analysis" && analysis)) && (
             <>
-              {/* 🆕 풀 분석 (5단계 + Best/Worst 그래프 + 5가지 교훈) — analysis가 있을 때만 */}
-              {analysis && (analysis.phases || analysis.lessons) && (
+              {/* 🆕 풀 분석 (5단계 + Best/Worst 그래프 + 5가지 교훈 + 6 Levels + 3원칙) */}
+              {analysis && (analysis.phases || analysis.lessons || analysis.financialLevel) && (
                 <div style={{ marginBottom: 20 }}>
                   <AnalysisReport
                     analysis={analysis}
@@ -1925,26 +2446,28 @@ function DebriefResultModal({ modal, onClose }) {
                 </div>
               )}
 
-              {/* 텍스트 피드백 (요약/상세/프리미엄) */}
-              <div style={{
-                fontSize: 13, color: "#e4e4e7", lineHeight: 1.7,
-                whiteSpace: "pre-wrap", wordBreak: "break-word",
-                paddingTop: analysis ? 20 : 0,
-                borderTop: analysis ? "1px solid #27272a" : "none",
-              }}>
-                {analysis && (
-                  <div style={{ fontSize: 11, fontWeight: 700, color: meta.color, marginBottom: 12 }}>
-                    💬 코칭 메시지
-                  </div>
-                )}
-                {text}
-              </div>
+              {/* 텍스트 피드백 (요약/상세/프리미엄만, analysis 티어는 제외) */}
+              {tier !== "analysis" && text && (
+                <div style={{
+                  fontSize: 13, color: "#e4e4e7", lineHeight: 1.7,
+                  whiteSpace: "pre-wrap", wordBreak: "break-word",
+                  paddingTop: analysis ? 20 : 0,
+                  borderTop: analysis ? "1px solid #27272a" : "none",
+                }}>
+                  {analysis && (
+                    <div style={{ fontSize: 11, fontWeight: 700, color: meta.color, marginBottom: 12 }}>
+                      💬 코칭 메시지
+                    </div>
+                  )}
+                  {text}
+                </div>
+              )}
             </>
           )}
         </div>
 
         {/* 다운로드/복사 버튼 (결과 있을 때만) */}
-        {!loading && !error && text && (
+        {!loading && !error && (text || (tier === "analysis" && analysis)) && (
           <div style={{
             marginTop: 14, paddingTop: 12, borderTop: "1px solid #27272a",
           }}>

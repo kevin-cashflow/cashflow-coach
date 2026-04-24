@@ -1530,6 +1530,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
   const [rightsPrice, setRightsPrice] = useState(0);
   const [gameEnded, setGameEnded] = useState(false); // 쥐경주 탈출 시 true
   const [gameSaved, setGameSaved] = useState(false); // 게임 저장 완료 시 true (디브리핑 버튼 활성화 조건)
+  const [savedGameKey, setSavedGameKey] = useState(null); // 🆕 저장된 게임 key (analysis 저장용)
   const [gameSaving, setGameSaving] = useState(false); // 저장 버튼 클릭 후 응답 대기 중
   const [playSessionId, setPlaySessionId] = useState(null); // 후기 버튼용 세션 ID
   // 초기 대출 (job 선택 시점의 옵션 — turnLog 바깥 상태로 유지)
@@ -3628,7 +3629,13 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                     priceOptions = deck.market
                       .filter(c => /콘도/.test(c.desc || "") && c.sell && /^\$/.test(c.sell))
                       .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
-                  } else if (/주택 3\/2|3\/2/.test(assetName) && !/가구|다가구|아파트/.test(assetName)) {
+                  } else if ((/주택 3\/2|3\/2|방3|욕실2/.test(assetName)) && !/가구|다가구|아파트/.test(assetName)) {
+                    // 주택 3/2 계열 (SMALL DEAL: "주택 방3/욕실2" + BIG DEAL: "주택 3/2")
+                    priceOptions = deck.market
+                      .filter(c => /주택 3\/2를 \$|콘도 2\/1/.test(c.desc || "") && c.sell && /^\$/.test(c.sell))
+                      .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
+                    // SMALL DEAL 주택(더 저렴)은 콘도 2/1 판매가도 적용 가능 (가격대 유사)
+                    // 하지만 기본적으로 "주택 3/2를 $XX,XXX에 팔라" 카드만 사용
                     priceOptions = deck.market
                       .filter(c => /주택 3\/2를 \$/.test(c.desc || "") && c.sell)
                       .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
@@ -4631,14 +4638,43 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
           <div style={{ fontSize: 14, color: "#86efac", fontWeight: 800, marginBottom: 6 }}>
             게임이 저장되었습니다
           </div>
-          <div style={{ fontSize: 12, color: "#d4d4d8", lineHeight: 1.6, marginBottom: 12 }}>
-            디브리핑은 <strong style={{ color: "#fbbf24" }}>👤 프로필</strong> 탭의<br/>
-            <strong style={{ color: "#fbbf24" }}>"저장된 게임 디브리핑"</strong>에서 언제든 진행할 수 있습니다.
+          <div style={{ fontSize: 11, color: "#a1a1aa", lineHeight: 1.6, marginBottom: 10 }}>
+            아래 버튼으로 바로 디브리핑 분석을 시작하거나,<br/>
+            나중에 <strong style={{ color: "#fbbf24" }}>👤 프로필</strong> 탭에서 진행할 수 있습니다.
           </div>
-          <div style={{ fontSize: 10, color: "#71717a", padding: "8px 12px", background: "#0a0a0f", borderRadius: 8, display: "inline-block" }}>
-            💡 한 번 진행한 디브리핑은 영구 저장되어 다시 호출 비용 없이 볼 수 있습니다
+          <div style={{ fontSize: 10, color: "#71717a", padding: "6px 10px", background: "#0a0a0f", borderRadius: 6, display: "inline-block" }}>
+            💡 생성된 분석은 자동 저장되어 재호출 없이 언제든 다시 볼 수 있습니다
           </div>
         </div>
+      )}
+
+      {/* 🆕 플레이 모드 인라인 디브리핑 (저장 후 활성화) */}
+      {gameSaved && turnLog.length >= 1 && (
+        <InlineDebriefSection
+          gameKey={savedGameKey}
+          results={(() => {
+            // turnLog → results 변환 (MyHistoryTab.handleDebrief와 동일 로직)
+            return turnLog.map(t => ({
+              turn: t.turn,
+              cell: { type: t.cellType, label: t.cellType },
+              dealType: t.dealType,
+              card: t.card ? { ...t.card, _action: t.action, _shares: t.shares } : null,
+              decisionSec: t.decisionSec,
+              splitApplied: t.splitApplied,
+              dice: [0], total: 0, pos: 0,
+            }));
+          })()}
+          version={version}
+          turns={turnLog.length}
+          gameSnapshot={{
+            job, jobData: JOBS.find(x => x.name === job),
+            babies, assets, cash, loanInterest, bankLoan,
+            startingCF: JOBS.find(x => x.name === job)?.cf || 0,
+            finalCF: totalCF,
+            finalAssets: assets,
+            totalCF,
+          }}
+        />
       )}
 
       {/* 🚧 DebriefSection은 프로필 탭으로 이동됨 (위치 변경) — 컴포넌트 자체는 export 유지 */}
@@ -4706,23 +4742,31 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
               if (result && result.localOnly) {
                 // 서버(Supabase) 실패 + localStorage에만 저장됨
                 await new Promise(resolve => {
-                  // 사용자에게 명확히 알림
+                  // 사용자에게 명확히 알림 + 복구 방법 안내
                   alert(
                     "⚠️ 서버 저장은 실패했지만, 브라우저에 임시 저장되었습니다.\n\n" +
-                    "이 기기에서는 디브리핑 가능합니다.\n" +
-                    "다른 기기와 동기화하려면 네트워크 확인 후 다시 저장해주세요.\n\n" +
-                    (result.error ? `(상세: ${result.error})` : "")
+                    "✅ 이 기기에서는 디브리핑 가능합니다.\n\n" +
+                    "🔧 서버 동기화를 다시 시도하려면:\n" +
+                    "  1. 프로필 탭의 '🔄 서버에 동기화 (재시도)' 버튼\n\n" +
+                    "🛡️ 만약 계속 실패한다면 (Supabase 락 문제):\n" +
+                    "  1. 브라우저 DevTools (F12) → Application → Storage\n" +
+                    "  2. 'Clear site data' 클릭\n" +
+                    "  3. 브라우저 완전 종료 후 재접속\n" +
+                    "  4. 재로그인 → 프로필 탭에서 동기화\n\n" +
+                    (result.error ? `(상세 오류: ${result.error})` : "")
                   );
                   resolve();
                 });
                 // localStorage에는 있으니 디브리핑 진행 허용
                 try { await deleteGameSession(authUser?.id); } catch (_) {}
+                if (result.key) setSavedGameKey(result.key);
                 setGameSaved(true);
                 return;
               }
 
               // 완전 성공
               try { await deleteGameSession(authUser?.id); } catch (_) {}
+              if (result.key) setSavedGameKey(result.key);
               setGameSaved(true); // 디브리핑 버튼 활성화
               alert("✅ 게임이 저장되었습니다.");
             } catch (e) {
@@ -5836,6 +5880,14 @@ export default function CoachingSimulator() {
               };
               console.log("[onSaveGame] 📝 저장자 로그:", saveLog);
 
+              // 🔍 디버그: gameData 구조 확인 (turnLog 유실 감지)
+              console.log(`[onSaveGame] 📊 payload 검증: turnLog=${Array.isArray(gameData.turnLog) ? gameData.turnLog.length + "개" : "❌ 배열 아님"}, turnCount=${gameData.turnCount}, assets=${(gameData.assets || []).length}개, job="${gameData.job}"`);
+              if (Array.isArray(gameData.turnLog) && gameData.turnLog.length > 0) {
+                console.log(`[onSaveGame] 📊 첫 턴 sample:`, JSON.stringify(gameData.turnLog[0]).substring(0, 150));
+              } else if (gameData.turnCount > 0) {
+                console.warn(`[onSaveGame] ⚠️ turnCount=${gameData.turnCount}인데 turnLog가 비어있음! (저장 시 데이터 유실)`);
+              }
+
               const payload = JSON.stringify({
                 ...gameData,
                 ts,
@@ -5886,9 +5938,41 @@ export default function CoachingSimulator() {
               } catch (storageErr) {
                 const elapsed = Date.now() - saveStartTime;
                 console.error(`[onSaveGame] ❌ storage.set 실패/타임아웃 (${elapsed}ms):`, storageErr.message);
-                console.warn("[onSaveGame] ℹ️ localStorage에는 정상 저장됨. 다음 로그인 시 Supabase에 재시도 가능");
-                // localStorage에는 이미 저장되어 있음 → 사용자에게 부분 성공 알림
-                return { key, localOnly: true, error: storageErr.message };
+
+                // 🆕 자동 Lock 복구: Supabase 세션 refresh 후 1회 재시도
+                console.warn("[onSaveGame] 🔄 Lock 복구 시도: 세션 refresh 후 재시도...");
+                try {
+                  const sb = (typeof window !== "undefined" && window.supabase) || null;
+                  if (sb && sb.auth?.refreshSession) {
+                    await Promise.race([
+                      sb.auth.refreshSession(),
+                      new Promise((_, rej) => setTimeout(() => rej(new Error("refresh timeout")), 5000)),
+                    ]).catch(e => console.warn("[onSaveGame] refresh 실패 (무시):", e.message));
+                    console.log("[onSaveGame] 🔄 세션 refresh 완료, 재시도 시작...");
+                  }
+
+                  // 1회 재시도 (타임아웃 15초로 단축)
+                  const retryStartTime = Date.now();
+                  const retryTimeout = new Promise((_, rej) =>
+                    setTimeout(() => rej(new Error("재시도 타임아웃 (15초)")), 15000)
+                  );
+                  result = await Promise.race([
+                    window.storage.set(key, payload),
+                    retryTimeout,
+                  ]);
+                  const retryElapsed = Date.now() - retryStartTime;
+                  if (result) {
+                    console.log(`[onSaveGame] ✅ 재시도 성공 (${retryElapsed}ms)`);
+                  } else {
+                    console.warn(`[onSaveGame] ⚠️ 재시도 결과 null (${retryElapsed}ms)`);
+                    console.warn("[onSaveGame] ℹ️ localStorage에는 정상 저장됨");
+                    return { key, localOnly: true, error: "재시도 결과 null" };
+                  }
+                } catch (retryErr) {
+                  console.error("[onSaveGame] ❌ 재시도도 실패:", retryErr.message);
+                  console.warn("[onSaveGame] ℹ️ localStorage에는 정상 저장됨. 프로필 탭에서 '🔄 서버에 동기화' 버튼으로 재시도 가능");
+                  return { key, localOnly: true, error: storageErr.message };
+                }
               }
 
               // 저장 실패 시 (storage.js v3에서 null 반환)
@@ -6779,10 +6863,11 @@ export async function runFullAnalysis({ simText, version, turns, results }) {
     throw new Error("브라우저 환경에서만 호출 가능합니다.");
   }
 
-  // 🆕 60초 timeout
+  // 🆕 120초 timeout (Opus 모델은 응답이 느릴 수 있음)
+  const TIMEOUT_MS = 120000;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000);
-  console.log(`[runFullAnalysis] API 호출 시작 — simText 길이=${(simText || "").length}`);
+  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  console.log(`[runFullAnalysis] API 호출 시작 — simText 길이=${(simText || "").length} (timeout ${TIMEOUT_MS/1000}초)`);
 
   let response;
   try {
@@ -7166,7 +7251,7 @@ RULES:
   } catch (fetchErr) {
     clearTimeout(timeoutId);
     if (fetchErr.name === "AbortError") {
-      throw new Error("분석 응답 시간 초과 (60초). 네트워크를 확인하거나 다시 시도해주세요.");
+      throw new Error(`분석 응답 시간 초과 (${TIMEOUT_MS/1000}초). 네트워크를 확인하거나 다시 시도해주세요.`);
     }
     throw fetchErr;
   }
@@ -7252,6 +7337,168 @@ RULES:
 
 
 // ═══════════════════════════════════════════════════
+// 🎯 InlineDebriefSection: 플레이 모드 인라인 디브리핑 (저장 후)
+// ═══════════════════════════════════════════════════
+// - "📋 총평" 무료 분석 1회 진행 (runFullAnalysis)
+// - 결과는 savedGameKey의 Supabase에 analysis로 저장
+// - 프로필에서 재호출 없이 다시 볼 수 있도록
+function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }) {
+  const [loading, setLoading] = useState(false);
+  const [analysis, setAnalysis] = useState(null);
+  const [error, setError] = useState("");
+
+  const handleRunAnalysis = async () => {
+    if (loading) return;
+    if (!results || results.length === 0) {
+      setError("턴 기록이 없어 분석을 생성할 수 없습니다.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `📋 디브리핑 분석 (무료)\n\n` +
+      `AI가 당신의 플레이를 4단계(사회 초년생 → 자산 형성기 → 성장과 전환 → 수확과 정리)로 나누어 분석합니다.\n` +
+      `최상의 선택 vs 최악의 선택 비교 그래프와 5가지 교훈이 포함됩니다.\n\n` +
+      `⏱️ 생성 시간: 약 1~2분\n` +
+      `⚠️ 생성 중 화면을 닫지 마세요.\n\n` +
+      `진행하시겠습니까?`
+    );
+    if (!confirmed) return;
+
+    setLoading(true);
+    setError("");
+    try {
+      const simText = buildPromptText(results, version, turns);
+      console.log(`[InlineDebrief] 📋 총평 runFullAnalysis 호출 시작 (gameKey=${gameKey})`);
+      const fullAnalysis = await runFullAnalysis({ simText, version, turns, results });
+      console.log("[InlineDebrief] ✅ 총평 생성 성공 — phases:", fullAnalysis?.phases?.length, "lessons:", fullAnalysis?.lessons?.length);
+
+      setAnalysis(fullAnalysis);
+
+      // 🆕 저장된 게임 키가 있으면 그 게임에 analysis 추가 저장
+      if (gameKey && typeof window !== "undefined" && window.storage) {
+        try {
+          console.log(`[InlineDebrief] 💾 저장 시도: ${gameKey}에 analysis 병합...`);
+          // 1) 현재 저장된 게임 불러오기
+          const existing = await Promise.race([
+            window.storage.get(gameKey),
+            new Promise((_, rej) => setTimeout(() => rej(new Error("get timeout")), 10000)),
+          ]);
+          let payload = null;
+          if (existing && existing.value) {
+            try { payload = JSON.parse(existing.value); }
+            catch (e) { console.warn("[InlineDebrief] payload 파싱 실패:", e.message); }
+          }
+          // 2) analysis 병합
+          if (payload) {
+            payload.debriefData = {
+              ...(payload.debriefData || {}),
+              analysis: fullAnalysis,
+              analysisAt: new Date().toISOString(),
+              feedback: {
+                ...(payload.debriefData?.feedback || {}),
+                analysis: { text: "", generatedAt: new Date().toISOString() },
+              },
+            };
+          } else {
+            // 게임 데이터가 없으면 analysis만 가지고 있는 경량 payload
+            payload = {
+              debriefData: {
+                analysis: fullAnalysis,
+                analysisAt: new Date().toISOString(),
+                feedback: { analysis: { text: "", generatedAt: new Date().toISOString() } },
+              },
+            };
+          }
+          const newPayloadStr = JSON.stringify(payload);
+
+          // 3) localStorage 저장 (안전망)
+          try { localStorage.setItem(gameKey, newPayloadStr); } catch (_) {}
+
+          // 4) Supabase 저장
+          await Promise.race([
+            window.storage.set(gameKey, newPayloadStr),
+            new Promise((_, rej) => setTimeout(() => rej(new Error("set timeout")), 30000)),
+          ]);
+          console.log(`[InlineDebrief] ✅ analysis 저장 완료: ${gameKey}`);
+        } catch (saveErr) {
+          console.warn("[InlineDebrief] analysis 저장 실패 (화면 표시는 계속):", saveErr.message);
+        }
+      } else {
+        console.warn("[InlineDebrief] gameKey 또는 window.storage 없음 — 저장 skip");
+      }
+    } catch (err) {
+      console.error("[InlineDebrief] 총평 실패:", err);
+      setError(err.message || "분석 생성 중 오류가 발생했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 분석 결과가 있으면 AnalysisReport 렌더링
+  if (analysis) {
+    return (
+      <div style={{ marginTop: 20 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#a855f7", marginBottom: 8 }}>
+          📋 디브리핑 분석 — 완료 ✅
+        </div>
+        <div style={{ fontSize: 10, color: "#71717a", marginBottom: 10 }}>
+          이 분석은 자동 저장되어 프로필 탭에서 언제든 다시 볼 수 있습니다
+        </div>
+        <AnalysisReport analysis={analysis} turns={turns} />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      marginTop: 16,
+      padding: 18,
+      borderRadius: 12,
+      background: "#18181b",
+      border: "1px solid #a855f740",
+      textAlign: "center",
+    }}>
+      <div style={{ fontSize: 22, marginBottom: 6 }}>📋</div>
+      <div style={{ fontSize: 14, color: "#c4b5fd", fontWeight: 800, marginBottom: 6 }}>
+        디브리핑 분석
+      </div>
+      <div style={{ fontSize: 11, color: "#a1a1aa", lineHeight: 1.6, marginBottom: 12 }}>
+        AI가 당신의 {turns}턴 플레이를 분석하여<br/>
+        전 생애 자산 흐름 · 최상/최악 비교 · 5가지 교훈을 제공합니다
+      </div>
+
+      {error && (
+        <div style={{
+          marginBottom: 10, padding: "8px 12px", borderRadius: 6,
+          background: "#dc262615", border: "1px solid #dc262650",
+          color: "#fca5a5", fontSize: 11, textAlign: "left",
+        }}>
+          ❌ {error}
+        </div>
+      )}
+
+      <button
+        onClick={handleRunAnalysis}
+        disabled={loading}
+        style={{
+          width: "100%", padding: "12px 20px", borderRadius: 10,
+          border: "none",
+          background: loading ? "#3f3f46" : "linear-gradient(135deg, #a855f7, #8b5cf6)",
+          color: loading ? "#71717a" : "#fff",
+          fontSize: 13, fontWeight: 800, cursor: loading ? "not-allowed" : "pointer",
+        }}
+      >
+        {loading ? "🔄 분석 중... (약 1~2분)" : "📊 디브리핑 분석 시작"}
+      </button>
+
+      <div style={{ fontSize: 9, color: "#52525b", marginTop: 10 }}>
+        💡 무료 · 한 번 생성되면 영구 저장되어 프로필에서 다시 볼 수 있습니다
+      </div>
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════
 // 🎨 AnalysisReport: 디브리핑 풀 분석 렌더링 (export, 재사용 가능)
 // ═══════════════════════════════════════════════════
 // 사용처: DebriefSection 내부 + MyHistoryTab의 모달
@@ -7261,7 +7508,10 @@ const phaseColors = ["#10b981","#3b82f6","#8b5cf6","#f59e0b","#ef4444"];
 if (!analysis) return null;
   const bp = analysis.bestPath || [];
   const wp = analysis.worstPath || [];
-  const hasPaths = bp.length > 0 && wp.length > 0;
+  // 🆕 hasPaths: 배열 길이만 아니라 실제 CF/asset 값이 의미있는지 확인
+  //    무행동 게임(CHARITY만 있는 턴 등)이면 bp/wp가 있어도 모두 0 → 그래프 무의미
+  const hasAnyValue = (arr) => arr.some(p => (p.cf || 0) !== 0 || (p.asset || 0) !== 0);
+  const hasPaths = bp.length > 0 && wp.length > 0 && (hasAnyValue(bp) || hasAnyValue(wp));
 
   // 🔧 턴 시간축 기반으로 bp/wp 정합성 맞추기
   const allTurns = Array.from(new Set([
@@ -7327,26 +7577,48 @@ if (!analysis) return null;
 
   return (
     <>
-      {/* ── 1. 전 생애 자산 흐름 요약 ── */}
-      <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #27272a", marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 800, color: "#fafafa", marginBottom: 14 }}>📋 전 생애 자산 흐름 요약</div>
-        {(analysis.phases || []).map((p, i) => (
-          <div key={i} style={{ marginBottom: i < 4 ? 14 : 0, paddingBottom: i < 4 ? 14 : 0, borderBottom: i < 4 ? "1px solid #1e1e2e" : "none" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-              <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: phaseColors[i] + "20", color: phaseColors[i] }}>{p.title} ({p.age})</span>
-              <span style={{ fontSize: 10, color: "#52525b" }}>{p.turns}</span>
+      {/* ── 1. 전 생애 자산 흐름 요약 (phases 있을 때만) ── */}
+      {Array.isArray(analysis.phases) && analysis.phases.length > 0 && (
+        <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #27272a", marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "#fafafa", marginBottom: 14 }}>📋 전 생애 자산 흐름 요약</div>
+          {analysis.phases.map((p, i) => (
+            <div key={i} style={{ marginBottom: i < 4 ? 14 : 0, paddingBottom: i < 4 ? 14 : 0, borderBottom: i < 4 ? "1px solid #1e1e2e" : "none" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: phaseColors[i] + "20", color: phaseColors[i] }}>{p.title} ({p.age})</span>
+                <span style={{ fontSize: 10, color: "#52525b" }}>{p.turns}</span>
+              </div>
+              <p style={{ fontSize: 12, color: "#a1a1aa", margin: "4px 0", lineHeight: 1.5 }}>{p.cards}</p>
+              <p style={{ fontSize: 12, color: phaseColors[i], margin: 0, fontWeight: 600 }}>{p.verdict}</p>
             </div>
-            <p style={{ fontSize: 12, color: "#a1a1aa", margin: "4px 0", lineHeight: 1.5 }}>{p.cards}</p>
-            <p style={{ fontSize: 12, color: phaseColors[i], margin: 0, fontWeight: 600 }}>{p.verdict}</p>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
       {/* ── 2. 최상의 선택 vs 최악의 선택 비교 그래프 ── */}
+      {/* 🆕 무행동 안내: 자산 매수/매도가 없어서 비교할 데이터가 없는 경우 */}
+      {!hasPaths && Array.isArray(analysis.phases) && analysis.phases.length > 0 && (
+      <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #f59e0b40", marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "#fde68a", marginBottom: 6 }}>📈 최상의 선택 vs 최악의 선택</div>
+        <div style={{
+          padding: "14px 16px", borderRadius: 10, background: "#f59e0b10",
+          fontSize: 12, color: "#fde68a", lineHeight: 1.6, marginTop: 10,
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>⚠️ 비교 데이터 없음</div>
+          <div style={{ color: "#d4d4d8" }}>
+            이 게임에서는 <strong>자산 매수/매도 행동이 없어</strong> 선택에 따른 결과 차이를 비교할 수 없습니다.
+          </div>
+          <div style={{ fontSize: 10, color: "#a1a1aa", marginTop: 8, paddingTop: 8, borderTop: "1px solid #f59e0b30" }}>
+            💡 <strong>캐쉬플로우의 핵심은 기회를 잡는 것</strong>입니다. 다음 게임에서는 OPPORTUNITY 칸에서 부동산/주식/사업에 적극 투자해보세요. 그때부터 "최상의 선택 vs 최악의 선택"이 의미를 갖습니다.
+          </div>
+        </div>
+      </div>
+      )}
+
+      {/* 비교 그래프 본문 (hasPaths true일 때만) */}
+      {hasPaths && (
       <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #27272a", marginBottom: 16 }}>
         <div style={{ fontSize: 14, fontWeight: 800, color: "#fafafa", marginBottom: 6 }}>📈 최상의 선택 vs 최악의 선택</div>
         <div style={{ fontSize: 11, color: "#71717a", marginBottom: 14 }}>같은 카드를 받았을 때, 선택에 따라 현금흐름이 어떻게 달라지는지 비교합니다.</div>
-        {hasPaths ? (<>
         {/* 탭 */}
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
           {[{ key:"cf", label:"월 현금흐름" }, { key:"asset", label:"누적 투자원금" }].map(t => (
@@ -7450,31 +7722,21 @@ if (!analysis) return null;
             }
           </span>
         </div>
-        </>) : (
-          <div style={{ padding: "20px 0", textAlign: "center" }}>
-            <p style={{ fontSize: 13, color: "#71717a", marginBottom: 8 }}>비교 데이터가 생성되지 않았습니다.</p>
-            <p style={{ fontSize: 10, color: "#52525b" }}>
-              최상 경로 {bp.length}개 · 최악 경로 {wp.length}개
-            </p>
-            {bp.length === 0 && wp.length === 0 && (
-              <p style={{ fontSize: 10, color: "#52525b", marginTop: 6 }}>
-                턴 기록이 부족하거나 분석에 오류가 있을 수 있습니다. 다시 분석을 시도해주세요.
-              </p>
-            )}
-          </div>
-        )}
       </div>
+      )}
 
-      {/* ── 3. 5가지 교훈 + 최종 질문 ── */}
+      {/* ── 3. 5가지 교훈 + 최종 질문 (lessons 있을 때만) ── */}
+      {Array.isArray(analysis.lessons) && analysis.lessons.length > 0 && (
       <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #27272a", marginBottom: 16 }}>
         <div style={{ fontSize: 14, fontWeight: 800, color: "#fafafa", marginBottom: 14 }}>💡 이 게임이 가르쳐 준 5가지</div>
-        {(analysis.lessons || []).map((lesson, i) => (
+        {analysis.lessons.map((lesson, i) => (
           <div key={i} style={{ display: "flex", gap: 10, marginBottom: i < 4 ? 12 : 0 }}>
             <span style={{ fontSize: 16, fontWeight: 900, color: "#f59e0b", minWidth: 20, textAlign: "center" }}>{i + 1}</span>
             <p style={{ fontSize: 13, lineHeight: 1.7, color: "#d4d4d8", margin: 0 }}>{lesson}</p>
           </div>
         ))}
       </div>
+      )}
 
       {/* ── 4. 시간 분석 (턴 기반 + 결정 속도) ── */}
       {analysis.timeAnalysis && (
@@ -7873,11 +8135,13 @@ export async function generatePaidFeedback({ tier, version, turns, simText, extr
 ═══════════════════════════════════════════════════
 `;
 
-  // 🆕 60초 timeout 추가 (무한 대기 방지)
+  // 🆕 모델별 timeout (Opus는 더 느림)
+  const isOpus = (model || "").includes("opus");
+  const TIMEOUT_MS = isOpus ? 120000 : 60000;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000);
+  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-  console.log(`[generatePaidFeedback] API 호출 시작 — tier=${tier}, model=${model}, simText 길이=${(simText || "").length}`);
+  console.log(`[generatePaidFeedback] API 호출 시작 — tier=${tier}, model=${model}, simText 길이=${(simText || "").length} (timeout ${TIMEOUT_MS/1000}초)`);
 
   let response;
   try {
@@ -7897,7 +8161,7 @@ export async function generatePaidFeedback({ tier, version, turns, simText, extr
   } catch (e) {
     clearTimeout(timeoutId);
     if (e.name === "AbortError") {
-      throw new Error("API 응답 시간 초과 (60초). 네트워크 상태를 확인하거나 다시 시도해주세요.");
+      throw new Error(`API 응답 시간 초과 (${TIMEOUT_MS/1000}초). 네트워크 상태를 확인하거나 다시 시도해주세요.`);
     }
     throw e;
   }
