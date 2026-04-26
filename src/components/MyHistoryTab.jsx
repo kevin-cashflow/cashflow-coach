@@ -881,12 +881,25 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
           dice: [0], total: 0, pos: 0,
         }));
 
+        // 🆕 turnLog/results가 비어있는 경우 (레거시 게임 또는 진행 중 저장 직후)
+        // simText라도 있으면 그것만으로 총평 시도, 그것도 없으면 명확한 안내 메시지
         if (results.length === 0) {
-          throw new Error("턴 기록이 없어 총평을 생성할 수 없습니다.");
+          const hasSimText = currentGame.simText && currentGame.simText.length > 50;
+          if (!hasSimText) {
+            throw new Error(
+              "이 게임은 턴 기록이 저장되지 않아 총평을 생성할 수 없습니다.\n\n" +
+              "원인:\n" +
+              "• 과거 버전에서 저장된 게임 (디브리핑만 있고 턴 기록 없음)\n" +
+              "• 게임 저장 시점에 데이터가 일부 유실됨\n\n" +
+              "해결:\n" +
+              "✅ 새 게임을 플레이하고 저장하면 총평 생성 가능합니다."
+            );
+          }
+          console.warn("[handleDebrief] turnLog 없지만 simText 존재 — simText로 총평 시도");
         }
 
         const simText = currentGame.simText || buildPromptText(results, currentGame.version, currentGame.turnCount || 0);
-        console.log("[handleDebrief] 📋 총평 runFullAnalysis 호출 시작");
+        console.log("[handleDebrief] 📋 총평 runFullAnalysis 호출 시작 — simText 길이:", simText?.length);
         const fullAnalysis = await runFullAnalysis({
           simText,
           version: currentGame.version,
@@ -1658,25 +1671,35 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
                   if (!tierInfo) return null;
                   const { key, icon, label, color } = tierInfo;
                   const done = !!(g.debriefData?.analysis?.phases?.length || g.debriefData?.analysis?.lessons?.length);
+                  // 🆕 턴 기록 없으면 비활성화 (이미 done이면 다시 보기는 가능)
+                  const turnLogLen = (g.turnLog || []).length;
+                  const hasResults = (g.gameResults || []).length > 0;
+                  const hasSimText = !!g.simText && g.simText.length > 50;
+                  const canRun = turnLogLen > 0 || hasResults || hasSimText;
+                  const isDisabled = !canRun && !done;
+
                   return (
                     <button
                       key={key}
                       onClick={() => handleDebrief(g, key)}
+                      disabled={isDisabled}
+                      title={isDisabled ? "이 게임은 턴 기록이 없어 총평을 생성할 수 없습니다 (레거시 데이터)" : ""}
                       style={{
                         width: "100%", padding: "10px 12px", borderRadius: 8, marginBottom: 6,
-                        border: `1px solid ${done ? color + "60" : color + "30"}`,
+                        border: `1px solid ${done ? color + "60" : (isDisabled ? "#27272a" : color + "30")}`,
                         background: done ? color + "20" : "transparent",
-                        color: done ? color : "#a1a1aa",
-                        cursor: "pointer",
+                        color: done ? color : (isDisabled ? "#52525b" : "#a1a1aa"),
+                        cursor: isDisabled ? "not-allowed" : "pointer",
+                        opacity: isDisabled ? 0.5 : 1,
                         fontSize: 11, fontWeight: 700,
                         display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
                         transition: "all 0.2s",
                       }}
                     >
-                      <span style={{ fontSize: 14 }}>{icon}</span>
+                      <span style={{ fontSize: 14 }}>{isDisabled ? "🔒" : icon}</span>
                       <span>{label}</span>
                       <span style={{ fontSize: 9, color: done ? color : "#52525b", fontWeight: 600, marginLeft: 4 }}>
-                        {done ? "· 📄 다시 보기" : "· ▶ 무료"}
+                        {done ? "· 📄 다시 보기" : (isDisabled ? "· 턴 기록 없음" : "· ▶ 무료")}
                       </span>
                     </button>
                   );
@@ -2427,10 +2450,15 @@ function DebriefResultModal({ modal, onClose }) {
 
           {error && (
             <div style={{
-              padding: 14, borderRadius: 8, background: "#7f1d1d30",
-              border: "1px solid #dc262650", color: "#fca5a5", fontSize: 12,
+              padding: "16px 18px", borderRadius: 10,
+              background: "#7f1d1d20", border: "1px solid #dc262650",
+              color: "#fca5a5", fontSize: 12, lineHeight: 1.7,
+              whiteSpace: "pre-wrap", wordBreak: "break-word",
             }}>
-              ❌ {error}
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8, color: "#fca5a5" }}>
+                ⚠️ 총평 생성 불가
+              </div>
+              <div style={{ color: "#fde68a" }}>{error}</div>
             </div>
           )}
 

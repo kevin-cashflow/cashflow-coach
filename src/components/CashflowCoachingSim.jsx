@@ -1645,6 +1645,13 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     return Array.from(acc.entries()).map(([key, count]) => ({ key, count }));
   }, [cardList, cardCategory, cellType, dealType]);
 
+  // 🆕 서브타입이 1개뿐이면 자동 선택 (사업 카테고리에서 BIG/SMALL 한 종류만 있을 때 단계 스킵)
+  useEffect(() => {
+    if (cellType === "OPPORTUNITY" && cardCategory && !cardSubtype && cardSubtypesWithCounts.length === 1) {
+      setCardSubtype(cardSubtypesWithCounts[0].key);
+    }
+  }, [cellType, cardCategory, cardSubtype, cardSubtypesWithCounts]);
+
   // 선택된 카테고리+서브타입으로 필터링된 실제 카드 (Step 3 목록)
   const filteredCards = useMemo(() => {
     if (cellType !== "OPPORTUNITY") return cardList;
@@ -2888,8 +2895,8 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                 </div>
               )}
 
-              {/* Step 2: 서브타입 */}
-              {cardCategory && !cardSubtype && (
+              {/* Step 2: 서브타입 (서브타입이 2개 이상일 때만 표시) */}
+              {cardCategory && !cardSubtype && cardSubtypesWithCounts.length >= 2 && (
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                     <button onClick={() => { setCardCategory(null); setCardSubtype(null); setSelectedCard(null); }} style={{
@@ -2916,12 +2923,21 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
               {cardCategory && cardSubtype && (
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
-                    <button onClick={() => { setCardSubtype(null); setSelectedCard(null); }} style={{
+                    <button onClick={() => {
+                      // 서브타입이 1개뿐이면 자동 선택되므로 카테고리까지 비워야 됨
+                      if (cardSubtypesWithCounts.length <= 1) {
+                        setCardCategory(null); setCardSubtype(null); setSelectedCard(null);
+                      } else {
+                        setCardSubtype(null); setSelectedCard(null);
+                      }
+                    }} style={{
                       padding: "3px 8px", borderRadius: 4, border: "1px solid #27272a",
                       background: "#18181b", color: "#71717a", cursor: "pointer", fontSize: 10,
                     }}>← 뒤로</button>
-                    <span style={{ fontSize: 10, color: "#52525b" }}>3단계 ·</span>
-                    <span style={{ fontSize: 11, color: "#e4e4e7", fontWeight: 600 }}>{cardCategory} / {cardSubtype}</span>
+                    <span style={{ fontSize: 10, color: "#52525b" }}>{cardSubtypesWithCounts.length <= 1 ? "2단계 ·" : "3단계 ·"}</span>
+                    <span style={{ fontSize: 11, color: "#e4e4e7", fontWeight: 600 }}>
+                      {cardCategory}{cardSubtypesWithCounts.length > 1 ? ` / ${cardSubtype}` : ""}
+                    </span>
                     <span style={{ fontSize: 10, color: "#71717a" }}>({filteredCards.length}장)</span>
                   </div>
                   <select
@@ -3641,18 +3657,40 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                       .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
                   } else if (/가구|다가구/.test(assetName)) {
                     // 가구당 단가 × 유닛수
+                    // desc에 "$30,000" 형식으로 정확한 금액 있음. sell 필드는 "가구당$30K" 약어.
+                    const parseUnitPriceFromCard = (card) => {
+                      // 1) desc에서 "$30,000" 같은 명시적 금액 추출 (우선순위 높음)
+                      const descMatch = (card.desc || "").match(/\$([0-9]{1,3}(?:,[0-9]{3})+)/);
+                      if (descMatch) return parseInt(descMatch[1].replace(/,/g, "")) || 0;
+                      // 2) sell 필드의 K/M 처리 fallback
+                      const s = String(card.sell || "");
+                      const num = parseInt(s.replace(/[^0-9]/g, "")) || 0;
+                      if (/[Kk]/.test(s)) return num * 1000;
+                      if (/[Mm]/.test(s)) return num * 1000000;
+                      return num;
+                    };
                     priceOptions = deck.market
                       .filter(c => /다가구 주택 가구당/.test(c.desc || "") && c.sell)
                       .map(c => {
-                        const unitPrice = parseNum(c.sell);
+                        const unitPrice = parseUnitPriceFromCard(c);
                         const total = unitPrice * unitCount;
                         return { label: `가구당 $${fmtNum(unitPrice)} × ${unitCount}채 = $${fmtNum(total)}`, value: total, card: c };
                       });
                   } else if (/아파트/.test(assetName)) {
+                    // 아파트 1채당 단가 × 세대수 (desc에서 추출 우선)
+                    const parseUnitPriceFromCard = (card) => {
+                      const descMatch = (card.desc || "").match(/\$([0-9]{1,3}(?:,[0-9]{3})+)/);
+                      if (descMatch) return parseInt(descMatch[1].replace(/,/g, "")) || 0;
+                      const s = String(card.sell || "");
+                      const num = parseInt(s.replace(/[^0-9]/g, "")) || 0;
+                      if (/[Kk]/.test(s)) return num * 1000;
+                      if (/[Mm]/.test(s)) return num * 1000000;
+                      return num;
+                    };
                     priceOptions = deck.market
                       .filter(c => /아파트 단지 1채당/.test(c.desc || "") && c.sell)
                       .map(c => {
-                        const unitPrice = parseNum(c.sell);
+                        const unitPrice = parseUnitPriceFromCard(c);
                         const total = unitPrice * unitCount;
                         return { label: `1채당 $${fmtNum(unitPrice)} × ${unitCount}채 = $${fmtNum(total)}`, value: total, card: c };
                       });
