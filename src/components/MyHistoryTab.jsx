@@ -2101,25 +2101,37 @@ function DebriefResultModal({ modal, onClose }) {
         // → 요약 텍스트 + "웹에서 전체 보기" 링크 방식이 표준
         // 하지만 링크용 페이지가 없으니 → 텍스트 설명에 본문 발췌만 포함
         const snippet = text.length > 200 ? text.substring(0, 200) + "..." : text;
-        const currentUrl = typeof window !== "undefined" ? window.location.href : "";
+
+        // 🔧 카카오 공유 클릭 무반응 문제 해결:
+        //   카카오톡은 "앱 대표 도메인"과 정확히 일치하는 URL만 클릭 허용함.
+        //   window.location.href는 fragment(#)나 querystring(?) 포함되면 거부될 수 있고,
+        //   localhost인 경우 다른 사람 폰에선 절대 못 열림.
+        //   → 항상 깨끗한 프로덕션 도메인 사용
+        const PROD_DOMAIN = "https://cashflow-coach.vercel.app";
+        const shareUrl = PROD_DOMAIN;  // 메인 페이지로만 이동
+
+        // 🔍 디버그: 어떤 URL을 보내는지 확인 (F12 콘솔에서 보임)
+        console.log("[카카오 공유] 전송 URL:", shareUrl);
+        console.log("[카카오 공유] 현재 page:", window.location.href);
+        console.log("[카카오 공유] 카카오 앱 키 등록됨:", !!kakaoKey);
 
         Kakao.Share.sendDefault({
           objectType: "feed",
           content: {
             title: `${meta.icon} ${tierLabel} - ${game.job || "캐쉬플로우"}`,
             description: `📅 ${dateStr} · ${game.version} · ${game.turnCount}턴${game.escaped ? " · ✅ 탈출" : ""}\n\n${snippet}`,
-            imageUrl: "https://cashflow-coach.vercel.app/og-image.png",  // 선택: OG 이미지 (없어도 됨)
+            imageUrl: `${PROD_DOMAIN}/og-image.png`,
             link: {
-              mobileWebUrl: currentUrl,
-              webUrl: currentUrl,
+              mobileWebUrl: shareUrl,
+              webUrl: shareUrl,
             },
           },
           buttons: [
             {
-              title: "웹에서 전체 보기",
+              title: "캐쉬플로우 코치 열기",
               link: {
-                mobileWebUrl: currentUrl,
-                webUrl: currentUrl,
+                mobileWebUrl: shareUrl,
+                webUrl: shareUrl,
               },
             },
           ],
