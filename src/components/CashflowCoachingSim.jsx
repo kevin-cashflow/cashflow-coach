@@ -7420,10 +7420,19 @@ RULES:
 // - "📋 총평" 무료 분석 1회 진행 (runFullAnalysis)
 // - 결과는 savedGameKey의 Supabase에 analysis로 저장
 // - 프로필에서 재호출 없이 다시 볼 수 있도록
+// - 🆕 분석 후 무료 요약/상세($9)/프리미엄($20) 피드백 + 카카오 공유 추가
 function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }) {
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null);
   const [error, setError] = useState("");
+
+  // 🆕 티어별 피드백 상태
+  // { free: "...", detail: "...", premium: "..." } 형태로 캐시
+  const [feedbackCache, setFeedbackCache] = useState({});
+  const [feedbackLoading, setFeedbackLoading] = useState(null); // 로딩 중인 tier (0, 1, 2)
+  const [activeTier, setActiveTier] = useState(null); // 현재 표시 중인 tier
+  const [feedbackError, setFeedbackError] = useState("");
+  const [kakaoLoading, setKakaoLoading] = useState(false);
 
   const handleRunAnalysis = async () => {
     if (loading) return;
@@ -7511,8 +7520,163 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
     }
   };
 
+  // 🆕 티어별 피드백 생성 핸들러
+  const handleGenerateFeedback = async (tier) => {
+    if (feedbackLoading !== null) return;
+
+    // 캐시에 있으면 바로 표시
+    const cacheKey = tier === 0 ? "free" : tier === 1 ? "detail" : "premium";
+    if (feedbackCache[cacheKey]) {
+      setActiveTier(tier);
+      return;
+    }
+
+    const tierName = tier === 0 ? "요약" : tier === 1 ? "상세" : "프리미엄";
+    const tierPrice = tier === 0 ? "무료" : tier === 1 ? "$9" : "$20";
+    const tierTime = tier === 0 ? "30초" : tier === 1 ? "1~2분" : "2~3분";
+
+    if (tier !== 0) {
+      const confirmed = window.confirm(
+        `💎 ${tierName} 피드백 (${tierPrice})\n\n` +
+        `Claude AI(${tier === 2 ? "Opus" : "Sonnet"})가 ${tier === 2 ? "5,000자" : "2,000자"} 분량의 ` +
+        `전문 코칭 리포트를 생성합니다.\n\n` +
+        `${tier === 2 ? "🎭 페르소나 진단 자동 통합\n" : ""}` +
+        `⏱️ 생성 시간: 약 ${tierTime}\n\n` +
+        `진행하시겠습니까?`
+      );
+      if (!confirmed) return;
+    }
+
+    setFeedbackLoading(tier);
+    setFeedbackError("");
+    try {
+      let feedbackText;
+      if (tier === 0) {
+        // 무료 요약 — 즉시 생성 (텍스트 기반)
+        feedbackText = generateFreeFeedback(results, turns);
+      } else {
+        // 유료 — API 호출
+        const simText = buildPromptText(results, version, turns);
+        const extraContext = analysis ? buildCompactSummary(analysis) : "";
+        feedbackText = await generatePaidFeedback({
+          tier,
+          version,
+          turns,
+          simText,
+          extraContext,
+          turnLog: gameSnapshot?.turnLog || null,
+          gameSnapshot,
+        });
+      }
+
+      // 캐시 저장
+      setFeedbackCache(prev => ({ ...prev, [cacheKey]: feedbackText }));
+      setActiveTier(tier);
+
+      // 🛡️ 4중 영구 저장 (localStorage + 박제 키 + IndexedDB + Supabase)
+      if (gameKey && typeof window !== "undefined") {
+        try {
+          const storageRaw = await window.storage?.get(gameKey);
+          if (storageRaw?.value) {
+            const payload = JSON.parse(storageRaw.value);
+            const updatedDebrief = {
+              ...(payload.debrief || {}),
+              feedback: feedbackText,
+              feedbackTier: tier,
+            };
+            // debriefData (티어별 누적)
+            const dd = payload.debriefData || { feedback: { free: null, detail: null, premium: null } };
+            dd.feedback = { ...dd.feedback, [cacheKey]: { text: feedbackText, generatedAt: new Date().toISOString() } };
+            const newPayload = JSON.stringify({ ...payload, debrief: updatedDebrief, debriefData: dd });
+
+            try { localStorage.setItem(gameKey, newPayload); } catch {}
+            try { localStorage.setItem(`debrief-永:${gameKey}:${cacheKey}`, JSON.stringify({ gameKey, tier: cacheKey, text: feedbackText, generatedAt: new Date().toISOString() })); } catch {}
+            try { await window.storage.set(gameKey, newPayload); } catch {}
+            console.log(`[InlineDebrief] ✅ ${cacheKey} 피드백 저장 완료`);
+          }
+        } catch (saveErr) {
+          console.warn(`[InlineDebrief] 피드백 저장 실패 (화면 표시는 계속):`, saveErr.message);
+        }
+      }
+    } catch (e) {
+      console.error("[InlineDebrief] 피드백 생성 실패:", e);
+      setFeedbackError(e.message || "피드백 생성 실패");
+    } finally {
+      setFeedbackLoading(null);
+    }
+  };
+
+  // 🆕 카카오톡 공유 핸들러
+  const handleKakaoShare = async () => {
+    if (kakaoLoading) return;
+    if (activeTier === null || !feedbackCache) {
+      alert("먼저 피드백을 생성해주세요.");
+      return;
+    }
+    const cacheKey = activeTier === 0 ? "free" : activeTier === 1 ? "detail" : "premium";
+    const text = feedbackCache[cacheKey];
+    if (!text) {
+      alert("표시할 피드백이 없습니다.");
+      return;
+    }
+
+    const kakaoKey = process.env.NEXT_PUBLIC_KAKAO_JS_KEY;
+    if (!kakaoKey) {
+      alert("⚠️ 카카오톡 공유 기능이 아직 설정되지 않았습니다.");
+      return;
+    }
+
+    setKakaoLoading(true);
+    try {
+      // Kakao SDK 로드 (1회만)
+      if (!window.Kakao) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = "https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js";
+          script.integrity = "sha384-TiCUE00h649CAMonG018J2ujOgDKW/kVWlChEuu4jK2vxfAAD0eZxzCKakxg55G4";
+          script.crossOrigin = "anonymous";
+          script.onload = resolve;
+          script.onerror = () => reject(new Error("Kakao SDK 로드 실패"));
+          document.head.appendChild(script);
+        });
+      }
+      if (!window.Kakao.isInitialized()) window.Kakao.init(kakaoKey);
+
+      const tierLabel = activeTier === 0 ? "요약 피드백" : activeTier === 1 ? "상세 피드백" : "프리미엄 피드백";
+      const tierIcon = activeTier === 0 ? "💬" : activeTier === 1 ? "📝" : "💎";
+      const job = gameSnapshot?.job || "캐쉬플로우";
+      const snippet = text.length > 200 ? text.substring(0, 200) + "..." : text;
+
+      const PROD_DOMAIN = "https://cashflow-coach.vercel.app";
+
+      console.log("[InlineDebrief 카카오 공유] 전송 URL:", PROD_DOMAIN);
+
+      window.Kakao.Share.sendDefault({
+        objectType: "feed",
+        content: {
+          title: `${tierIcon} ${tierLabel} - ${job}`,
+          description: `📅 ${new Date().toLocaleDateString("ko-KR")} · ${version} · ${turns}턴\n\n${snippet}`,
+          imageUrl: `${PROD_DOMAIN}/og-image.png`,
+          link: { mobileWebUrl: PROD_DOMAIN, webUrl: PROD_DOMAIN },
+        },
+        buttons: [{
+          title: "캐쉬플로우 코치 열기",
+          link: { mobileWebUrl: PROD_DOMAIN, webUrl: PROD_DOMAIN },
+        }],
+      });
+    } catch (e) {
+      console.error("[InlineDebrief] 카카오 공유 실패:", e);
+      alert("❌ 카카오톡 공유 실패: " + (e.message || "알 수 없는 오류"));
+    } finally {
+      setKakaoLoading(false);
+    }
+  };
+
   // 분석 결과가 있으면 AnalysisReport 렌더링
   if (analysis) {
+    const cacheKey = activeTier === 0 ? "free" : activeTier === 1 ? "detail" : activeTier === 2 ? "premium" : null;
+    const activeFeedbackText = cacheKey ? feedbackCache[cacheKey] : null;
+
     return (
       <div style={{ marginTop: 20 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "#a855f7", marginBottom: 8 }}>
@@ -7522,6 +7686,105 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
           이 분석은 자동 저장되어 프로필 탭에서 언제든 다시 볼 수 있습니다
         </div>
         <AnalysisReport analysis={analysis} turns={turns} />
+
+        {/* 🆕 티어별 피드백 선택 영역 */}
+        <div style={{
+          marginTop: 20, padding: 16, borderRadius: 12,
+          background: "linear-gradient(135deg, #22c55e08, #3b82f608, #f59e0b08)",
+          border: "1px solid #3f3f46",
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#fafafa", marginBottom: 6 }}>
+            💬 AI 코칭 피드백 받기
+          </div>
+          <div style={{ fontSize: 10, color: "#71717a", marginBottom: 12 }}>
+            원하는 단계의 피드백을 선택하세요. 한 번 생성하면 영구 저장됩니다.
+          </div>
+
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            {[
+              { tier: 0, label: "요약", price: "무료", icon: "💬", color: "#22c55e", key: "free" },
+              { tier: 1, label: "상세", price: "$9", icon: "📝", color: "#3b82f6", key: "detail" },
+              { tier: 2, label: "프리미엄", price: "$20", icon: "💎", color: "#f59e0b", key: "premium" },
+            ].map(t => {
+              const isLoading = feedbackLoading === t.tier;
+              const isActive = activeTier === t.tier;
+              const hasCache = !!feedbackCache[t.key];
+              return (
+                <button
+                  key={t.tier}
+                  onClick={() => handleGenerateFeedback(t.tier)}
+                  disabled={feedbackLoading !== null}
+                  style={{
+                    flex: 1, padding: "10px 8px", borderRadius: 8,
+                    border: `1px solid ${isActive ? t.color : t.color + "40"}`,
+                    background: isActive ? t.color + "20" : t.color + "08",
+                    color: t.color,
+                    fontSize: 11, fontWeight: 700,
+                    cursor: feedbackLoading !== null ? "not-allowed" : "pointer",
+                    opacity: feedbackLoading !== null && !isLoading ? 0.5 : 1,
+                    display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+                  }}
+                >
+                  <span style={{ fontSize: 16 }}>{isLoading ? "🔄" : t.icon}</span>
+                  <span>{isLoading ? "생성 중..." : t.label}</span>
+                  <span style={{ fontSize: 8, opacity: 0.7 }}>
+                    {hasCache ? "✓ 보기" : t.price}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {feedbackError && (
+            <div style={{
+              marginBottom: 10, padding: "8px 12px", borderRadius: 6,
+              background: "#dc262615", border: "1px solid #dc262650",
+              color: "#fca5a5", fontSize: 11,
+            }}>
+              ❌ {feedbackError}
+            </div>
+          )}
+
+          {/* 활성 피드백 본문 표시 */}
+          {activeFeedbackText && (
+            <div style={{
+              padding: 14, borderRadius: 8,
+              background: "#0a0a0f", border: "1px solid #27272a",
+              marginBottom: 12,
+            }}>
+              <div style={{ fontSize: 10, color: "#a1a1aa", marginBottom: 8, textAlign: "right" }}>
+                {activeTier === 0 ? "💬 요약 피드백" : activeTier === 1 ? "📝 상세 피드백" : "💎 프리미엄 피드백"}
+              </div>
+              <div style={{
+                fontSize: 12, lineHeight: 1.7, color: "#e4e4e7",
+                whiteSpace: "pre-wrap", wordBreak: "break-word",
+                maxHeight: 600, overflow: "auto",
+              }}>
+                {activeFeedbackText}
+              </div>
+            </div>
+          )}
+
+          {/* 🆕 카카오톡 공유 버튼 — 활성 피드백이 있을 때만 표시 */}
+          {activeFeedbackText && (
+            <button
+              onClick={handleKakaoShare}
+              disabled={kakaoLoading}
+              style={{
+                width: "100%", padding: "10px 14px", borderRadius: 8,
+                border: "1px solid #fcd34d50", background: "#fde68a15",
+                color: "#fde68a",
+                fontSize: 12, fontWeight: 700,
+                cursor: kakaoLoading ? "not-allowed" : "pointer",
+                opacity: kakaoLoading ? 0.6 : 1,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              }}
+            >
+              <span style={{ fontSize: 14 }}>{kakaoLoading ? "⏳" : "💬"}</span>
+              <span>{kakaoLoading ? "카카오톡 SDK 로딩..." : "카카오톡으로 보내기"}</span>
+            </button>
+          )}
+        </div>
       </div>
     );
   }
