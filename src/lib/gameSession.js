@@ -226,22 +226,29 @@ export async function loadGameSession(userId) {
 }
 
 // ─── 공개 API: 세션 삭제 ───
+//
+// localStorage는 동기 즉시 삭제 (절대 실패 안 함).
+// Supabase 삭제는 백그라운드로 fire-and-forget — 실패해도 다음 게임 시작 시
+// upsert로 덮어쓰니 무방. await로 호출자 차단하지 않음.
 export async function deleteGameSession(userId) {
   clearLocal();
 
   if (userId) {
-    try {
-      await withTimeout(
-        supabase
-          .from("game_sessions")
-          .delete()
-          .eq("user_id", userId),
-        SB_WRITE_TIMEOUT,
-        "game_sessions.delete"
-      );
-    } catch (e) {
-      console.warn("[gameSession] Supabase 삭제 실패:", e?.message);
-    }
+    // 백그라운드로 던지기 — 실패/타임아웃이 나도 호출자 영향 없음
+    (async () => {
+      try {
+        await withTimeout(
+          supabase
+            .from("game_sessions")
+            .delete()
+            .eq("user_id", userId),
+          SB_WRITE_TIMEOUT,
+          "game_sessions.delete"
+        );
+      } catch (e) {
+        console.warn("[gameSession] Supabase 삭제 실패 (무시):", e?.message);
+      }
+    })();
   }
 }
 

@@ -10710,6 +10710,68 @@ RULES:
             <div style={{ padding: "20px 18px", borderRadius: 12, background: "#111118", border: "1px solid #27272a" }}>
               <div style={{ fontSize: 13, lineHeight: 2, color: "#d4d4d8", whiteSpace: "pre-wrap" }}>{displayText}</div>
             </div>
+
+            {/* 🆕 카카오톡 공유 버튼 */}
+            <button
+              onClick={async () => {
+                const kakaoKey = process.env.NEXT_PUBLIC_KAKAO_JS_KEY;
+                if (!kakaoKey) {
+                  alert("⚠️ 카카오톡 공유 기능이 아직 설정되지 않았습니다.");
+                  return;
+                }
+                try {
+                  // Kakao SDK 동적 로드 (1회만)
+                  if (!window.Kakao) {
+                    await new Promise((resolve, reject) => {
+                      const script = document.createElement("script");
+                      script.src = "https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js";
+                      script.integrity = "sha384-TiCUE00h649CAMonG018J2ujOgDKW/kVWlChEuu4jK2vxfAAD0eZxzCKakxg55G4";
+                      script.crossOrigin = "anonymous";
+                      script.onload = resolve;
+                      script.onerror = () => reject(new Error("Kakao SDK 로드 실패"));
+                      document.head.appendChild(script);
+                    });
+                  }
+                  if (!window.Kakao.isInitialized()) window.Kakao.init(kakaoKey);
+
+                  const tierLabel = currentTier.label.replace(/\s*\(\$\d+\)/, "");
+                  const tierIcon = tier === 0 ? "💬" : tier === 1 ? "📝" : "💎";
+                  const job = gameSnapshot?.job || "캐쉬플로우";
+                  const snippet = displayText.length > 200 ? displayText.substring(0, 200) + "..." : displayText;
+                  const PROD_DOMAIN = "https://cashflow-coach.vercel.app";
+
+                  console.log("[DebriefSection 카카오 공유] 전송 URL:", PROD_DOMAIN);
+
+                  window.Kakao.Share.sendDefault({
+                    objectType: "feed",
+                    content: {
+                      title: `${tierIcon} ${tierLabel} - ${job}`,
+                      description: `📅 ${new Date().toLocaleDateString("ko-KR")} · ${version} · ${turns}턴\n\n${snippet}`,
+                      imageUrl: `${PROD_DOMAIN}/og-image.png`,
+                      link: { mobileWebUrl: PROD_DOMAIN, webUrl: PROD_DOMAIN },
+                    },
+                    buttons: [{
+                      title: "캐쉬플로우 코치 열기",
+                      link: { mobileWebUrl: PROD_DOMAIN, webUrl: PROD_DOMAIN },
+                    }],
+                  });
+                } catch (e) {
+                  console.error("[DebriefSection] 카카오 공유 실패:", e);
+                  alert("❌ 카카오톡 공유 실패: " + (e.message || "알 수 없는 오류"));
+                }
+              }}
+              style={{
+                width: "100%", marginTop: 10, padding: "10px 14px", borderRadius: 8,
+                border: "1px solid #fcd34d50", background: "#fde68a15",
+                color: "#fde68a",
+                fontSize: 12, fontWeight: 700, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              }}
+            >
+              <span style={{ fontSize: 14 }}>💬</span>
+              <span>카카오톡으로 보내기</span>
+            </button>
+
             {tier < 2 && (
               <div style={{ marginTop: 12, padding: "12px 16px", borderRadius: 10, textAlign: "center", background: TIERS[tier + 1].color + "10", border: `1px solid ${TIERS[tier + 1].color}30` }}>
                 <p style={{ fontSize: 11, color: "#a1a1aa", margin: "0 0 6px" }}>더 깊은 분석이 필요하시다면</p>
