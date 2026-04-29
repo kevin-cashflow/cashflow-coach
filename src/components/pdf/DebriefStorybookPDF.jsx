@@ -165,7 +165,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: C.text,
     lineHeight: 1.7,
-    fontStyle: 'italic',
   },
   noteSource: {
     fontSize: 8.5,
@@ -365,7 +364,7 @@ const CoverPage = ({ playerName, job, turnCount, date, level, reportNo }) => (
 
     <Text style={{ fontSize: 12, color: C.text, lineHeight: 1.7, marginBottom: 32 }}>
       개인 재무 의사결정 패턴 분석 및{'\n'}
-      6단계 자산 위계(Six Levels of Wealth) 진단
+      6단계의 부의 단계 진단
     </Text>
 
     {/* 공식 파트너십 표기 (Robert Kiyosaki + Cashflow Clubs Korea) */}
@@ -470,11 +469,11 @@ const ExecutiveLetterPage = ({ playerName, pageNum, total }) => (
     <Text style={styles.body}>
       본 리포트는 캐쉬플로우 시뮬레이션을 통해 도출된 귀하의 재무 의사결정 패턴 분석 결과입니다.
       40개년에 걸친 가상의 자산 운용 시나리오에서 내린 결정들을 정량적·정성적으로 분석하여,
-      현재의 재무 위계와 향후 개선 방향을 제시하였습니다.
+      현재의 부의 단계와 향후 개선 방향을 제시하였습니다.
     </Text>
 
     <Text style={styles.body}>
-      리포트는 핵심 지표 요약, 6단계 자산 위계 진단, 5개 인생 단계별 의사결정 분석,
+      리포트는 핵심 지표 요약, 6단계의 부의 단계 진단, 5개 인생 단계별 의사결정 분석,
       대안 시나리오 비교, 그리고 실행 권고로 구성됩니다. 각 섹션의 데이터는 실제 게임 로그를
       기반으로 산출되었으며, 시뮬레이션의 한계 내에서 해석되어야 합니다.
     </Text>
@@ -516,7 +515,6 @@ const ExecutiveLetterPage = ({ playerName, pageNum, total }) => (
             fontSize: 10.5,
             color: C.text,
             lineHeight: 1.7,
-            fontStyle: 'italic',
             marginBottom: 8,
           }}
         >
@@ -615,7 +613,7 @@ const ExecutiveSummaryPage = ({ playerName, metrics, level, pageNum, total }) =>
 };
 
 // ─────────────────────────────────────────────────────────────
-// 4. Six Levels of Wealth
+// 4. 6단계의 부의 단계 (Six Levels of Wealth)
 // ─────────────────────────────────────────────────────────────
 const SixLevelsPage = ({ playerName, level, metrics, pageNum, total }) => {
   const coverage = metrics.expense > 0 ? metrics.passiveIncome / metrics.expense : 0;
@@ -631,15 +629,15 @@ const SixLevelsPage = ({ playerName, level, metrics, pageNum, total }) => {
   const currentLabelY = labelY[level.idx];
 
   return (
-    <PageFrame label="ASSET HIERARCHY" pageNumber={pageNum} totalPages={total} playerName={playerName}>
+    <PageFrame label="LEVELS OF WEALTH" pageNumber={pageNum} totalPages={total} playerName={playerName}>
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionNumber}>SECTION 02</Text>
-        <Text style={styles.sectionTitle}>자산 위계 진단</Text>
+        <Text style={styles.sectionTitle}>6단계의 부의 단계 진단</Text>
       </View>
 
       <Text style={[styles.body, { fontSize: 10.5 }]}>
         패시브 인컴 대비 월 지출 비율(P/E Ratio: Passive Income to Expense)을 기준으로
-        6단계 자산 위계를 산출하였다. 각 단계의 정의와 진단 임계값은 다음과 같다.
+        6단계의 부의 단계를 산출하였다. 각 단계의 정의와 진단 임계값은 다음과 같다.
       </Text>
 
       <View style={{ flexDirection: 'row', gap: 24, marginTop: 16, marginBottom: 16 }}>
@@ -781,7 +779,7 @@ const SixLevelsPage = ({ playerName, level, metrics, pageNum, total }) => {
             );
           })}
 
-          <Text style={{ fontSize: 8, color: C.textMuted, marginTop: 10, fontStyle: 'italic' }}>
+          <Text style={{ fontSize: 8, color: C.textMuted, marginTop: 10 }}>
             * P/E 비율: Passive Income / Monthly Expense
           </Text>
         </View>
@@ -876,7 +874,143 @@ const ChapterPage = ({ phase, playerName, sectionNum, pageNum, total }) => (
 );
 
 // ─────────────────────────────────────────────────────────────
-// 6. Crossroads — 시나리오 비교 분석
+// 6. PersonaPage — 8 페르소나 진단 (Section 06)
+// ─────────────────────────────────────────────────────────────
+// Kevin Jung 강사님의 12년·5,000+ 세션 코칭 경험을 기반으로 설계된 페르소나
+// 진단 결과를 시각적으로 표현. 진단 + 의미 + 다음 시도 3원 구조.
+const PersonaPage = ({ playerName, persona, sectionNum, pageNum, total }) => {
+  if (!persona || !persona.personaInfo) {
+    // 페르소나 데이터가 없을 때 fallback 페이지
+    return (
+      <Page size="A4" style={styles.page}>
+        <PageFrame label="FINANCIAL PERSONA" pageNumber={pageNum} totalPages={total} playerName={playerName}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionNumber}>SECTION 0{sectionNum}</Text>
+            <Text style={styles.sectionTitle}>당신의 재무 페르소나</Text>
+          </View>
+          <Text style={styles.body}>
+            페르소나 진단을 위한 데이터가 충분하지 않습니다. 게임을 끝까지 완료한 후 다시 디브리핑을 진행하시면 정확한 진단을 받으실 수 있어요.
+          </Text>
+        </PageFrame>
+      </Page>
+    );
+  }
+
+  const { personaInfo, evidence = [], diagnosis, meaning, nextStep, metrics } = persona;
+  const { name, nameEn, classification, icon, color } = personaInfo;
+
+  // 마크다운 ** 강조를 분리해 React 노드로 변환
+  const renderRichText = (text, baseStyle) => {
+    if (!text) return null;
+    const parts = text.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <Text key={i} style={[baseStyle, { fontWeight: 700, color: C.text }]}>{part.slice(2, -2)}</Text>;
+      }
+      return <Text key={i} style={baseStyle}>{part}</Text>;
+    });
+  };
+
+  return (
+    <Page size="A4" style={styles.page}>
+      <PageFrame label="FINANCIAL PERSONA" pageNumber={pageNum} totalPages={total} playerName={playerName}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionNumber}>SECTION 0{sectionNum}</Text>
+          <Text style={styles.sectionTitle}>당신의 재무 페르소나</Text>
+        </View>
+
+        {/* 페르소나 카드 (아이콘 + 이름 + 분류) */}
+        <View style={{
+          marginTop: 16,
+          marginBottom: 20,
+          padding: 20,
+          borderRadius: 8,
+          borderLeft: `4px solid ${color}`,
+          backgroundColor: '#f8fafc',
+        }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+            <Text style={{ fontSize: 36 }}>{icon}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 9, color: C.textMuted, letterSpacing: 2, marginBottom: 2 }}>
+                {nameEn.toUpperCase()}
+              </Text>
+              <Text style={{ fontSize: 18, fontWeight: 700, color: C.text, marginBottom: 4 }}>
+                {name}
+              </Text>
+              <Text style={{ fontSize: 10, color: color, fontWeight: 600, letterSpacing: 1 }}>
+                {classification}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* 진단 근거 박스 */}
+        {evidence.length > 0 && (
+          <View style={{
+            marginBottom: 16,
+            padding: 12,
+            borderRadius: 6,
+            backgroundColor: '#f1f5f9',
+            borderLeft: `3px solid ${C.textMuted}`,
+          }}>
+            <Text style={{ fontSize: 9, color: C.textMuted, letterSpacing: 1.5, marginBottom: 8, fontWeight: 700 }}>
+              DIAGNOSIS EVIDENCE · 진단 근거
+            </Text>
+            {evidence.slice(0, 8).map((e, i) => (
+              <Text key={i} style={{ fontSize: 9.5, color: C.text, lineHeight: 1.6, marginBottom: 2 }}>
+                · {e}
+              </Text>
+            ))}
+          </View>
+        )}
+
+        {/* 📊 진단 */}
+        {diagnosis && (
+          <View style={{ marginBottom: 14 }}>
+            <Text style={{ fontSize: 10, fontWeight: 700, color: color, letterSpacing: 1, marginBottom: 6 }}>
+              📊 진단
+            </Text>
+            <Text style={{ fontSize: 10, color: C.text, lineHeight: 1.7 }}>
+              {renderRichText(diagnosis, { fontSize: 10, color: C.text, lineHeight: 1.7 })}
+            </Text>
+          </View>
+        )}
+
+        {/* 💡 의미 */}
+        {meaning && (
+          <View style={{ marginBottom: 14 }}>
+            <Text style={{ fontSize: 10, fontWeight: 700, color: color, letterSpacing: 1, marginBottom: 6 }}>
+              💡 이 페르소나의 의미
+            </Text>
+            <Text style={{ fontSize: 10, color: C.text, lineHeight: 1.7 }}>
+              {renderRichText(meaning, { fontSize: 10, color: C.text, lineHeight: 1.7 })}
+            </Text>
+          </View>
+        )}
+
+        {/* 🌱 다음 시도 */}
+        {nextStep && (
+          <View style={{ marginBottom: 8 }}>
+            <Text style={{ fontSize: 10, fontWeight: 700, color: color, letterSpacing: 1, marginBottom: 6 }}>
+              🌱 다음 게임에서 시도해볼 것
+            </Text>
+            <Text style={{ fontSize: 10, color: C.text, lineHeight: 1.7 }}>
+              {renderRichText(nextStep, { fontSize: 10, color: C.text, lineHeight: 1.7 })}
+            </Text>
+          </View>
+        )}
+
+        {/* Footer note */}
+        <Text style={{ fontSize: 8, color: C.textMuted, marginTop: 16 }}>
+          * 페르소나 진단은 12년·5,000+ 세션 데이터 기반 알고리즘이며, 절대적 평가가 아닌 현재 위치 진단입니다. 캐쉬플로우 게임은 반복적으로 하면서 감각을 익히는 과정이며, 어떤 결정이든 스스로 내릴 수 있는 능력이 가장 중요합니다.
+        </Text>
+      </PageFrame>
+    </Page>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// 7. Crossroads — 시나리오 비교 분석
 // ─────────────────────────────────────────────────────────────
 const CrossroadsPage = ({ playerName, comparison, sectionNum, pageNum, total }) => {
   const { best = [], actual = [], worst = [] } = comparison;
@@ -1000,7 +1134,7 @@ const PrinciplesPage = ({ playerName, sectionNum, pageNum, total }) => {
       </View>
 
       <Text style={styles.body}>
-        본 코칭 프로그램에서 권장하는 세 가지 핵심 원칙은 모든 자산 위계에서 공통으로 적용된다.
+        본 코칭 프로그램에서 권장하는 세 가지 핵심 원칙은 모든 부의 단계에서 공통으로 적용된다.
         시뮬레이션 결과의 해석과 향후 실제 자산 운용 의사결정 시 참조 기준으로 활용할 수 있다.
       </Text>
 
@@ -1122,7 +1256,7 @@ const RecommendationsPage = ({ playerName, qrCoaching, qrNextGame, sectionNum, p
     {
       num: '02',
       title: '실제 재무 현황 점검표 작성',
-      body: '실제 패시브 인컴 / 월 지출 비율을 산출하고 6단계 자산 위계상 위치를 확인한다.',
+      body: '실제 패시브 인컴 / 월 지출 비율을 산출하고 6단계의 부의 단계상 위치를 확인한다.',
     },
     {
       num: '03',
@@ -1256,13 +1390,14 @@ export const StorybookDocument = ({ data, qrCoaching, qrNextGame }) => {
     metrics = { totalAsset: 0, monthlyCF: 0, passiveIncome: 0, expense: 3000, escaped: false },
     phases = [],
     comparison = { best: [], actual: [], worst: [] },
+    persona = null,  // 8 페르소나 진단 결과 (personaDiagnosis.js의 generatePersonaInsight() 출력)
   } = data;
 
   const level = diagnoseLevel(metrics.passiveIncome, metrics.expense, metrics.totalAsset);
   const reportNo = `RPT-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 9000 + 1000)}`;
 
-  // 표지 + 서두 + 요약 + 6Levels + 챕터 N개 + 시나리오 + 원칙 + 워크북 + 권고
-  const totalPages = 1 + 1 + 1 + 1 + phases.length + 1 + 1 + 1 + 1;
+  // 표지 + 서두 + 요약 + 6Levels + 챕터 N개 + 페르소나 + 시나리오 + 원칙 + 워크북 + 권고
+  const totalPages = 1 + 1 + 1 + 1 + phases.length + 1 + 1 + 1 + 1 + 1;
 
   let pn = 1;
   let sn = 1;
@@ -1295,6 +1430,8 @@ export const StorybookDocument = ({ data, qrCoaching, qrNextGame }) => {
           />
         );
       })}
+      {(() => { sn++; return null; })()}
+      <PersonaPage playerName={playerName} persona={persona} sectionNum={sn} pageNum={++pn} total={totalPages} />
       {(() => { sn++; return null; })()}
       <CrossroadsPage playerName={playerName} comparison={comparison} sectionNum={sn} pageNum={++pn} total={totalPages} />
       {(() => { sn++; return null; })()}

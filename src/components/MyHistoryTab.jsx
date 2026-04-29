@@ -2,12 +2,16 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { generateFreeFeedback, generatePaidFeedback, buildPromptText, computeBestWorstPaths, runFullAnalysis, AnalysisReport, diagnoseFinancialLevel } from "./CashflowCoachingSim";
+import { adaptGameToStorybook } from "./pdf/debriefDataAdapter";
+import { downloadStorybookPDF } from "./pdf/DebriefStorybookPDF";
 import {
   saveEternalDebrief,
   getAllEternalDebriefs,
   deleteGameEternalDebriefs,
   countEternalDebriefs,
 } from "./eternalStorage";
+// 🆕 진행 중 자동 저장 게임 조회 (CashflowCoachingSim과 동일한 모듈)
+import { loadGameSession } from "@/lib/gameSession";
 
 /**
  * 📊 내 이력 탭 (Phase B Day 4 — 게임 단위 통합)
@@ -36,6 +40,8 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
   const [localOnlyGames, setLocalOnlyGames] = useState([]);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
+  // 🆕 진행 중 자동 저장 게임 (영구 저장 안 된 게임)
+  const [inProgressGame, setInProgressGame] = useState(null);
 
   // 언마운트 체크용 ref (React state 업데이트 경고 방지)
   const isMountedRef = useRef(true);
@@ -496,6 +502,37 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
         }
       } catch (e) {
         console.warn("[MyHistoryTab] localOnly 감지 실패:", e);
+      }
+
+      // 🆕 진행 중 자동 저장 게임 조회 (gameSession 모듈 — CashflowCoachingSim과 동일한 저장소)
+      // 사용자가 "💾 게임 저장"을 누르지 않은 게임도 여기서 보임
+      try {
+        if (myUserId) {
+          const session = await Promise.race([
+            loadGameSession(myUserId),
+            new Promise((_, rej) => setTimeout(() => rej(new Error("session timeout")), 5000)),
+          ]).catch(() => null);
+
+          const state = session?.game_state;
+          const turnLogLen = Array.isArray(state?.turnLog) ? state.turnLog.length : 0;
+          if (state && turnLogLen > 0) {
+            console.log(`[MyHistoryTab] 🎮 진행 중 게임 발견: ${turnLogLen}턴 (job=${state.job || "-"})`);
+            setInProgressGame({
+              turnCount: turnLogLen,
+              job: state.job || "-",
+              version: state.version || "캐쉬플로우",
+              cash: state.cash,
+              totalCF: state.totalCF,
+              updatedAt: session.updated_at || session.savedAt || null,
+              raw: state,
+            });
+          } else {
+            setInProgressGame(null);
+          }
+        }
+      } catch (e) {
+        console.warn("[MyHistoryTab] 진행 중 게임 조회 실패:", e);
+        setInProgressGame(null);
       }
     } catch (e) {
       console.error("[MyHistoryTab] 게임 이력 조회 실패:", e);
@@ -1068,6 +1105,18 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
           version: currentGame.version,
           turns: currentGame.turnCount || 0,
           simText,
+          // 🆕 프리미엄(numericTier=2)일 때 페르소나 진단을 위한 게임 데이터 전달
+          turnLog: currentGame.turnLog || null,
+          gameSnapshot: {
+            job: currentGame.job,
+            assets: currentGame.assets || [],
+            cash: currentGame.cash,
+            totalCF: currentGame.totalCF,
+            bankLoan: currentGame.bankLoan,
+            babies: currentGame.babies,
+            gameEnded: currentGame.gameEnded || currentGame.escaped,
+            playerName: currentGame.playerName || "플레이어",
+          },
         });
 
         // 🆕 유료 전용: 6 Levels of Wealth 자동 진단 추가
@@ -1166,6 +1215,23 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
     } catch (e) {
       alert("삭제 실패: " + (e.message || ""));
     }
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  // 📖 스토리북 PDF 다운로드 핸들러
+  // ─────────────────────────────────────────────────────────────
+  // ⚠️ 2026-04 임시 비활성화: react-pdf 메인 스레드 블로킹 이슈로
+  //                        "응답 없음" 발생 → 추후 재작업 예정.
+  //                        버튼은 표시하되 클릭 시 안내 alert만 띄움.
+  const [pdfLoading, setPdfLoading] = useState(null); // 다운로드 중인 game.key 저장 (호환성 유지)
+
+  const handleDownloadStorybookPDF = async (game) => {
+    alert(
+      "📖 스토리북 PDF 다운로드 기능은 현재 점검 중입니다.\n\n" +
+      "PDF 생성 속도 개선 작업이 진행 중이며, 곧 다시 사용 가능해질 예정입니다.\n\n" +
+      "디브리핑 결과는 화면(요약/상세/프리미엄)에서 확인해주세요."
+    );
+    console.log("[MyHistoryTab] PDF 다운로드 임시 비활성화 — 사용자 안내 표시");
   };
 
   // 티어 정의 (유료/무료 피드백)
@@ -1335,7 +1401,65 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
         </div>
       )}
 
-      {!loading && !error && games.length === 0 && (
+      {/* 🆕 진행 중 자동 저장 게임 안내 배너 (영구 저장 안 된 게임) */}
+      {!loading && !error && inProgressGame && (
+        <div style={{
+          padding: "14px 16px", borderRadius: 10, marginBottom: 12,
+          background: "linear-gradient(90deg, #f59e0b15, #3b82f615)",
+          border: "1px solid #f59e0b66",
+        }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+            <div style={{ fontSize: 22, lineHeight: 1 }}>🎮</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#fef3c7", marginBottom: 4 }}>
+                저장 안 된 진행 중 게임이 있어요
+              </div>
+              <div style={{ fontSize: 11, color: "#fbbf24", lineHeight: 1.6, marginBottom: 8 }}>
+                <strong style={{ color: "#fde68a" }}>{inProgressGame.job}</strong>
+                {" · "}
+                <strong style={{ color: "#fde68a" }}>{inProgressGame.turnCount}턴</strong>
+                {" 진행 중"}
+                {inProgressGame.updatedAt && (
+                  <span style={{ color: "#a16207", marginLeft: 6 }}>
+                    (마지막 활동: {new Date(inProgressGame.updatedAt).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" })})
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 10, color: "#a16207", lineHeight: 1.6, marginBottom: 10 }}>
+                ⚠️ 이 게임은 자동 저장만 되어 있어요. 디브리핑/페르소나 진단/PDF를 받으려면{" "}
+                <strong style={{ color: "#fbbf24" }}>플레이 탭 → "💾 게임 저장" 버튼</strong>을 누르셔야 합니다.
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button
+                  onClick={() => {
+                    // 플레이 탭으로 이동 (앱마다 다르지만 일반적으로 부모 컴포넌트가 처리)
+                    // 간단히 안내만: window.dispatchEvent로 커스텀 이벤트 발행
+                    if (typeof window !== "undefined") {
+                      window.dispatchEvent(new CustomEvent("cf:navigate", { detail: { tab: "play" } }));
+                    }
+                    alert("플레이 탭으로 이동해서 게임을 이어한 뒤 '💾 게임 저장' 버튼을 눌러주세요.");
+                  }}
+                  style={{
+                    padding: "6px 12px", borderRadius: 6, border: "none",
+                    background: "linear-gradient(135deg, #3b82f6, #8b5cf6)",
+                    color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer",
+                  }}
+                >🎲 플레이 탭에서 이어하기</button>
+                <button
+                  onClick={() => loadGames?.()}
+                  style={{
+                    padding: "6px 12px", borderRadius: 6, border: "1px solid #3f3f46",
+                    background: "transparent", color: "#a1a1aa",
+                    fontSize: 11, fontWeight: 600, cursor: "pointer",
+                  }}
+                >🔄 새로고침</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!loading && !error && games.length === 0 && !inProgressGame && (
         <div style={{
           padding: 40, borderRadius: 12, background: "#111118",
           border: "1px solid #27272a", textAlign: "center",
@@ -1359,6 +1483,21 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
           >🔄 목록 새로고침</button>
           <div style={{ fontSize: 9, color: "#52525b", marginTop: 8 }}>
             방금 저장한 게임이 안 보이면 새로고침을 눌러주세요
+          </div>
+        </div>
+      )}
+
+      {/* 🆕 진행 중 게임은 있는데 저장된 게임은 0개일 때 (현재 사용자 케이스) */}
+      {!loading && !error && games.length === 0 && inProgressGame && (
+        <div style={{
+          padding: 24, borderRadius: 12, background: "#111118",
+          border: "1px dashed #3f3f46", textAlign: "center",
+        }}>
+          <div style={{ fontSize: 24, marginBottom: 8 }}>💾</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "#a1a1aa", lineHeight: 1.6 }}>
+            저장 완료된 게임은 아직 없어요.<br/>
+            위에 있는 진행 중 게임을 이어한 뒤{" "}
+            <strong style={{ color: "#fbbf24" }}>"💾 게임 저장"</strong> 버튼을 눌러보세요.
           </div>
         </div>
       )}
@@ -1733,6 +1872,42 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
                     );
                   })}
                 </div>
+
+                {/* 🚧 스토리북 PDF 다운로드 버튼 (점검 중 — 2026-04)
+                    react-pdf 메인 스레드 블로킹 이슈로 임시 비활성화 상태.
+                    클릭 시 안내 alert만 표시. 추후 재작업 예정. */}
+                {(() => {
+                  const turnLogLen = (g.turnLog || []).length;
+                  const hasResults = (g.gameResults || []).length > 0;
+                  const canDownload = turnLogLen > 0 || hasResults;
+
+                  return (
+                    <button
+                      onClick={() => handleDownloadStorybookPDF(g)}
+                      disabled={!canDownload}
+                      title={!canDownload
+                        ? "이 게임은 턴 기록이 없어 PDF를 생성할 수 없습니다"
+                        : "🚧 PDF 다운로드 기능은 현재 점검 중입니다 (속도 개선 작업)"}
+                      style={{
+                        width: "100%", padding: "10px 12px", borderRadius: 8, marginTop: 8,
+                        border: `1px dashed ${canDownload ? "#a16207" : "#27272a"}`,
+                        background: canDownload ? "#fbbf2410" : "transparent",
+                        color: canDownload ? "#a16207" : "#52525b",
+                        cursor: !canDownload ? "not-allowed" : "pointer",
+                        opacity: !canDownload ? 0.5 : 1,
+                        fontSize: 11, fontWeight: 700,
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                        transition: "all 0.2s",
+                      }}
+                    >
+                      <span style={{ fontSize: 14 }}>🚧</span>
+                      <span>스토리북 PDF (점검 중)</span>
+                      <span style={{ fontSize: 9, color: canDownload ? "#a1620780" : "#52525b", fontWeight: 600, marginLeft: 4 }}>
+                        {!canDownload ? "· 턴 기록 없음" : "· 추후 제공"}
+                      </span>
+                    </button>
+                  );
+                })()}
               </div>
             );
           })}
