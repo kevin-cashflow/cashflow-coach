@@ -6688,11 +6688,11 @@ function buildCompactSummary(analysis) {
   return `[분석요약]${ph}\n[교훈]${ls}\n[질문]${analysis.finalQuestion}`;
 }
 
-export const computeBestWorstPaths = (turnLogData, totalTurns) => {
+export const computeBestWorstPaths = (turnLogData, totalTurns, startAge = 20) => {
   if (!turnLogData || turnLogData.length === 0) {
     return {
-      bestPath: [{ turn: 1, age: 20, cf: 0, asset: 0, note: "기록 없음" }],
-      worstPath: [{ turn: 1, age: 20, cf: 0, asset: 0, note: "기록 없음" }],
+      bestPath: [{ turn: 1, age: startAge, cf: 0, asset: 0, note: "기록 없음" }],
+      worstPath: [{ turn: 1, age: startAge, cf: 0, asset: 0, note: "기록 없음" }],
     };
   }
 
@@ -6715,7 +6715,7 @@ export const computeBestWorstPaths = (turnLogData, totalTurns) => {
   });
 
   const yearsPerTurn = Math.round(40 / Math.max(totalTurns, 1) * 10) / 10;
-  const ageAtTurn = (t) => Math.round(20 + (t - 0.5) * yearsPerTurn);
+  const ageAtTurn = (t) => Math.round(startAge + (t - 0.5) * yearsPerTurn);
 
   // 게임 구간 정의 (초반 1/3 / 중반 1/3 / 후반 1/3)
   const earlyThreshold = Math.max(Math.floor(totalTurns / 3), 3);
@@ -7241,7 +7241,7 @@ export const computeBestWorstPaths = (turnLogData, totalTurns) => {
 // 사용처:
 // - DebriefSection.runAnalysis() 내부 (기존)
 // - MyHistoryTab.handleDebrief() 외부 (신규)
-export async function runFullAnalysis({ simText, version, turns, results }) {
+export async function runFullAnalysis({ simText, version, turns, results, startAge = 20 }) {
   if (!simText || !version || !turns || !results) {
     throw new Error("runFullAnalysis: 필수 인자 누락");
   }
@@ -7591,7 +7591,8 @@ WRITING STYLE:
           messages: [{
             role: "user",
             content: `Analyze this CashFlow ${version} game (${turns} turns). 
-CRITICAL: Map ALL ${turns} turns proportionally to a 40-year life (age 20~60). 1 turn = ${Math.round(40/turns*10)/10} years.
+CRITICAL: Map ALL ${turns} turns proportionally to a 40-year life (age ${startAge}~${startAge + 40}). 1 turn = ${Math.round(40/turns*10)/10} years.
+⚠️ The user's ACTUAL starting age is ${startAge}. ALL "age" fields in the JSON output MUST start from ${startAge}, not 20. Adjust ALL age ranges accordingly (e.g., if startAge=30, "출발" phase becomes "30~40세" not "20~30세"; lessons referencing age MUST use ${startAge} as start).
 ${turns <= 10 ? `This is a SHORT game (${turns} turns). Even with few turns, map the full 40-year life journey. Fewer actions = more untapped potential. The coaching insight is: "What could you have done differently? What opportunities did you miss? The real game — and real life — rewards those who ACT, explore diverse strategies, and broaden their perspective."` : ""}
 
 SIMULATION DATA:
@@ -7693,7 +7694,7 @@ RULES:
           const parsed = JSON.parse(jsonStr);
           if (parsed.phases && parsed.lessons) {
             // 🎯 Best/Worst 경로를 코드 계산값으로 덮어쓰기 (외부 export 함수 사용)
-            const computed = computeBestWorstPaths(results, turns);
+            const computed = computeBestWorstPaths(results, turns, startAge);
             parsed.bestPath = computed.bestPath;
             parsed.worstPath = computed.worstPath;
             console.log("[runFullAnalysis] Best/Worst 경로 재계산 완료");
@@ -7764,6 +7765,21 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
       console.log(`[InlineDebrief] 📋 총평 runFullAnalysis 호출 시작 (gameKey=${gameKey})`);
       const fullAnalysis = await runFullAnalysis({ simText, version, turns, results });
       console.log("[InlineDebrief] ✅ 총평 생성 성공 — phases:", fullAnalysis?.phases?.length, "lessons:", fullAnalysis?.lessons?.length);
+
+      // 🆕 6 Levels 진단을 게임 데이터로 계산 (정확한 수치 기반)
+      const fin = computeFinancialSnapshot(gameSnapshot || {});
+      fullAnalysis.financialLevel = {
+        ...diagnoseFinancialLevel({
+          passiveIncome: fin.passiveIncome,
+          totalExpense: fin.totalExpense,
+          cash: fin.cash,
+          assets: fin.assets,
+          bankLoan: fin.bankLoan,
+          jobName: gameSnapshot?.job || "",
+        }),
+        snapshot: fin,
+      };
+      console.log("[InlineDebrief] 6 Levels 진단:", fullAnalysis.financialLevel.level, fullAnalysis.financialLevel.levelName);
 
       setAnalysis(fullAnalysis);
 
@@ -8201,7 +8217,7 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
 // 🎨 AnalysisReport: 디브리핑 풀 분석 렌더링 (export, 재사용 가능)
 // ═══════════════════════════════════════════════════
 // 사용처: DebriefSection 내부 + MyHistoryTab의 모달
-export function AnalysisReport({ analysis, turns }) {
+export function AnalysisReport({ analysis, turns, startAge = 20 }) {
 const [bestWorstTab, setBestWorstTab] = useState("cf");
 const phaseColors = ["#10b981","#3b82f6","#8b5cf6","#f59e0b","#ef4444"];
 if (!analysis) return null;
@@ -8224,7 +8240,7 @@ if (!analysis) return null;
 
   // ageAtTurn 공식: 40년을 totalTurns로 나누기 (computeBestWorstPaths와 동일)
   const yearsPerTurn = Math.round(40 / Math.max(turns, 1) * 10) / 10;
-  const ageAtTurnUI = (t) => Math.round(20 + (t - 0.5) * yearsPerTurn);
+  const ageAtTurnUI = (t) => Math.round(startAge + (t - 0.5) * yearsPerTurn);
 
   // 각 턴에서 가장 최근(이전까지 누적된) 값 추출 헬퍼
   const getValueAtTurn = (path, turn) => {
@@ -8553,6 +8569,126 @@ if (!analysis) return null;
               )}
             </div>
 
+            {/* 🆕 이번 게임의 실제 재무 데이터 */}
+            {fl.snapshot && (
+              <div style={{
+                padding: "14px 16px", borderRadius: 10,
+                background: "#0a0a0f", border: `1px solid ${fl.color}25`,
+                marginBottom: 12,
+              }}>
+                <div style={{
+                  fontSize: 10, fontWeight: 800, color: fl.color,
+                  marginBottom: 12, letterSpacing: 1,
+                }}>📊 이번 게임 — 진단 근거 데이터</div>
+
+                {/* 4가지 핵심 지표 그리드 */}
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(2, 1fr)",
+                  gap: 8, marginBottom: 12,
+                }}>
+                  {/* 월급 (노동 수입) */}
+                  <div style={{
+                    padding: "10px 12px", borderRadius: 8,
+                    background: "#27272a40", border: "1px solid #3f3f46",
+                  }}>
+                    <div style={{ fontSize: 9, color: "#71717a", marginBottom: 4 }}>💼 월급 (노동 수입)</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#fafafa" }}>
+                      ${fmtNum(fl.snapshot.salary)}<span style={{ fontSize: 10, color: "#71717a", fontWeight: 600 }}>/월</span>
+                    </div>
+                  </div>
+
+                  {/* 패시브 인컴 (자산 수입) */}
+                  <div style={{
+                    padding: "10px 12px", borderRadius: 8,
+                    background: "#22c55e10", border: "1px solid #22c55e30",
+                  }}>
+                    <div style={{ fontSize: 9, color: "#86efac", marginBottom: 4 }}>📈 패시브 인컴</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#86efac" }}>
+                      ${fmtNum(fl.snapshot.passiveIncome)}<span style={{ fontSize: 10, color: "#71717a", fontWeight: 600 }}>/월</span>
+                    </div>
+                  </div>
+
+                  {/* 총 지출 */}
+                  <div style={{
+                    padding: "10px 12px", borderRadius: 8,
+                    background: "#ef444410", border: "1px solid #ef444430",
+                  }}>
+                    <div style={{ fontSize: 9, color: "#fca5a5", marginBottom: 4 }}>💸 총 지출</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#fca5a5" }}>
+                      ${fmtNum(fl.snapshot.totalExpense)}<span style={{ fontSize: 10, color: "#71717a", fontWeight: 600 }}>/월</span>
+                    </div>
+                  </div>
+
+                  {/* 월 현금흐름 (수입 - 지출) */}
+                  <div style={{
+                    padding: "10px 12px", borderRadius: 8,
+                    background: fl.snapshot.monthlyCashflow >= 0 ? "#3b82f610" : "#f59e0b10",
+                    border: `1px solid ${fl.snapshot.monthlyCashflow >= 0 ? "#3b82f630" : "#f59e0b30"}`,
+                  }}>
+                    <div style={{ fontSize: 9, color: fl.snapshot.monthlyCashflow >= 0 ? "#93c5fd" : "#fde68a", marginBottom: 4 }}>
+                      💵 월 현금흐름
+                    </div>
+                    <div style={{
+                      fontSize: 16, fontWeight: 800,
+                      color: fl.snapshot.monthlyCashflow >= 0 ? "#93c5fd" : "#fde68a",
+                    }}>
+                      {fl.snapshot.monthlyCashflow >= 0 ? "+" : "-"}${fmtNum(Math.abs(fl.snapshot.monthlyCashflow))}<span style={{ fontSize: 10, color: "#71717a", fontWeight: 600 }}>/월</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 보조 지표 - 현금/자산 */}
+                <div style={{
+                  display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
+                  gap: 6, paddingTop: 10,
+                  borderTop: `1px solid ${fl.color}20`,
+                }}>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 9, color: "#71717a", marginBottom: 2 }}>💰 보유 현금</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#fde68a" }}>
+                      ${fmtNum(fl.snapshot.cash)}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 9, color: "#71717a", marginBottom: 2 }}>🛡️ 비상금</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#fde68a" }}>
+                      {fl.snapshot.savingMonths.toFixed(1)}<span style={{ fontSize: 9, color: "#71717a", fontWeight: 600 }}>개월분</span>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 9, color: "#71717a", marginBottom: 2 }}>🏠 보유 자산</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#fde68a" }}>
+                      {fl.snapshot.assetCount}<span style={{ fontSize: 9, color: "#71717a", fontWeight: 600 }}>개 (CF +{fl.snapshot.cfAssetCount})</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* P/E Ratio (패시브/지출 비율) - 핵심 지표 */}
+                <div style={{
+                  marginTop: 12, padding: "10px 12px",
+                  borderRadius: 8,
+                  background: `${fl.color}10`,
+                  border: `1px dashed ${fl.color}40`,
+                  textAlign: "center",
+                }}>
+                  <div style={{ fontSize: 9, color: fl.color, fontWeight: 700, marginBottom: 4 }}>
+                    🎯 패시브 인컴 / 지출 비율 (쥐경주 탈출 = 1.0 이상)
+                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: fl.color }}>
+                    {fl.snapshot.totalExpense > 0
+                      ? (fl.snapshot.passiveIncome / fl.snapshot.totalExpense).toFixed(2)
+                      : "0.00"}
+                    <span style={{ fontSize: 10, color: "#71717a", fontWeight: 600, marginLeft: 6 }}>
+                      {fl.snapshot.totalExpense > 0 && fl.snapshot.passiveIncome >= fl.snapshot.totalExpense
+                        ? "✓ 탈출 조건 달성"
+                        : `목표 1.0까지 -$${fmtNum(Math.max(0, fl.snapshot.totalExpense - fl.snapshot.passiveIncome))}/월 부족`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* 지침 */}
             <div style={{ marginBottom: 12 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#fafafa", marginBottom: 8 }}>📋 이 단계에서 해야 할 행동</div>
@@ -8603,6 +8739,82 @@ if (!analysis) return null;
       </div>
     </>
   );
+}
+
+// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════
+// 🆕 computeFinancialSnapshot: gameSnapshot에서 6 Levels 진단용 데이터 추출
+// ═══════════════════════════════════════════════════
+//
+// gameSnapshot의 다양한 형태에서 안전하게 데이터 추출.
+// - 신버전: snapshot.totalCF, snapshot.totalExpense, snapshot.cash, snapshot.assets
+// - 구버전: passiveIncome, expense 같은 다른 필드명
+// - 누락 시: 안전한 기본값 (0)
+//
+// 반환: UI에 표시할 모든 핵심 재무 지표 + 진단 함수 입력
+export function computeFinancialSnapshot(gameSnapshot) {
+  const gs = gameSnapshot || {};
+
+  // 자산 배열 (다양한 위치에서 찾기)
+  const assets = gs.assets || gs.finalAssets || gs.snapshot?.assets || [];
+
+  // 패시브 인컴 (월별 자산 수입)
+  // 우선순위: gs.passiveIncome > gs.totalCF > 자산 합산
+  let passiveIncome = 0;
+  if (typeof gs.passiveIncome === "number") {
+    passiveIncome = gs.passiveIncome;
+  } else if (typeof gs.totalCF === "number") {
+    passiveIncome = gs.totalCF;
+  } else if (Array.isArray(assets) && assets.length > 0) {
+    passiveIncome = assets.reduce((sum, a) => sum + (a.cf || 0), 0);
+  }
+
+  // 총 지출
+  const totalExpense = gs.totalExpense || gs.expense || gs.snapshot?.totalExpense || 0;
+
+  // 보유 현금
+  const cash = gs.cash || gs.snapshot?.cash || 0;
+
+  // 은행 대출
+  const bankLoan = gs.bankLoan || gs.snapshot?.bankLoan || 0;
+
+  // 직업 (월급, 직업명)
+  const salary = gs.salary || gs.jobData?.salary || 0;
+  const jobName = gs.job || gs.jobData?.name || "";
+
+  // 자녀 수 (있으면)
+  const babies = gs.babies || 0;
+
+  // 월 현금흐름 (총소득 - 총지출)
+  // 총 소득 = 월급 + 패시브 인컴
+  const totalIncome = salary + passiveIncome;
+  const monthlyCashflow = totalIncome - totalExpense;
+
+  // 비상금 개월 수
+  const savingMonths = totalExpense > 0 ? cash / totalExpense : 0;
+
+  // 자산 카운트
+  const assetCount = Array.isArray(assets) ? assets.length : 0;
+  const cfAssetCount = Array.isArray(assets) ? assets.filter(a => (a.cf || 0) > 0).length : 0;
+
+  return {
+    // 진단 함수 입력용 (그대로 통과)
+    passiveIncome,
+    totalExpense,
+    cash,
+    assets,
+    bankLoan,
+    jobName,
+
+    // UI 표시용 (계산된 값들)
+    salary,
+    totalIncome,
+    monthlyCashflow,
+    savingMonths,
+    assetCount,
+    cfAssetCount,
+    babies,
+  };
 }
 
 // ═══════════════════════════════════════════════════
@@ -8932,7 +9144,7 @@ ${persona.nextStep || "(권장 행동 미확보)"}
 `;
 }
 
-export async function generatePaidFeedback({ tier, version, turns, simText, extraContext = "", gameSnapshot = null, turnLog = null }) {
+export async function generatePaidFeedback({ tier, version, turns, simText, extraContext = "", gameSnapshot = null, turnLog = null, startAge = 20 }) {
   const model = tier === 2 ? MODEL_OPUS : MODEL_SONNET;
   const detail = FEEDBACK_DETAIL[tier] || FEEDBACK_DETAIL[1];
   const maxTokens = FEEDBACK_MAX_TOKENS[tier] || 2500;
@@ -9017,10 +9229,11 @@ export async function generatePaidFeedback({ tier, version, turns, simText, extr
       signal: controller.signal,
       body: JSON.stringify({
         model, max_tokens: maxTokens,
-        system: SYSTEM_PROMPT,
+        // 🆕 startAge 동적 반영 - SYSTEM_PROMPT의 "20세시작"을 사용자 실제 나이로 교체
+        system: SYSTEM_PROMPT.replace("20세시작", `${startAge}세시작`),
         messages: [{
           role: "user",
-          content: `캐쉬플로우${version} ${turns}턴 디브리핑 총평.\n${simText}\n${extraContext}\n${personaContext}\n\n${PAID_COACHING_FRAMEWORK}\n\n${detail}`,
+          content: `캐쉬플로우${version} ${turns}턴 디브리핑 총평.\n⚠️ 사용자 실제 시작 나이: ${startAge}세 (모든 나이 매핑은 ${startAge}세부터 시작. 게임 끝 = ${startAge + 40}세).\n${simText}\n${extraContext}\n${personaContext}\n\n${PAID_COACHING_FRAMEWORK}\n\n${detail}`,
         }],
       }),
     });
@@ -10228,6 +10441,195 @@ const TIERS = [
   { label: "프리미엄 피드백", chars: "5,000자", price: "$20", color: "#f59e0b", sub: "전문 코칭 리포트 + 맞춤 전략", model: "Opus" },
 ];
 
+// ═══════════════════════════════════════════════════
+// 🆕 StartAgeModal: 디브리핑 시작 나이 입력 모달
+// ═══════════════════════════════════════════════════
+//
+// 사용자의 실제 나이를 입력받아 디브리핑 결과에 반영.
+// - 필수 입력: 안 넣으면 권유 메시지 → 건너뛰기로 20세 시작 가능
+// - localStorage에 저장: 다음 디브리핑부터 자동 반영
+// - 게임 자체에는 영향 없음, 디브리핑 표시만 변경
+function StartAgeModal({ initialAge = 20, onConfirm, onSkip, onCancel }) {
+  const [ageInput, setAgeInput] = useState(initialAge === 20 ? "" : String(initialAge));
+  const [error, setError] = useState("");
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    // 모달 열릴 때 자동 포커스
+    setTimeout(() => inputRef.current?.focus(), 100);
+  }, []);
+
+  const handleConfirm = () => {
+    const age = parseInt(ageInput);
+    if (!ageInput || isNaN(age)) {
+      setError("나이를 입력해주세요. (또는 건너뛰기로 20세부터 시작)");
+      return;
+    }
+    if (age < 10 || age > 80) {
+      setError("나이는 10세에서 80세 사이로 입력해주세요.");
+      return;
+    }
+    onConfirm(age);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") handleConfirm();
+    if (e.key === "Escape" && onCancel) onCancel();
+  };
+
+  return (
+    <div style={{
+      position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+      background: "rgba(0, 0, 0, 0.75)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 9999, padding: 16,
+      backdropFilter: "blur(4px)",
+    }}>
+      <div style={{
+        maxWidth: 460, width: "100%",
+        background: "linear-gradient(135deg, #18181b, #0a0a0f)",
+        borderRadius: 20,
+        border: "1px solid #f59e0b40",
+        boxShadow: "0 20px 60px rgba(245, 158, 11, 0.2)",
+        overflow: "hidden",
+      }}>
+        {/* 헤더 */}
+        <div style={{
+          padding: "20px 24px",
+          background: "linear-gradient(135deg, #f59e0b15, #ef444410)",
+          borderBottom: "1px solid #f59e0b30",
+          textAlign: "center",
+        }}>
+          <div style={{ fontSize: 36, marginBottom: 8 }}>🎂</div>
+          <h2 style={{
+            margin: 0, fontSize: 18, fontWeight: 800,
+            color: "#fde68a", letterSpacing: 0.3,
+          }}>
+            당신의 실제 나이를 알려주세요
+          </h2>
+        </div>
+
+        {/* 본문 */}
+        <div style={{ padding: "24px" }}>
+          <p style={{
+            margin: "0 0 16px",
+            fontSize: 13, lineHeight: 1.7, color: "#d4d4d8",
+            textAlign: "center",
+          }}>
+            디브리핑은 <strong style={{ color: "#fde68a" }}>당신의 실제 나이부터 시작하는 40년 인생 여정</strong>으로 분석됩니다.
+            <br />
+            <span style={{ fontSize: 11, color: "#a1a1aa" }}>
+              (게임 결과에는 영향 없이, 디브리핑 표시만 달라집니다)
+            </span>
+          </p>
+
+          {/* 입력 */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{
+              display: "block", fontSize: 11, fontWeight: 700,
+              color: "#fbbf24", marginBottom: 8, letterSpacing: 1,
+            }}>
+              현재 나이
+            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input
+                ref={inputRef}
+                type="number"
+                min="10"
+                max="80"
+                value={ageInput}
+                onChange={(e) => { setAgeInput(e.target.value); setError(""); }}
+                onKeyDown={handleKeyDown}
+                placeholder="예: 27"
+                style={{
+                  flex: 1,
+                  padding: "12px 14px",
+                  borderRadius: 10,
+                  border: error ? "1px solid #ef4444" : "1px solid #3f3f46",
+                  background: "#0a0a0f",
+                  color: "#fafafa",
+                  fontSize: 18, fontWeight: 700,
+                  textAlign: "center",
+                  outline: "none",
+                }}
+              />
+              <span style={{ fontSize: 14, color: "#a1a1aa", fontWeight: 600 }}>세</span>
+            </div>
+            {error && (
+              <div style={{
+                marginTop: 8, fontSize: 11, color: "#fca5a5",
+                padding: "6px 10px", borderRadius: 6,
+                background: "#ef444410", border: "1px solid #ef444430",
+              }}>
+                ⚠️ {error}
+              </div>
+            )}
+          </div>
+
+          {/* 안내 메시지 */}
+          <div style={{
+            padding: "10px 14px", borderRadius: 8,
+            background: "#3b82f608",
+            border: "1px solid #3b82f620",
+            fontSize: 11, color: "#93c5fd", lineHeight: 1.6,
+            marginBottom: 16,
+          }}>
+            💡 입력한 나이는 다음 디브리핑부터도 자동으로 적용됩니다.
+            언제든 변경 가능합니다.
+          </div>
+
+          {/* 버튼 그룹 */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {/* 메인: 확인 */}
+            <button
+              onClick={handleConfirm}
+              style={{
+                width: "100%", padding: "12px",
+                borderRadius: 10, border: "none", cursor: "pointer",
+                background: "linear-gradient(135deg, #f59e0b, #ef4444)",
+                color: "#fff", fontSize: 14, fontWeight: 800,
+                letterSpacing: 0.5,
+              }}
+            >
+              ✅ 확인하고 분석 시작
+            </button>
+
+            {/* 보조: 건너뛰기 (20세부터) */}
+            <button
+              onClick={onSkip}
+              style={{
+                width: "100%", padding: "10px",
+                borderRadius: 10, cursor: "pointer",
+                background: "transparent",
+                border: "1px solid #3f3f46",
+                color: "#71717a", fontSize: 12, fontWeight: 600,
+              }}
+            >
+              건너뛰기 (기본 20세부터 분석)
+            </button>
+
+            {/* 취소 */}
+            {onCancel && (
+              <button
+                onClick={onCancel}
+                style={{
+                  width: "100%", padding: "8px",
+                  borderRadius: 8, cursor: "pointer",
+                  background: "transparent",
+                  border: "none",
+                  color: "#52525b", fontSize: 11,
+                }}
+              >
+                취소
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DebriefSection({ results, version, turns, deck, gameSnapshot }) {
   const [mode, setMode] = useState(null);
   const [tier, setTier] = useState(null);
@@ -10240,6 +10642,25 @@ function DebriefSection({ results, version, turns, deck, gameSnapshot }) {
   const [bestWorstTab, setBestWorstTab] = useState("cf");
   const debRef = useRef(null);
   const abortRef = useRef(null);
+
+  // 🆕 시작 나이 (사용자 실제 나이) - localStorage에서 불러오기
+  // 디브리핑 시작 시 모달로 입력받음. 모든 디브리핑 분석/표시에 반영.
+  const [startAge, setStartAge] = useState(20);
+  const [showAgeModal, setShowAgeModal] = useState(false);
+
+  // 컴포넌트 마운트 시 localStorage에서 startAge 복원
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = window.localStorage.getItem("cashflow:userStartAge");
+      if (saved) {
+        const num = parseInt(saved);
+        if (!isNaN(num) && num >= 10 && num <= 80) {
+          setStartAge(num);
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }, []);
 
   // ── 피드백 캐시: 같은 게임 세션에서 티어별로 한 번만 API 호출 ──
   // { 0: "무료 텍스트", 1: "상세 텍스트", 2: "프리미엄 텍스트" }
@@ -11384,7 +11805,8 @@ WRITING STYLE:
           messages: [{
             role: "user",
             content: `Analyze this CashFlow ${version} game (${turns} turns). 
-CRITICAL: Map ALL ${turns} turns proportionally to a 40-year life (age 20~60). 1 turn = ${Math.round(40/turns*10)/10} years.
+CRITICAL: Map ALL ${turns} turns proportionally to a 40-year life (age ${startAge}~${startAge + 40}). 1 turn = ${Math.round(40/turns*10)/10} years.
+⚠️ The user's ACTUAL starting age is ${startAge}. ALL "age" fields in the JSON output MUST start from ${startAge}, not 20. Adjust ALL age ranges accordingly (e.g., if startAge=30, "출발" phase becomes "30~40세" not "20~30세"; lessons referencing age MUST use ${startAge} as start).
 ${turns <= 10 ? `This is a SHORT game (${turns} turns). Even with few turns, map the full 40-year life journey. Fewer actions = more untapped potential. The coaching insight is: "What could you have done differently? What opportunities did you miss? The real game — and real life — rewards those who ACT, explore diverse strategies, and broaden their perspective."` : ""}
 
 SIMULATION DATA:
@@ -11481,14 +11903,32 @@ RULES:
           const parsed = JSON.parse(jsonStr);
           if (parsed.phases && parsed.lessons) {
             // 🎯 Best/Worst 경로를 코드 계산값으로 덮어쓰기 (AI 추측 대신 실제 데이터)
-            const computed = computeBestWorstPaths(results, turns);
+            const computed = computeBestWorstPaths(results, turns, startAge);
             parsed.bestPath = computed.bestPath;
             parsed.worstPath = computed.worstPath;
             console.log("[디브리핑] Best/Worst 경로 재계산 완료:", {
               bestFinal: computed.bestPath[computed.bestPath.length - 1],
               worstFinal: computed.worstPath[computed.worstPath.length - 1],
             });
-            
+
+            // 🆕 6 Levels 진단을 게임 데이터로 계산 (LLM에 의존하지 않고 정확한 수치 사용)
+            // gameSnapshot에서 최종 재무 상태 추출 → diagnoseFinancialLevel에 전달
+            const gs = gameSnapshot || {};
+            const fin = computeFinancialSnapshot(gs);
+            parsed.financialLevel = {
+              ...diagnoseFinancialLevel({
+                passiveIncome: fin.passiveIncome,
+                totalExpense: fin.totalExpense,
+                cash: fin.cash,
+                assets: fin.assets,
+                bankLoan: fin.bankLoan,
+                jobName: gs.job || "",
+              }),
+              // 🆕 UI에서 표시할 실제 게임 데이터
+              snapshot: fin,
+            };
+            console.log("[디브리핑] 6 Levels 진단:", parsed.financialLevel.level, parsed.financialLevel.levelName);
+
             setAnalysis(parsed);
             setMode("analysis-done");
             saveReport(parsed, "", null);
@@ -11562,6 +12002,7 @@ RULES:
         // 🆕 프리미엄(tier=2)일 때 페르소나 진단을 위한 데이터 전달
         gameSnapshot,
         turnLog: gameSnapshot?.turnLog || null,
+        startAge,  // 🆕 사용자 실제 시작 나이 전달
       });
       setPaidText(pText);
       setFeedbackCache(prev => ({ ...prev, [selectedTier]: pText }));
@@ -11692,13 +12133,38 @@ RULES:
   if (!mode && !error) {
     return (
       <div ref={debRef} style={{ marginTop: 24 }}>
-        <button onClick={runAnalysis} style={{
-          width: "100%", padding: 18, borderRadius: 14, border: "none", cursor: "pointer",
-          background: "linear-gradient(135deg, #f59e0b, #ef4444)", color: "#fff",
-          fontSize: 18, fontWeight: 800, letterSpacing: 1,
-        }}>
+        <button
+          onClick={() => setShowAgeModal(true)}
+          style={{
+            width: "100%", padding: 18, borderRadius: 14, border: "none", cursor: "pointer",
+            background: "linear-gradient(135deg, #f59e0b, #ef4444)", color: "#fff",
+            fontSize: 18, fontWeight: 800, letterSpacing: 1,
+          }}
+        >
           📊 디브리핑 분석 시작
         </button>
+
+        {/* 🆕 시작 나이 입력 모달 */}
+        {showAgeModal && (
+          <StartAgeModal
+            initialAge={startAge}
+            onConfirm={(age) => {
+              setStartAge(age);
+              try {
+                window.localStorage.setItem("cashflow:userStartAge", String(age));
+              } catch (e) { /* ignore */ }
+              setShowAgeModal(false);
+              runAnalysis();
+            }}
+            onSkip={() => {
+              // 건너뛰기: 기본 20세 유지하고 분석 시작
+              setStartAge(20);
+              setShowAgeModal(false);
+              runAnalysis();
+            }}
+            onCancel={() => setShowAgeModal(false)}
+          />
+        )}
       </div>
     );
   }
@@ -11760,7 +12226,7 @@ RULES:
 
     // ageAtTurn 공식: 40년을 totalTurns로 나누기 (computeBestWorstPaths와 동일)
     const yearsPerTurn = Math.round(40 / Math.max(turns, 1) * 10) / 10;
-    const ageAtTurnUI = (t) => Math.round(20 + (t - 0.5) * yearsPerTurn);
+    const ageAtTurnUI = (t) => Math.round(startAge + (t - 0.5) * yearsPerTurn);
 
     // 각 턴에서 가장 최근(이전까지 누적된) 값 추출 헬퍼
     const getValueAtTurn = (path, turn) => {
