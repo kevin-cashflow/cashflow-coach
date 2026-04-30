@@ -19,7 +19,7 @@ export async function GET(request, context) {
 
     console.log("[share/get] 요청 token:", token);
 
-    if (!token || !/^[0-9a-f-]{36}$/i.test(token)) {
+    if (!token || !/^[A-Za-z0-9]{8}$/.test(token)) {
       return Response.json(
         { error: "유효하지 않은 공유 링크" },
         { status: 400 }
@@ -80,7 +80,7 @@ export async function DELETE(request, context) {
     const params = context?.params ? await context.params : {};
     const token = params?.token;
     
-    if (!token || !/^[0-9a-f-]{36}$/i.test(token)) {
+    if (!token || !/^[A-Za-z0-9]{8}$/.test(token)) {
       return Response.json(
         { error: "유효하지 않은 공유 링크" },
         { status: 400 }

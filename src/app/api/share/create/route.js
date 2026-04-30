@@ -63,18 +63,27 @@ export async function POST(request) {
       );
     }
     
-    // 3. 닉네임 조회 (players 테이블에서)
+    // 3. 닉네임 결정 (우선순위: 클라이언트 → players 테이블 → 익명)
     let nickname = "익명";
-    try {
-      const { data: player } = await supabase
-        .from("players")
-        .select("nickname")
-        .eq("user_id", user.id)
-        .single();
-      if (player?.nickname) nickname = player.nickname;
-    } catch (e) {
-      console.warn("[share/create] 닉네임 조회 실패, '익명'으로 처리:", e.message);
+
+    // 우선순위 1: 클라이언트에서 보낸 닉네임 (가장 신뢰할 수 있음)
+    if (body.nickname && typeof body.nickname === "string" && body.nickname.trim()) {
+      nickname = body.nickname.trim();
+    } else {
+      // 우선순위 2: players 테이블 조회 (폴백)
+      try {
+        const { data: player } = await supabase
+          .from("players")
+          .select("nickname")
+          .eq("user_id", user.id)
+          .single();
+        if (player?.nickname) nickname = player.nickname;
+      } catch (e) {
+        console.warn("[share/create] 닉네임 조회 실패, '익명'으로 처리:", e.message);
+      }
     }
+    
+    console.log("[share/create] 사용 닉네임:", nickname);
     
     // 4. 공유 레코드 생성
     const insertData = {

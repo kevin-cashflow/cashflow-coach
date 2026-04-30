@@ -61,12 +61,23 @@ import {
 // returns: 공유 URL (string) or null (실패 시)
 export async function createShareLink(shareData) {
   try {
-    // 현재 세션 토큰 조회
+    // 현재 세션 토큰 + 사용자 메타데이터 조회
     const { data: { session } } = await supabase.auth.getSession();
     const accessToken = session?.access_token;
+    const user = session?.user;
     if (!accessToken) {
       console.warn("[createShareLink] 세션 없음 - 공유 링크 생성 불가");
       return null;
+    }
+
+    // 닉네임 자동 추출 (우선순위: shareData → user_metadata → email → 익명)
+    let nickname = shareData.nickname;
+    if (!nickname || !nickname.trim()) {
+      nickname = user?.user_metadata?.nickname
+        || user?.user_metadata?.name
+        || user?.user_metadata?.full_name
+        || (user?.email ? user.email.split("@")[0] : null)
+        || "익명";
     }
 
     const res = await fetch("/api/share/create", {
@@ -75,7 +86,7 @@ export async function createShareLink(shareData) {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${accessToken}`,
       },
-      body: JSON.stringify(shareData),
+      body: JSON.stringify({ ...shareData, nickname }),
     });
 
     if (!res.ok) {
