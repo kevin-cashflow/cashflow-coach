@@ -2105,7 +2105,6 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     setAction(null);
     setShares("");
     setSellPriceInput(0);
-    if (timerOn)
   };
 
   const checkSellEligibility = (card) => {
@@ -3053,7 +3052,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                   turn: currentTurn, cellType: "DOWNSIZED_REST", boardPos,
                   dice: 0, passedPaydays: 0, dealType: "DOWNSIZED",
                   card: null, action: "rest", shares: null,
-                  time: timerOn ? elapsed : null: null,
+                  time: timerOn ? elapsed : null,
                   _schemaVersion: SCHEMA_VERSION,
                   transaction: `다운사이즈 휴식 (잔여 ${downsizeRestTurns - 1}턴)`,
                 };
@@ -4104,7 +4103,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                           card: { sub: asset_.name, desc: `타인 마켓카드로 ${asset_.name} 매도` },
                           action: "sell", shares: null,
                           assetType: asset_.type || "부동산",
-                          time: timerOn ? elapsed : null: null,
+                          time: timerOn ? elapsed : null,
                           _schemaVersion: SCHEMA_VERSION,
                           _sellAssetId: asset_.id,
                           _sellPrice: sellPrice_,

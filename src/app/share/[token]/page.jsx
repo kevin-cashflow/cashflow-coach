@@ -8,6 +8,12 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+// 🆕 메인 디브리핑과 동일한 카드형 시각화 적용
+import {
+  FeedbackSections,
+  PersonaCard,
+  extractPersonaFromText,
+} from "@/components/CashflowCoachingSim";
 
 export default function SharePage() {
   // 🔧 Next.js 16 호환: useParams 훅 사용
@@ -254,8 +260,8 @@ export default function SharePage() {
           </div>
         </div>
 
-        {/* 페르소나 카드 (있으면) */}
-        {personaImageUrl && (
+        {/* 페르소나 미니 카드 - 프리미엄 아닐 때만 (프리미엄은 본문 안에 큰 PersonaCard) */}
+        {personaImageUrl && share.feedback_tier !== 2 && (
           <div style={{
             padding: "20px 24px", borderRadius: 16, marginBottom: 20,
             background: "linear-gradient(135deg, #fde68a08, #f59e0b08)",
@@ -278,20 +284,48 @@ export default function SharePage() {
           </div>
         )}
 
-        {/* 피드백 본문 */}
-        {share.feedback_text && (
-          <div style={{
-            padding: "24px 24px", borderRadius: 16, marginBottom: 20,
-            background: "#111118", border: "1px solid #27272a",
-          }}>
-            <div style={{
-              fontSize: 13, lineHeight: 1.9, color: "#d4d4d8",
-              whiteSpace: "pre-wrap", wordBreak: "break-word",
-            }}>
-              {share.feedback_text}
+        {/* 피드백 본문 - 프리미엄(2)이면 카드형 시각화, 그 외는 plain text */}
+        {share.feedback_text && (() => {
+          const isPremium = share.feedback_tier === 2;
+          // 프리미엄: 페르소나 분리 + 카드 시각화
+          // 요약/상세: 기존 plain text
+          const { cleanedText, personaData } = isPremium
+            ? extractPersonaFromText(share.feedback_text)
+            : { cleanedText: share.feedback_text, personaData: null };
+
+          return (
+            <div style={{ marginBottom: 20 }}>
+              {isPremium ? (
+                // 프리미엄: 카드형 시각화
+                <FeedbackSections text={cleanedText} />
+              ) : (
+                // 요약/상세: plain text
+                <div style={{
+                  padding: "24px 24px", borderRadius: 16,
+                  background: "#111118", border: "1px solid #27272a",
+                }}>
+                  <div style={{
+                    fontSize: 13, lineHeight: 1.9, color: "#d4d4d8",
+                    whiteSpace: "pre-wrap", wordBreak: "break-word",
+                  }}>
+                    {cleanedText}
+                  </div>
+                </div>
+              )}
+
+              {/* 🆕 프리미엄 페르소나 카드 (있으면) */}
+              {personaData && personaData.name && (
+                <PersonaCard
+                  personaName={personaData.name}
+                  personaClass={personaData.class}
+                  evidence={personaData.evidence}
+                  meaning={personaData.meaning}
+                  nextStep={personaData.nextStep}
+                />
+              )}
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* 분석 결과 (있으면) */}
         {share.analysis?.lessons && Array.isArray(share.analysis.lessons) && share.analysis.lessons.length > 0 && (
