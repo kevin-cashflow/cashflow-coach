@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { generateFreeFeedback, generatePaidFeedback, buildPromptText, computeBestWorstPaths, runFullAnalysis, AnalysisReport, diagnoseFinancialLevel, createShareLink } from "./CashflowCoachingSim";
+import { generateFreeFeedback, generatePaidFeedback, buildPromptText, computeBestWorstPaths, runFullAnalysis, AnalysisReport, diagnoseFinancialLevel, createShareLink, ShareButtonGroup } from "./CashflowCoachingSim";
 import { adaptGameToStorybook } from "./pdf/debriefDataAdapter";
 import { downloadStorybookPDF } from "./pdf/DebriefStorybookPDF";
 import {
@@ -2710,22 +2710,29 @@ function DebriefResultModal({ modal, onClose }) {
               }}
             >📑 PDF로 저장 (인쇄 → PDF)</button>
 
-            {/* 2줄: 카카오톡 공유 */}
-            <button
-              onClick={handleKakaoShare}
-              style={{
-                width: "100%", padding: "9px 14px", borderRadius: 8,
-                border: "1px solid #FEE500",
-                background: "linear-gradient(135deg, #FEE500, #FAD84B)",
-                color: "#3C1E1E",
-                cursor: "pointer", fontSize: 12, fontWeight: 800,
-                marginBottom: 6,
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              }}
-            >
-              <span style={{ fontSize: 14 }}>💬</span>
-              카카오톡으로 보내기 (본인/지인)
-            </button>
+            {/* 2줄: 통합 공유 버튼 (URL 복사 우선 + 카카오 보조) */}
+            <div style={{ marginBottom: 6 }}>
+              <ShareButtonGroup
+                context="MyHistory"
+                shareData={{
+                  gameKey: game?.key || game?.id || null,
+                  version: game?.version || null,
+                  job: game?.job || "캐쉬플로우",
+                  turnCount: game?.turnCount || 0,
+                  escaped: game?.escaped || false,
+                  datePlayed: game?.date || (game?.dateTime ? new Date(game.dateTime).toISOString().slice(0, 10) : null),
+                  analysis: game?.debrief?.analysis || analysis || null,
+                  feedbackText: text,
+                  feedbackTier: meta?.tier ?? null,
+                  personaKey: game?.debrief?.personaKey || null,
+                  personaName: game?.debrief?.personaName || null,
+                }}
+                kakaoTemplate={{
+                  title: `${meta?.icon || "📋"} ${(meta?.name || "디브리핑").replace(/\s*\(\$\d+\)/, "")} - ${game?.job || "캐쉬플로우"}`,
+                  description: `📅 ${game?.date || "최근"} · ${game?.version || ""} · ${game?.turnCount || 0}턴${game?.escaped ? " · ✅ 탈출" : ""}`,
+                }}
+              />
+            </div>
 
             {/* 3줄: 보조 다운로드 */}
             <div style={{ display: "flex", gap: 6 }}>
