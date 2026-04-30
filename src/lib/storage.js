@@ -19,14 +19,55 @@ import { supabase } from "./supabase";
  */
 
 // ─── 타임아웃 헬퍼 (모든 Supabase 호출에 적용) ───
-const SB_TIMEOUT_MS = 6000;       // Supabase 단일 호출 한도
+//
+// 🔧 v4.2 콜드 스타트 대응 (2026-04):
+//   - 무료 티어는 미사용 시 일시정지되어 첫 호출이 10초+ 걸림
+//   - 첫 호출은 길게(15초), 이후 호출은 짧게(8초)
+//   - 첫 실패 시 1회 재시도 (지수 백오프 없이 즉시)
+const SB_TIMEOUT_MS_COLD = 15000;  // 첫 호출 (콜드 스타트 대응)
+const SB_TIMEOUT_MS = 8000;        // 일반 호출 (워밍업 후)
 const AUTH_CACHE_TTL = 5 * 60 * 1000; // userId 캐시 5분
 
-function withTimeout(promise, ms = SB_TIMEOUT_MS, label = "supabase") {
+// 🆕 콜드 스타트 추적: 첫 성공 호출 후 false로 전환
+let _isColdStart = true;
+
+function getCurrentTimeout() {
+  return _isColdStart ? SB_TIMEOUT_MS_COLD : SB_TIMEOUT_MS;
+}
+
+function withTimeout(promise, ms = null, label = "supabase") {
+  const timeoutMs = ms || getCurrentTimeout();
   return Promise.race([
     promise,
-    new Promise((_, rej) => setTimeout(() => rej(new Error(`${label} 타임아웃 (${ms}ms)`)), ms)),
-  ]);
+    new Promise((_, rej) => setTimeout(() => rej(new Error(`${label} 타임아웃 (${timeoutMs}ms)`)), timeoutMs)),
+  ]).then(result => {
+    // 성공하면 워밍업 완료 → 다음 호출부터 짧은 타임아웃 사용
+    if (_isColdStart) {
+      console.log(`[storage] ✅ Supabase 워밍업 완료 (${label}) → 다음 호출부터 ${SB_TIMEOUT_MS}ms 타임아웃`);
+      _isColdStart = false;
+    }
+    return result;
+  });
+}
+
+// 🆕 재시도 헬퍼: 첫 실패 시 1회 즉시 재시도
+//
+// 콜드 스타트 외에도 일시적 네트워크 오류, RLS 평가 지연 등에 대응.
+// 두 번째 시도도 실패하면 그냥 throw (호출자가 처리).
+async function withRetry(fn, label = "supabase") {
+  try {
+    return await fn();
+  } catch (e) {
+    const msg = e?.message || "";
+    // 타임아웃이거나 네트워크 에러면 재시도
+    if (msg.includes("타임아웃") || msg.includes("timeout") || msg.includes("network")) {
+      console.warn(`[storage] ${label} 1차 실패 → 재시도:`, msg);
+      // 재시도는 항상 길게
+      _isColdStart = true;
+      return await fn();
+    }
+    throw e;
+  }
 }
 
 // ─── 키 파싱 ───
@@ -73,10 +114,10 @@ async function getCurrentUserId() {
 
   _authInflight = (async () => {
     try {
-      // 1차: 현재 세션 (타임아웃 보호)
+      // 1차: 현재 세션 (콜드 스타트 대응 - 동적 타임아웃)
       const userResult = await withTimeout(
         supabase.auth.getUser(),
-        4000,
+        null,  // null = getCurrentTimeout() 사용
         "auth.getUser"
       ).catch(() => null);
 
@@ -87,11 +128,11 @@ async function getCurrentUserId() {
         return user.id;
       }
 
-      // 2차: 세션 복구 (타임아웃 보호)
+      // 2차: 세션 복구 (콜드 스타트 대응)
       console.warn("[storage] 세션 없음, 복구 시도 중...");
       const refreshResult = await withTimeout(
         supabase.auth.refreshSession(),
-        4000,
+        null,
         "auth.refreshSession"
       ).catch(() => null);
 
@@ -217,7 +258,7 @@ async function get(key) {
     if (k.kind === "players") {
       const { data, error } = await withTimeout(
         supabase.from("players").select("*"),
-        SB_TIMEOUT_MS,
+        null,  // 동적 타임아웃 (콜드: 15s, 웜: 8s)
         "players.select"
       );
       if (error || !data) return null;
@@ -235,7 +276,7 @@ async function get(key) {
     if (k.kind === "game") {
       const { data, error } = await withTimeout(
         supabase.from("games").select("*").eq("id", k.ts).maybeSingle(),
-        SB_TIMEOUT_MS,
+        null,  // 동적 타임아웃 (콜드: 15s, 웜: 8s)
         "games.select"
       );
       if (error || !data) return null;
@@ -245,7 +286,7 @@ async function get(key) {
     if (k.kind === "debrief") {
       const { data, error } = await withTimeout(
         supabase.from("debrief_reports").select("*").eq("id", k.ts).maybeSingle(),
-        SB_TIMEOUT_MS,
+        null,  // 동적 타임아웃 (콜드: 15s, 웜: 8s)
         "debrief.select"
       );
       if (error || !data) return null;
@@ -275,7 +316,7 @@ async function setSupabaseOnly(key, value, userId) {
             games_played: p.gamesPlayed || 0,
             user_id: userId,
           }),  // 🆕 .select() 제거 — Pooler 점유 시간 50% 감소
-          SB_TIMEOUT_MS,
+          null,  // 동적 타임아웃 (콜드: 15s, 웜: 8s)
           "players.upsert"
         );
         if (error) {
@@ -311,7 +352,7 @@ async function setSupabaseOnly(key, value, userId) {
           passive_income_at_escape: data.passiveIncomeAtEscape || null,
           job_at_escape: data.jobAtEscape || null,
         }),  // 🆕 .select() 제거
-        SB_TIMEOUT_MS,
+        null,  // 동적 타임아웃 (콜드: 15s, 웜: 8s)
         "games.upsert"
       );
 
@@ -340,7 +381,7 @@ async function setSupabaseOnly(key, value, userId) {
           game_id: data.gameId || null,
           is_simulation: data.isSimulation || false,
         }),
-        SB_TIMEOUT_MS,
+        null,  // 동적 타임아웃 (콜드: 15s, 웜: 8s)
         "debrief.upsert"
       );
 
@@ -426,13 +467,13 @@ async function del(key) {
     if (k.kind === "game") {
       await withTimeout(
         supabase.from("games").delete().eq("id", k.ts),
-        SB_TIMEOUT_MS,
+        null,  // 동적 타임아웃 (콜드: 15s, 웜: 8s)
         "games.delete"
       );
     } else if (k.kind === "debrief") {
       await withTimeout(
         supabase.from("debrief_reports").delete().eq("id", k.ts),
-        SB_TIMEOUT_MS,
+        null,  // 동적 타임아웃 (콜드: 15s, 웜: 8s)
         "debrief.delete"
       );
     }
@@ -449,7 +490,7 @@ export async function deletePlayer(playerId) {
   try {
     await withTimeout(
       supabase.from("players").delete().eq("id", playerId),
-      SB_TIMEOUT_MS,
+      null,  // 동적 타임아웃 (콜드: 15s, 웜: 8s)
       "players.delete"
     );
   } catch (e) {
@@ -478,7 +519,7 @@ async function list(prefix) {
             .select("id, player_id")
             .eq("player_id", playerId)
             .order("date_time", { ascending: false }),
-          SB_TIMEOUT_MS,
+          null,  // 동적 타임아웃 (콜드: 15s, 웜: 8s)
           "games.list"
         );
         return {
@@ -501,7 +542,7 @@ async function list(prefix) {
             .select("id, player_id")
             .eq("user_id", userId)
             .order("date_time", { ascending: false }),
-          SB_TIMEOUT_MS,
+          null,  // 동적 타임아웃 (콜드: 15s, 웜: 8s)
           "games.list.all"
         );
         // 각 row의 실제 player_id로 키 재구성 (저장 시 사용한 키와 일치)
@@ -519,7 +560,7 @@ async function list(prefix) {
           .from("debrief_reports")
           .select("id")
           .order("created_at", { ascending: false }),
-        SB_TIMEOUT_MS,
+        null,  // 동적 타임아웃 (콜드: 15s, 웜: 8s)
         "debrief.list"
       );
       return {

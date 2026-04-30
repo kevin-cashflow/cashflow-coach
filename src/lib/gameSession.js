@@ -21,8 +21,12 @@ import { supabase } from "./supabase";
 
 const LOCAL_KEY = "cashflow_game_session";
 const DEBOUNCE_MS = 5000;          // 🆕 2초 → 5초 (Pooler 락 빈도 감소)
-const SB_WRITE_TIMEOUT = 6000;     // 🆕 Supabase 쓰기 타임아웃
-const SB_READ_TIMEOUT = 3000;      // 🆕 Supabase 읽기 타임아웃 (이어하기 빠르게)
+//
+// 🔧 v4.2 콜드 스타트 대응 (2026-04):
+//   기존: 쓰기 6초, 읽기 3초 → 무료 티어 콜드 스타트 시 모두 타임아웃
+//   수정: 쓰기 12초, 읽기 8초로 늘림 (워밍업 후엔 어차피 빠름)
+const SB_WRITE_TIMEOUT = 12000;    // Supabase 쓰기 타임아웃 (6초 → 12초)
+const SB_READ_TIMEOUT = 8000;      // Supabase 읽기 타임아웃 (3초 → 8초)
 
 let supabaseDebounceTimer = null;
 let lastSupabaseState = null;
