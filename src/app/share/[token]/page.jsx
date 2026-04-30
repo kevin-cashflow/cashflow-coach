@@ -7,15 +7,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { use } from "react";
+import { useParams } from "next/navigation";
 
-export default function SharePage({ params }) {
-  const { token } = use(params);
+export default function SharePage() {
+  // 🔧 Next.js 16 호환: useParams 훅 사용
+  // - props.params 대신 useParams() 훅으로 접근
+  // - 클라이언트 컴포넌트에서 가장 안정적
+  // - 14/15/16 모든 버전 호환
+  const params = useParams();
+  const token = params?.token;
+
   const [share, setShare] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (!token) return;
     let cancelled = false;
     
     async function load() {

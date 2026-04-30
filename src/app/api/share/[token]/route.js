@@ -1,60 +1,104 @@
-// app/api/share/create/route.js
+// app/api/share/[token]/route.js
 //
-// 공유 링크 생성 API
-// POST /api/share/create
+// 공유 데이터 조회 + 삭제 API
 //
-// Request body:
-// {
-//   gameKey: string,
-//   version: string,
-//   job: string,
-//   turnCount: number,
-//   escaped: boolean,
-//   datePlayed: string (YYYY-MM-DD),
-//   analysis: object,
-//   feedbackText: string,
-//   feedbackTier: 0 | 1 | 2,
-//   personaKey: string | null,
-//   personaName: string | null,
-// }
-//
-// Response:
-// {
-//   token: string (UUID),
-//   url: string ("https://cashflow-coach.vercel.app/share/{token}"),
-// }
+// GET /api/share/{token} → 익명 OK, 공유 데이터 반환 + 조회수 증가
+// DELETE /api/share/{token} → 본인만 OK, 공유 취소
 
 import { createClient } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
 
-export async function POST(request) {
+// ─── GET: 공유 데이터 조회 (익명 OK) ───
+export async function GET(request, context) {
   try {
-    const body = await request.json();
+    // 🔧 Next.js 14 / 15 양쪽 버전 호환:
+    //   - Next.js 15: params는 Promise → await 필요
+    //   - Next.js 14: params는 일반 객체 → await 불필요 (await도 동작은 함)
+    //   - 안전하게 await 사용 (둘 다 작동)
+    const params = context?.params ? await context.params : {};
+    const token = params?.token;
+
+    console.log("[share/get] 요청 token:", token);
+
+    if (!token || !/^[0-9a-f-]{36}$/i.test(token)) {
+      return Response.json(
+        { error: "유효하지 않은 공유 링크" },
+        { status: 400 }
+      );
+    }
     
-    // 1. Supabase 클라이언트 (서버사이드, 사용자 인증)
-    const cookieStore = await cookies();
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    
+
     if (!supabaseUrl || !supabaseAnonKey) {
+      console.error("[share/get] Supabase 환경변수 누락");
       return Response.json(
-        { error: "Supabase 환경변수 미설정" },
+        { error: "서버 설정 오류" },
         { status: 500 }
       );
     }
     
-    // 사용자의 access_token을 쿠키에서 추출 (Supabase auth-helpers 패턴)
-    // 클라이언트가 Authorization 헤더로 보내면 그것도 사용 가능
+    // 익명 클라이언트 (anon key만 사용 - RLS가 SELECT 허용)
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    
+    // 공유 데이터 조회
+    const { data: share, error } = await supabase
+      .from("shared_debriefs")
+      .select("token, nickname, version, job, turn_count, escaped, date_played, analysis, feedback_text, feedback_tier, persona_key, persona_name, created_at, view_count")
+      .eq("token", token)
+      .single();
+    
+    if (error || !share) {
+      return Response.json(
+        { error: "공유 링크를 찾을 수 없습니다 (삭제되었거나 잘못된 링크)" },
+        { status: 404 }
+      );
+    }
+    
+    // 조회수 증가 (실패해도 무시)
+    try {
+      await supabase.rpc("increment_share_view", { share_token: token });
+    } catch (e) {
+      console.warn("[share/get] 조회수 증가 실패 (무시):", e.message);
+    }
+    
+    return Response.json(share);
+    
+  } catch (e) {
+    console.error("[share/get] 예외:", e);
+    return Response.json(
+      { error: e.message || "알 수 없는 오류" },
+      { status: 500 }
+    );
+  }
+}
+
+// ─── DELETE: 공유 취소 (본인만) ───
+export async function DELETE(request, context) {
+  try {
+    const params = context?.params ? await context.params : {};
+    const token = params?.token;
+    
+    if (!token || !/^[0-9a-f-]{36}$/i.test(token)) {
+      return Response.json(
+        { error: "유효하지 않은 공유 링크" },
+        { status: 400 }
+      );
+    }
+    
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    
     const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
+    const accessToken = authHeader?.replace("Bearer ", "");
     
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader || "" } },
       auth: { persistSession: false, autoRefreshToken: false },
     });
     
-    // 2. 사용자 정보 확인
-    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+    const { data: { user }, error: userError } = await supabase.auth.getUser(accessToken);
     
     if (userError || !user) {
       return Response.json(
@@ -63,62 +107,24 @@ export async function POST(request) {
       );
     }
     
-    // 3. 닉네임 조회 (players 테이블에서)
-    let nickname = "익명";
-    try {
-      const { data: player } = await supabase
-        .from("players")
-        .select("nickname")
-        .eq("user_id", user.id)
-        .single();
-      if (player?.nickname) nickname = player.nickname;
-    } catch (e) {
-      console.warn("[share/create] 닉네임 조회 실패, '익명'으로 처리:", e.message);
-    }
-    
-    // 4. 공유 레코드 생성
-    const insertData = {
-      user_id: user.id,
-      nickname,
-      game_key: body.gameKey || null,
-      version: body.version || null,
-      job: body.job || null,
-      turn_count: body.turnCount || 0,
-      escaped: body.escaped || false,
-      date_played: body.datePlayed || null,
-      analysis: body.analysis || null,
-      feedback_text: body.feedbackText || null,
-      feedback_tier: body.feedbackTier ?? null,
-      persona_key: body.personaKey || null,
-      persona_name: body.personaName || null,
-    };
-    
-    const { data: created, error: insertError } = await supabase
+    // RLS가 본인 것만 삭제 허용 (정책에 의해)
+    const { error: deleteError } = await supabase
       .from("shared_debriefs")
-      .insert(insertData)
-      .select("token")
-      .single();
+      .delete()
+      .eq("token", token);
     
-    if (insertError) {
-      console.error("[share/create] 생성 실패:", insertError);
+    if (deleteError) {
+      console.error("[share/delete] 삭제 실패:", deleteError);
       return Response.json(
-        { error: "공유 링크 생성 실패: " + insertError.message },
+        { error: "삭제 실패: " + deleteError.message },
         { status: 500 }
       );
     }
     
-    const PROD_DOMAIN = process.env.NEXT_PUBLIC_PROD_DOMAIN || "https://cashflow-coach.vercel.app";
-    const shareUrl = `${PROD_DOMAIN}/share/${created.token}`;
-    
-    console.log("[share/create] ✅ 공유 링크 생성:", created.token);
-    
-    return Response.json({
-      token: created.token,
-      url: shareUrl,
-    });
+    return Response.json({ success: true });
     
   } catch (e) {
-    console.error("[share/create] 예외:", e);
+    console.error("[share/delete] 예외:", e);
     return Response.json(
       { error: e.message || "알 수 없는 오류" },
       { status: 500 }
