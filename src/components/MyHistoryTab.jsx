@@ -1001,11 +1001,56 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
     const existing = currentGame.debriefData?.feedback?.[tier];
     if (existing?.text) {
       console.log(`[MyHistoryTab] ${tier} 저장본 표시 (재호출 방지)`);
+
+      // 🆕 캐시된 analysis가 있으면 그대로, 없으면 financialLevel만이라도 즉석 계산
+      // (이전 버전에서 financialLevel 없이 저장된 디브리핑 보강)
+      let cachedAnalysis = currentGame.debriefData?.analysis || null;
+
+      // 유료(detail/premium)일 때만 financialLevel 보강
+      // (무료는 차별화 차원에서 6 Levels 표시 안 함)
+      if ((tier === "detail" || tier === "premium")) {
+        const hasFL = cachedAnalysis && cachedAnalysis.financialLevel && cachedAnalysis.financialLevel.snapshot;
+        if (!hasFL) {
+          try {
+            // gameSnapshot 형태로 데이터 정리
+            const gs = {
+              job: currentGame.job,
+              assets: currentGame.assets || [],
+              cash: currentGame.cash,
+              totalCF: currentGame.totalCF,
+              totalExpense: currentGame.totalExpense,
+              salary: currentGame.salary,
+              jobData: currentGame.jobData,
+              bankLoan: currentGame.bankLoan,
+              babies: currentGame.babies,
+            };
+            const fin = computeFinancialSnapshot(gs);
+            const financialLevel = {
+              ...diagnoseFinancialLevel({
+                passiveIncome: fin.passiveIncome,
+                totalExpense: fin.totalExpense,
+                cash: fin.cash,
+                assets: fin.assets,
+                bankLoan: fin.bankLoan,
+                jobName: gs.job || "",
+              }),
+              snapshot: fin,
+            };
+            cachedAnalysis = cachedAnalysis
+              ? { ...cachedAnalysis, financialLevel }
+              : { financialLevel };
+            console.log(`[MyHistoryTab] 🔧 ${tier} 캐시에 financialLevel 자동 보강:`, financialLevel.level, financialLevel.levelName);
+          } catch (err) {
+            console.warn("[MyHistoryTab] financialLevel 보강 실패:", err.message);
+          }
+        }
+      }
+
       safeSetDebriefModal({
         game: currentGame,
         tier,
         text: existing.text,
-        analysis: currentGame.debriefData?.analysis || null, // 🆕 풀 분석도 같이
+        analysis: cachedAnalysis,
         generatedAt: existing.generatedAt,
         loading: false,
         error: null,
@@ -1127,21 +1172,32 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
         });
 
         // 🆕 유료 전용: 6 Levels of Wealth 자동 진단 추가
+        // computeFinancialSnapshot으로 통일된 방식으로 데이터 추출
+        // (DebriefSection / InlineDebrief와 동일한 로직)
         try {
-          const passiveIncome = (currentGame.assets || [])
-            .filter(a => a.type !== "주식")
-            .reduce((sum, a) => sum + (a.cf || 0), 0);
-          const totalExpense = currentGame.totalCF !== undefined && currentGame.totalCF < 0
-            ? Math.abs(currentGame.totalCF) + passiveIncome
-            : 1000;
-          const financialLevel = diagnoseFinancialLevel({
-            passiveIncome,
-            totalExpense,
-            cash: currentGame.cash || 0,
+          const gs = {
+            job: currentGame.job,
             assets: currentGame.assets || [],
-            bankLoan: currentGame.bankLoan || 0,
-            jobName: currentGame.job || "",
-          });
+            cash: currentGame.cash,
+            totalCF: currentGame.totalCF,
+            totalExpense: currentGame.totalExpense,
+            salary: currentGame.salary,
+            jobData: currentGame.jobData,
+            bankLoan: currentGame.bankLoan,
+            babies: currentGame.babies,
+          };
+          const fin = computeFinancialSnapshot(gs);
+          const financialLevel = {
+            ...diagnoseFinancialLevel({
+              passiveIncome: fin.passiveIncome,
+              totalExpense: fin.totalExpense,
+              cash: fin.cash,
+              assets: fin.assets,
+              bankLoan: fin.bankLoan,
+              jobName: gs.job || "",
+            }),
+            snapshot: fin,  // 🆕 UI에 표시할 실제 게임 데이터 포함
+          };
           // 기존 analysis가 있으면 financialLevel만 추가, 없으면 새로 생성
           fullAnalysis = currentGame.debriefData?.analysis
             ? { ...currentGame.debriefData.analysis, financialLevel }
@@ -2675,6 +2731,7 @@ function DebriefResultModal({ modal, onClose }) {
                   <AnalysisReport
                     analysis={analysis}
                     turns={game?.turnCount || (game?.turnLog || []).length || 0}
+                    gameSnapshot={game}
                   />
                 </div>
               )}

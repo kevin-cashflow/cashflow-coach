@@ -8025,7 +8025,7 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
         <div style={{ fontSize: 10, color: "#71717a", marginBottom: 10 }}>
           이 분석은 자동 저장되어 프로필 탭에서 언제든 다시 볼 수 있습니다
         </div>
-        <AnalysisReport analysis={analysis} turns={turns} />
+        <AnalysisReport analysis={analysis} turns={turns} gameSnapshot={gameSnapshot} />
 
         {/* 🆕 티어별 피드백 선택 영역 */}
         <div style={{
@@ -8217,10 +8217,30 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
 // 🎨 AnalysisReport: 디브리핑 풀 분석 렌더링 (export, 재사용 가능)
 // ═══════════════════════════════════════════════════
 // 사용처: DebriefSection 내부 + MyHistoryTab의 모달
-export function AnalysisReport({ analysis, turns, startAge = 20 }) {
+// 🆕 gameSnapshot 추가: financialLevel.snapshot이 없을 때 즉석 계산용 (이전 버전 호환)
+export function AnalysisReport({ analysis: analysisRaw, turns, startAge = 20, gameSnapshot = null }) {
 const [bestWorstTab, setBestWorstTab] = useState("cf");
 const phaseColors = ["#10b981","#3b82f6","#8b5cf6","#f59e0b","#ef4444"];
-if (!analysis) return null;
+if (!analysisRaw) return null;
+
+  // 🆕 financialLevel이 있는데 snapshot이 없으면 자동 보강 (이전 버전 디브리핑 호환)
+  // gameSnapshot이 전달됐을 때만 보강 가능. 없으면 진단 근거 데이터 카드는 안 보임.
+  let analysis = analysisRaw;
+  if (analysisRaw.financialLevel && !analysisRaw.financialLevel.snapshot && gameSnapshot) {
+    try {
+      const fin = computeFinancialSnapshot(gameSnapshot);
+      analysis = {
+        ...analysisRaw,
+        financialLevel: {
+          ...analysisRaw.financialLevel,
+          snapshot: fin,
+        },
+      };
+      console.log("[AnalysisReport] 🔧 financialLevel.snapshot 자동 보강 완료");
+    } catch (e) {
+      console.warn("[AnalysisReport] snapshot 보강 실패:", e.message);
+    }
+  }
   const bp = analysis.bestPath || [];
   const wp = analysis.worstPath || [];
   // 🆕 hasPaths: 배열 길이만 아니라 실제 CF/asset 값이 의미있는지 확인
