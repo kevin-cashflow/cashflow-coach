@@ -9589,11 +9589,30 @@ export const PERSONA_META = {
 // 좌측: 큰 이미지 + 그라데이션 배경
 // 우측: 이름/분류/강점/약점/추천 행동/키워드 카드들
 export function PersonaCard({ personaName, personaClass, evidence, meaning, nextStep }) {
-  if (!personaName) return null;
+  if (!personaName) {
+    if (typeof window !== "undefined") {
+      console.warn("[PersonaCard] ⚠️ personaName이 비어있어 렌더링 안 함");
+    }
+    return null;
+  }
 
   const key = getPersonaKey(personaName);
   const meta = key ? PERSONA_META[key] : null;
   const imageUrl = key ? `https://cashflow-coach.vercel.app/personas/${key}.png` : null;
+
+  // 🆕 디버깅: 페르소나 매핑 결과 콘솔 로그
+  if (typeof window !== "undefined") {
+    console.log("[PersonaCard] 🎭 페르소나 카드 렌더링", {
+      personaName,
+      key,
+      hasImage: !!imageUrl,
+      imageUrl,
+      hasMeta: !!meta,
+    });
+  }
+
+  // 🆕 이미지 로드 실패 추적용 state
+  const [imageError, setImageError] = useState(false);
 
   // 메타가 없으면 기본값 (예외 케이스 - 매핑 안 되는 페르소나)
   const m = meta || {
@@ -9639,19 +9658,20 @@ export function PersonaCard({ personaName, personaClass, evidence, meaning, next
         display: "flex", flexDirection: "row", gap: 20,
         flexWrap: "wrap",
       }}>
-        {/* 좌측: 큰 이미지 */}
-        {imageUrl && (
+        {/* 좌측: 큰 이미지 (이미지 없거나 에러여도 이모지 자리는 항상 표시) */}
+        <div style={{
+          flex: "0 0 auto",
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+        }}>
           <div style={{
-            flex: "0 0 auto",
-            display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+            width: 140, height: 140, borderRadius: 16,
+            background: `${m.color}15`,
+            padding: 8,
+            border: `2px solid ${m.color}40`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            position: "relative",
           }}>
-            <div style={{
-              width: 140, height: 140, borderRadius: 16,
-              background: `${m.color}10`,
-              padding: 8,
-              border: `1px solid ${m.color}30`,
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
+            {imageUrl && !imageError ? (
               <img
                 src={imageUrl}
                 alt={personaName}
@@ -9659,12 +9679,27 @@ export function PersonaCard({ personaName, personaClass, evidence, meaning, next
                   width: "100%", height: "100%", objectFit: "contain",
                   borderRadius: 10,
                 }}
-                onError={(e) => { e.currentTarget.style.display = "none"; }}
+                onError={(e) => {
+                  console.error("[PersonaCard] 🚨 이미지 로드 실패:", imageUrl);
+                  setImageError(true);
+                }}
+                onLoad={() => {
+                  console.log("[PersonaCard] ✅ 이미지 로드 성공:", imageUrl);
+                }}
               />
-            </div>
-            <div style={{ fontSize: 32 }}>{m.icon}</div>
+            ) : (
+              // 이미지 없거나 로드 실패 시 큰 이모지로 폴백
+              <div style={{
+                fontSize: 80,
+                lineHeight: 1,
+                filter: `drop-shadow(0 0 12px ${m.color}40)`,
+              }}>
+                {m.icon}
+              </div>
+            )}
           </div>
-        )}
+          <div style={{ fontSize: 32 }}>{m.icon}</div>
+        </div>
 
         {/* 우측: 이름 + 분류 + 의미 */}
         <div style={{ flex: 1, minWidth: 240 }}>

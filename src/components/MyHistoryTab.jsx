@@ -1,7 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { generateFreeFeedback, generatePaidFeedback, buildPromptText, computeBestWorstPaths, runFullAnalysis, AnalysisReport, diagnoseFinancialLevel, createShareLink, ShareButtonGroup } from "./CashflowCoachingSim";
+import {
+  generateFreeFeedback, generatePaidFeedback, buildPromptText, computeBestWorstPaths, runFullAnalysis,
+  AnalysisReport, diagnoseFinancialLevel, createShareLink, ShareButtonGroup,
+  // 🆕 페르소나 카드 + 마크다운 시각화 (DebriefSection과 동일한 처리)
+  PersonaCard, FeedbackSections, extractPersonaFromText,
+  // 🆕 6 Levels 진단 데이터 추출
+  computeFinancialSnapshot,
+} from "./CashflowCoachingSim";
 import { adaptGameToStorybook } from "./pdf/debriefDataAdapter";
 import { downloadStorybookPDF } from "./pdf/DebriefStorybookPDF";
 import {
@@ -2673,21 +2680,51 @@ function DebriefResultModal({ modal, onClose }) {
               )}
 
               {/* 텍스트 피드백 (요약/상세/프리미엄만, analysis 티어는 제외) */}
-              {tier !== "analysis" && text && (
-                <div style={{
-                  fontSize: 13, color: "#e4e4e7", lineHeight: 1.7,
-                  whiteSpace: "pre-wrap", wordBreak: "break-word",
-                  paddingTop: analysis ? 20 : 0,
-                  borderTop: analysis ? "1px solid #27272a" : "none",
-                }}>
-                  {analysis && (
-                    <div style={{ fontSize: 11, fontWeight: 700, color: meta.color, marginBottom: 12 }}>
-                      💬 코칭 메시지
-                    </div>
-                  )}
-                  {text}
-                </div>
-              )}
+              {tier !== "analysis" && text && (() => {
+                // 🆕 프리미엄(premium)일 때만 페르소나 분리 + 카드형 시각화
+                // (DebriefSection과 동일한 처리)
+                const isPremium = tier === "premium";
+                const { cleanedText, personaData } = isPremium
+                  ? extractPersonaFromText(text)
+                  : { cleanedText: text, personaData: null };
+
+                return (
+                  <div style={{
+                    paddingTop: analysis ? 20 : 0,
+                    borderTop: analysis ? "1px solid #27272a" : "none",
+                  }}>
+                    {analysis && (
+                      <div style={{ fontSize: 11, fontWeight: 700, color: meta.color, marginBottom: 12 }}>
+                        💬 코칭 메시지
+                      </div>
+                    )}
+
+                    {isPremium ? (
+                      // 프리미엄: 카드형 시각화
+                      <FeedbackSections text={cleanedText} />
+                    ) : (
+                      // 요약/상세: plain text
+                      <div style={{
+                        fontSize: 13, color: "#e4e4e7", lineHeight: 1.7,
+                        whiteSpace: "pre-wrap", wordBreak: "break-word",
+                      }}>
+                        {cleanedText}
+                      </div>
+                    )}
+
+                    {/* 🆕 프리미엄 페르소나 카드 */}
+                    {personaData && personaData.name && (
+                      <PersonaCard
+                        personaName={personaData.name}
+                        personaClass={personaData.class}
+                        evidence={personaData.evidence}
+                        meaning={personaData.meaning}
+                        nextStep={personaData.nextStep}
+                      />
+                    )}
+                  </div>
+                );
+              })()}
             </>
           )}
         </div>
