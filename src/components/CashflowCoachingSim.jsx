@@ -104,6 +104,264 @@ export async function createShareLink(shareData) {
   }
 }
 
+// ═══════════════════════════════════════════════════
+// 🆕 공유 액션 헬퍼들 (URL 복사 + 카카오 공유 + 시스템 공유)
+// ═══════════════════════════════════════════════════
+//
+// 카카오톡 인앱브라우저가 vercel.app 도메인의 공유 URL을 차단하는 이슈로,
+// URL 복사를 가장 큰 버튼으로 두고, 카카오는 보조로 처리.
+
+// URL 복사 (모든 디바이스/브라우저 호환)
+export async function copyShareUrl(shareUrl) {
+  if (!shareUrl) {
+    alert("공유 링크가 없습니다.");
+    return false;
+  }
+
+  try {
+    // 모던 브라우저: Clipboard API
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(shareUrl);
+      console.log("[copyShareUrl] ✅ 클립보드 복사 성공");
+      return true;
+    }
+    // 폴백: 임시 textarea 사용 (구버전 브라우저)
+    const textarea = document.createElement("textarea");
+    textarea.value = shareUrl;
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return ok;
+  } catch (e) {
+    console.error("[copyShareUrl] 복사 실패:", e);
+    // 마지막 수단: prompt로 표시 → 사용자가 직접 복사
+    prompt("이 URL을 복사하세요 (Ctrl+C):", shareUrl);
+    return false;
+  }
+}
+
+// 시스템 공유 (Web Share API - 모바일 네이티브 공유 시트)
+// iOS/Android 모두 지원, PC 일부 브라우저만 지원
+export async function systemShare({ title, text, url }) {
+  if (!navigator.share) {
+    return { ok: false, reason: "지원하지 않는 브라우저" };
+  }
+  try {
+    await navigator.share({ title, text, url });
+    console.log("[systemShare] ✅ 시스템 공유 완료");
+    return { ok: true };
+  } catch (e) {
+    if (e.name === "AbortError") {
+      // 사용자가 취소 - 정상
+      return { ok: false, reason: "cancelled" };
+    }
+    console.error("[systemShare] 실패:", e);
+    return { ok: false, reason: e.message };
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// 🆕 ShareButtonGroup: 통합 공유 버튼 컴포넌트
+// ═══════════════════════════════════════════════════
+//
+// URL 복사를 가장 큰 버튼으로 두고, 카카오톡과 시스템 공유는 보조.
+// 카카오톡 인앱브라우저의 vercel.app 클릭 차단 이슈 우회용.
+//
+// props:
+//   - context: "InlineDebrief" | "DebriefSection" | "MyHistory" (로깅용)
+//   - shareData: createShareLink에 전달할 디브리핑 데이터
+//   - kakaoTemplate: { title, description } 카카오 메시지용
+export function ShareButtonGroup({ context = "Share", shareData, kakaoTemplate }) {
+  const [generating, setGenerating] = useState(false);
+  const [shareUrl, setShareUrl] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  // 공유 링크 생성 (1회만, 캐시)
+  const ensureShareUrl = async () => {
+    if (shareUrl) return shareUrl;
+    setGenerating(true);
+    try {
+      console.log(`[${context}] 공유 링크 생성 중...`);
+      const url = await createShareLink(shareData);
+      if (url) {
+        setShareUrl(url);
+        return url;
+      } else {
+        // 폴백: 메인 도메인
+        const fallback = "https://cashflow-coach.vercel.app";
+        setShareUrl(fallback);
+        return fallback;
+      }
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // 1️⃣ URL 복사 (메인 액션)
+  const handleCopy = async () => {
+    const url = await ensureShareUrl();
+    if (!url) {
+      alert("공유 링크 생성 실패");
+      return;
+    }
+    const ok = await copyShareUrl(url);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    }
+  };
+
+  // 2️⃣ 카카오톡 공유
+  const handleKakao = async () => {
+    const kakaoKey = process.env.NEXT_PUBLIC_KAKAO_JS_KEY;
+    if (!kakaoKey) {
+      alert("⚠️ 카카오톡 공유가 아직 설정되지 않았습니다.");
+      return;
+    }
+    const url = await ensureShareUrl();
+    try {
+      if (!window.Kakao) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = "https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js";
+          script.integrity = "sha384-TiCUE00h649CAMonG018J2ujOgDKW/kVWlChEuu4jK2vxfAAD0eZxzCKakxg55G4";
+          script.crossOrigin = "anonymous";
+          script.onload = resolve;
+          script.onerror = () => reject(new Error("Kakao SDK 로드 실패"));
+          document.head.appendChild(script);
+        });
+      }
+      if (!window.Kakao.isInitialized()) window.Kakao.init(kakaoKey);
+
+      const PROD_DOMAIN = "https://cashflow-coach.vercel.app";
+      window.Kakao.Share.sendDefault({
+        objectType: "feed",
+        content: {
+          title: kakaoTemplate.title,
+          description: kakaoTemplate.description,
+          imageUrl: `${PROD_DOMAIN}/og-image.png`,
+          link: { mobileWebUrl: url, webUrl: url },
+        },
+        buttons: [{
+          title: "디브리핑 보기",
+          link: { mobileWebUrl: url, webUrl: url },
+        }],
+      });
+      console.log(`[${context} 카카오] 전송 URL:`, url);
+    } catch (e) {
+      console.error(`[${context} 카카오] 실패:`, e);
+      alert("카카오톡 공유 실패: " + e.message);
+    }
+  };
+
+  // 3️⃣ 시스템 공유 (Web Share API)
+  const handleSystemShare = async () => {
+    const url = await ensureShareUrl();
+    const result = await systemShare({
+      title: kakaoTemplate.title,
+      text: kakaoTemplate.description,
+      url,
+    });
+    if (!result.ok && result.reason !== "cancelled") {
+      // 폴백: URL 복사
+      await handleCopy();
+    }
+  };
+
+  const hasNativeShare = typeof navigator !== "undefined" && !!navigator.share;
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      {/* 안내 문구 */}
+      <div style={{
+        fontSize: 10, color: "#a1a1aa", marginBottom: 8, textAlign: "center",
+        lineHeight: 1.5,
+      }}>
+        💡 카카오톡 공유는 일부 환경에서 클릭이 막힐 수 있어요.
+        <br />가장 확실한 방법은 <strong style={{ color: "#fde68a" }}>링크 복사</strong>입니다.
+      </div>
+
+      {/* 메인 액션: 링크 복사 (가장 큰 버튼) */}
+      <button
+        onClick={handleCopy}
+        disabled={generating}
+        style={{
+          width: "100%", padding: "12px 16px", borderRadius: 10,
+          border: "1px solid " + (copied ? "#22c55e80" : "#3b82f680"),
+          background: copied ? "#22c55e15" : "linear-gradient(135deg, #3b82f615, #8b5cf615)",
+          color: copied ? "#22c55e" : "#60a5fa",
+          fontSize: 13, fontWeight: 700,
+          cursor: generating ? "not-allowed" : "pointer",
+          opacity: generating ? 0.6 : 1,
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          transition: "all 0.2s",
+        }}
+      >
+        <span style={{ fontSize: 16 }}>{generating ? "⏳" : copied ? "✅" : "🔗"}</span>
+        <span>
+          {generating ? "공유 링크 만드는 중..." :
+           copied ? "복사 완료! (어디든 붙여넣기)" :
+           "공유 링크 복사하기"}
+        </span>
+      </button>
+
+      {/* 보조 액션 그룹 */}
+      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+        <button
+          onClick={handleKakao}
+          disabled={generating}
+          style={{
+            flex: 1, padding: "8px 10px", borderRadius: 8,
+            border: "1px solid #fcd34d40", background: "#fde68a10",
+            color: "#fde68a",
+            fontSize: 11, fontWeight: 600,
+            cursor: generating ? "not-allowed" : "pointer",
+            opacity: generating ? 0.5 : 1,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+          }}
+        >
+          <span style={{ fontSize: 12 }}>💬</span>
+          <span>카카오톡</span>
+        </button>
+
+        {hasNativeShare && (
+          <button
+            onClick={handleSystemShare}
+            disabled={generating}
+            style={{
+              flex: 1, padding: "8px 10px", borderRadius: 8,
+              border: "1px solid #a78bfa40", background: "#8b5cf610",
+              color: "#a78bfa",
+              fontSize: 11, fontWeight: 600,
+              cursor: generating ? "not-allowed" : "pointer",
+              opacity: generating ? 0.5 : 1,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+            }}
+          >
+            <span style={{ fontSize: 12 }}>📤</span>
+            <span>다른 앱</span>
+          </button>
+        )}
+      </div>
+
+      {/* 공유 URL 생성됐으면 작게 표시 */}
+      {shareUrl && (
+        <div style={{
+          marginTop: 8, padding: "6px 10px", borderRadius: 6,
+          background: "#0a0a0f", border: "1px solid #27272a",
+          fontSize: 9, color: "#71717a", textAlign: "center",
+          wordBreak: "break-all", fontFamily: "monospace",
+        }}>
+          {shareUrl}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════
    24칸 쥐경주 판 배열 (확정)
    홀수(1,3,5,7,9,11,13,15,17,19,21,23) = 기회 (12칸)
@@ -7839,24 +8097,28 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
             </div>
           )}
 
-          {/* 🆕 카카오톡 공유 버튼 — 활성 피드백이 있을 때만 표시 */}
+          {/* 🆕 디브리핑 공유 - URL 복사 우선 + 카카오 보조 */}
           {activeFeedbackText && (
-            <button
-              onClick={handleKakaoShare}
-              disabled={kakaoLoading}
-              style={{
-                width: "100%", padding: "10px 14px", borderRadius: 8,
-                border: "1px solid #fcd34d50", background: "#fde68a15",
-                color: "#fde68a",
-                fontSize: 12, fontWeight: 700,
-                cursor: kakaoLoading ? "not-allowed" : "pointer",
-                opacity: kakaoLoading ? 0.6 : 1,
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            <ShareButtonGroup
+              context="InlineDebrief"
+              shareData={{
+                gameKey: gameKey || null,
+                version,
+                job: gameSnapshot?.job || "캐쉬플로우",
+                turnCount: turns,
+                escaped: gameSnapshot?.escaped || false,
+                datePlayed: new Date().toISOString().slice(0, 10),
+                analysis: analysis || null,
+                feedbackText: activeFeedbackText,
+                feedbackTier: activeTier,
+                personaKey: gameSnapshot?.personaKey || null,
+                personaName: gameSnapshot?.personaName || null,
               }}
-            >
-              <span style={{ fontSize: 14 }}>{kakaoLoading ? "⏳" : "💬"}</span>
-              <span>{kakaoLoading ? "카카오톡 SDK 로딩..." : "카카오톡으로 보내기"}</span>
-            </button>
+              kakaoTemplate={{
+                title: `${activeTier === 0 ? "💬" : activeTier === 1 ? "📝" : "💎"} ${activeTier === 0 ? "요약 피드백" : activeTier === 1 ? "상세 피드백" : "프리미엄 피드백"} - ${gameSnapshot?.job || "캐쉬플로우"}`,
+                description: `📅 ${new Date().toLocaleDateString("ko-KR")} · ${version} · ${turns}턴`,
+              }}
+            />
           )}
         </div>
       </div>
@@ -10833,88 +11095,27 @@ RULES:
               <div style={{ fontSize: 13, lineHeight: 2, color: "#d4d4d8", whiteSpace: "pre-wrap" }}>{displayText}</div>
             </div>
 
-            {/* 🆕 카카오톡 공유 버튼 - 개별 공유 링크 생성 후 전송 */}
-            <button
-              onClick={async () => {
-                const kakaoKey = process.env.NEXT_PUBLIC_KAKAO_JS_KEY;
-                if (!kakaoKey) {
-                  alert("⚠️ 카카오톡 공유 기능이 아직 설정되지 않았습니다.");
-                  return;
-                }
-                try {
-                  // 1. 공유 링크 생성 (Supabase에 저장)
-                  console.log("[DebriefSection 카카오 공유] 1단계: 공유 링크 생성 중...");
-                  const shareUrl = await createShareLink({
-                    gameKey: gameSnapshot?.gameKey || gameSnapshot?.id || null,
-                    version,
-                    job: gameSnapshot?.job || "캐쉬플로우",
-                    turnCount: turns,
-                    escaped: gameSnapshot?.escaped || false,
-                    datePlayed: new Date().toISOString().slice(0, 10),
-                    analysis: gameSnapshot?.analysis || null,
-                    feedbackText: displayText,
-                    feedbackTier: tier,
-                    personaKey: gameSnapshot?.personaKey || null,
-                    personaName: gameSnapshot?.personaName || null,
-                  });
-
-                  if (!shareUrl) {
-                    // 공유 링크 생성 실패 시 PROD_DOMAIN으로 fallback
-                    console.warn("[DebriefSection] 공유 링크 생성 실패, 메인 도메인으로 폴백");
-                  }
-                  const finalUrl = shareUrl || "https://cashflow-coach.vercel.app";
-
-                  // 2. Kakao SDK 동적 로드
-                  if (!window.Kakao) {
-                    await new Promise((resolve, reject) => {
-                      const script = document.createElement("script");
-                      script.src = "https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js";
-                      script.integrity = "sha384-TiCUE00h649CAMonG018J2ujOgDKW/kVWlChEuu4jK2vxfAAD0eZxzCKakxg55G4";
-                      script.crossOrigin = "anonymous";
-                      script.onload = resolve;
-                      script.onerror = () => reject(new Error("Kakao SDK 로드 실패"));
-                      document.head.appendChild(script);
-                    });
-                  }
-                  if (!window.Kakao.isInitialized()) window.Kakao.init(kakaoKey);
-
-                  const tierLabel = currentTier.label.replace(/\s*\(\$\d+\)/, "");
-                  const tierIcon = tier === 0 ? "💬" : tier === 1 ? "📝" : "💎";
-                  const job = gameSnapshot?.job || "캐쉬플로우";
-                  const snippet = displayText.length > 200 ? displayText.substring(0, 200) + "..." : displayText;
-                  const PROD_DOMAIN = "https://cashflow-coach.vercel.app";
-
-                  console.log("[DebriefSection 카카오 공유] 2단계: 카카오 전송, URL:", finalUrl);
-
-                  window.Kakao.Share.sendDefault({
-                    objectType: "feed",
-                    content: {
-                      title: `${tierIcon} ${tierLabel} - ${job}`,
-                      description: `📅 ${new Date().toLocaleDateString("ko-KR")} · ${version} · ${turns}턴\n\n${snippet}`,
-                      imageUrl: `${PROD_DOMAIN}/og-image.png`,
-                      link: { mobileWebUrl: finalUrl, webUrl: finalUrl },
-                    },
-                    buttons: [{
-                      title: "디브리핑 전체 보기",
-                      link: { mobileWebUrl: finalUrl, webUrl: finalUrl },
-                    }],
-                  });
-                } catch (e) {
-                  console.error("[DebriefSection] 카카오 공유 실패:", e);
-                  alert("❌ 카카오톡 공유 실패: " + (e.message || "알 수 없는 오류"));
-                }
+            {/* 🆕 디브리핑 공유 - URL 복사 우선 + 카카오 보조 */}
+            <ShareButtonGroup
+              context="DebriefSection"
+              shareData={{
+                gameKey: gameSnapshot?.gameKey || gameSnapshot?.id || null,
+                version,
+                job: gameSnapshot?.job || "캐쉬플로우",
+                turnCount: turns,
+                escaped: gameSnapshot?.escaped || false,
+                datePlayed: new Date().toISOString().slice(0, 10),
+                analysis: gameSnapshot?.analysis || null,
+                feedbackText: displayText,
+                feedbackTier: tier,
+                personaKey: gameSnapshot?.personaKey || null,
+                personaName: gameSnapshot?.personaName || null,
               }}
-              style={{
-                width: "100%", marginTop: 10, padding: "10px 14px", borderRadius: 8,
-                border: "1px solid #fcd34d50", background: "#fde68a15",
-                color: "#fde68a",
-                fontSize: 12, fontWeight: 700, cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              kakaoTemplate={{
+                title: `${tier === 0 ? "💬" : tier === 1 ? "📝" : "💎"} ${currentTier.label.replace(/\s*\(\$\d+\)/, "")} - ${gameSnapshot?.job || "캐쉬플로우"}`,
+                description: `📅 ${new Date().toLocaleDateString("ko-KR")} · ${version} · ${turns}턴`,
               }}
-            >
-              <span style={{ fontSize: 14 }}>💬</span>
-              <span>카카오톡으로 보내기</span>
-            </button>
+            />
 
             {tier < 2 && (
               <div style={{ marginTop: 12, padding: "12px 16px", borderRadius: 10, textAlign: "center", background: TIERS[tier + 1].color + "10", border: `1px solid ${TIERS[tier + 1].color}30` }}>
