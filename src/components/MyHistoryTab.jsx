@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { generateFreeFeedback, generatePaidFeedback, buildPromptText, computeBestWorstPaths, runFullAnalysis, AnalysisReport, diagnoseFinancialLevel } from "./CashflowCoachingSim";
+import { generateFreeFeedback, generatePaidFeedback, buildPromptText, computeBestWorstPaths, runFullAnalysis, AnalysisReport, diagnoseFinancialLevel, createShareLink } from "./CashflowCoachingSim";
 import { adaptGameToStorybook } from "./pdf/debriefDataAdapter";
 import { downloadStorybookPDF } from "./pdf/DebriefStorybookPDF";
 import {
@@ -2098,22 +2098,33 @@ function DebriefResultModal({ modal, onClose }) {
         const tierLabel = meta.name.replace(/\s*\(\$\d+\)/, "");
 
         // 카카오톡 메시지는 템플릿에 긴 본문을 직접 넣기 어려움 (1000자 제한)
-        // → 요약 텍스트 + "웹에서 전체 보기" 링크 방식이 표준
-        // 하지만 링크용 페이지가 없으니 → 텍스트 설명에 본문 발췌만 포함
+        // → 요약 텍스트 + "디브리핑 전체 보기" 링크 방식이 표준
         const snippet = text.length > 200 ? text.substring(0, 200) + "..." : text;
 
-        // 🔧 카카오 공유 클릭 무반응 문제 해결:
-        //   카카오톡은 "앱 대표 도메인"과 정확히 일치하는 URL만 클릭 허용함.
-        //   window.location.href는 fragment(#)나 querystring(?) 포함되면 거부될 수 있고,
-        //   localhost인 경우 다른 사람 폰에선 절대 못 열림.
-        //   → 항상 깨끗한 프로덕션 도메인 사용
-        const PROD_DOMAIN = "https://cashflow-coach.vercel.app";
-        const shareUrl = PROD_DOMAIN;  // 메인 페이지로만 이동
+        // 🆕 1단계: 공유 링크 생성 (Supabase에 저장)
+        console.log("[MyHistoryTab 카카오 공유] 1단계: 공유 링크 생성 중...");
+        const shareUrl = await createShareLink({
+          gameKey: game.key || game.id || null,
+          version: game.version || null,
+          job: game.job || "캐쉬플로우",
+          turnCount: game.turnCount || 0,
+          escaped: game.escaped || false,
+          datePlayed: dateStr.replace(/\./g, "-").replace(/\s/g, "").replace(/-$/, ""),
+          analysis: game.debrief?.analysis || null,
+          feedbackText: text,
+          feedbackTier: meta.tier ?? null,
+          personaKey: game.debrief?.personaKey || null,
+          personaName: game.debrief?.personaName || null,
+        });
 
-        // 🔍 디버그: 어떤 URL을 보내는지 확인 (F12 콘솔에서 보임)
-        console.log("[카카오 공유] 전송 URL:", shareUrl);
-        console.log("[카카오 공유] 현재 page:", window.location.href);
-        console.log("[카카오 공유] 카카오 앱 키 등록됨:", !!kakaoKey);
+        // 🔧 카카오 공유 URL 결정:
+        //   1순위: 공유 링크 (수신자가 클릭 시 디브리핑 직접 보기)
+        //   2순위 (fallback): 메인 도메인
+        const PROD_DOMAIN = "https://cashflow-coach.vercel.app";
+        const finalUrl = shareUrl || PROD_DOMAIN;
+
+        console.log("[MyHistoryTab 카카오 공유] 2단계: 카카오 전송, URL:", finalUrl);
+        console.log("[MyHistoryTab 카카오 공유] 카카오 앱 키 등록됨:", !!kakaoKey);
 
         Kakao.Share.sendDefault({
           objectType: "feed",
@@ -2122,16 +2133,16 @@ function DebriefResultModal({ modal, onClose }) {
             description: `📅 ${dateStr} · ${game.version} · ${game.turnCount}턴${game.escaped ? " · ✅ 탈출" : ""}\n\n${snippet}`,
             imageUrl: `${PROD_DOMAIN}/og-image.png`,
             link: {
-              mobileWebUrl: shareUrl,
-              webUrl: shareUrl,
+              mobileWebUrl: finalUrl,
+              webUrl: finalUrl,
             },
           },
           buttons: [
             {
-              title: "캐쉬플로우 코치 열기",
+              title: shareUrl ? "디브리핑 전체 보기" : "캐쉬플로우 코치 열기",
               link: {
-                mobileWebUrl: shareUrl,
-                webUrl: shareUrl,
+                mobileWebUrl: finalUrl,
+                webUrl: finalUrl,
               },
             },
           ],

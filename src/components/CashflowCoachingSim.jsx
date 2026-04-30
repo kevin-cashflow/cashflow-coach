@@ -47,6 +47,52 @@ import {
   createDebtRepayTurn,
 } from "@/lib/gameStateEngine";
 
+// ═══════════════════════════════════════════════════
+// 🆕 공유 링크 생성 헬퍼 (POST /api/share/create)
+// ═══════════════════════════════════════════════════
+//
+// 디브리핑을 외부 공유용으로 저장하고 URL 반환.
+// 카카오톡 공유 시 메인 도메인 대신 이 URL을 사용하면
+// 받는 사람이 클릭해서 진짜 디브리핑을 볼 수 있음.
+//
+// shareData: { gameKey, version, job, turnCount, escaped, datePlayed,
+//              analysis, feedbackText, feedbackTier, personaKey, personaName }
+//
+// returns: 공유 URL (string) or null (실패 시)
+export async function createShareLink(shareData) {
+  try {
+    // 현재 세션 토큰 조회
+    const { data: { session } } = await supabase.auth.getSession();
+    const accessToken = session?.access_token;
+    if (!accessToken) {
+      console.warn("[createShareLink] 세션 없음 - 공유 링크 생성 불가");
+      return null;
+    }
+
+    const res = await fetch("/api/share/create", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(shareData),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.warn("[createShareLink] API 실패:", err);
+      return null;
+    }
+
+    const { url } = await res.json();
+    console.log("[createShareLink] ✅ 공유 URL 생성:", url);
+    return url;
+  } catch (e) {
+    console.warn("[createShareLink] 예외:", e.message);
+    return null;
+  }
+}
+
 /* ═══════════════════════════════════════════════════
    24칸 쥐경주 판 배열 (확정)
    홀수(1,3,5,7,9,11,13,15,17,19,21,23) = 기회 (12칸)
@@ -7628,7 +7674,24 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
 
     setKakaoLoading(true);
     try {
-      // Kakao SDK 로드 (1회만)
+      // 1. 공유 링크 생성
+      console.log("[InlineDebrief 카카오 공유] 1단계: 공유 링크 생성 중...");
+      const shareUrl = await createShareLink({
+        gameKey: gameKey || null,
+        version,
+        job: gameSnapshot?.job || "캐쉬플로우",
+        turnCount: turns,
+        escaped: gameSnapshot?.escaped || false,
+        datePlayed: new Date().toISOString().slice(0, 10),
+        analysis: analysis || null,
+        feedbackText: text,
+        feedbackTier: activeTier,
+        personaKey: gameSnapshot?.personaKey || null,
+        personaName: gameSnapshot?.personaName || null,
+      });
+      const finalUrl = shareUrl || "https://cashflow-coach.vercel.app";
+
+      // 2. Kakao SDK 로드 (1회만)
       if (!window.Kakao) {
         await new Promise((resolve, reject) => {
           const script = document.createElement("script");
@@ -7649,7 +7712,7 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
 
       const PROD_DOMAIN = "https://cashflow-coach.vercel.app";
 
-      console.log("[InlineDebrief 카카오 공유] 전송 URL:", PROD_DOMAIN);
+      console.log("[InlineDebrief 카카오 공유] 2단계: 카카오 전송, URL:", finalUrl);
 
       window.Kakao.Share.sendDefault({
         objectType: "feed",
@@ -7657,11 +7720,11 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
           title: `${tierIcon} ${tierLabel} - ${job}`,
           description: `📅 ${new Date().toLocaleDateString("ko-KR")} · ${version} · ${turns}턴\n\n${snippet}`,
           imageUrl: `${PROD_DOMAIN}/og-image.png`,
-          link: { mobileWebUrl: PROD_DOMAIN, webUrl: PROD_DOMAIN },
+          link: { mobileWebUrl: finalUrl, webUrl: finalUrl },
         },
         buttons: [{
-          title: "캐쉬플로우 코치 열기",
-          link: { mobileWebUrl: PROD_DOMAIN, webUrl: PROD_DOMAIN },
+          title: "디브리핑 전체 보기",
+          link: { mobileWebUrl: finalUrl, webUrl: finalUrl },
         }],
       });
     } catch (e) {
@@ -8539,6 +8602,8 @@ ${persona.nextStep || "(권장 행동 미확보)"}
 
 ## 🎭 당신의 재무 페르소나
 
+![${info.name || "페르소나"}](https://cashflow-coach.vercel.app/personas/${(info.key || "").toLowerCase()}.png)
+
 **${info.icon || "👤"} ${info.name || ""} (${info.nameEn || ""})**
 분류: ${info.classification || "-"}
 
@@ -8747,9 +8812,15 @@ function buildHardcodedPersonaCard(personaContext) {
   const humanizedDiagnosis = humanizeMetricTerms(meaningLine || diagnosisLine || "");
   const humanizedNextStep = humanizeMetricTerms(nextStepLine || "");
 
+  // 🆕 페르소나 키로부터 이미지 파일 경로 추출
+  // nameLine 예: "👑 완성형 설계자 (Master Architect)" → "master_architect"
+  const personaImageUrl = getPersonaImageUrl(nameLine);
+
   return `## 🎭 당신의 재무 페르소나
 
-**${nameLine || "(페르소나 진단 결과)"}**
+${personaImageUrl ? `![${nameLine || "페르소나"}](${personaImageUrl})
+
+` : ""}**${nameLine || "(페르소나 진단 결과)"}**
 ${classLine ? `분류: ${classLine}` : ""}
 
 ### 📊 진단 근거 (게임 데이터 기반)
@@ -8770,6 +8841,46 @@ ${humanizedNextStep || "(권장 사항 미확보)"}
 > · **활용률**: 게임 중 만난 매수 기회 카드 중 실제로 매수한 비율.
 > · **자산 회전율**: 매수한 자산 중 매도까지 한 비율. 100%면 단타, 0%면 장기 보유.
 > · **레버리지**: 부채를 활용해 더 큰 자산을 매입하는 비율. 부자 아빠 전략의 핵심.`;
+}
+
+// 🆕 페르소나 이름에서 이미지 URL 매핑
+// 8개 페르소나 PNG 파일 경로를 반환. /public/personas/{key}.png 형태.
+function getPersonaImageUrl(nameLine) {
+  if (!nameLine || typeof window === "undefined") return null;
+
+  // 한글명 또는 영문명으로 매핑 (어느 쪽이 들어와도 매치)
+  const PERSONA_KEY_MAP = {
+    "완성형 설계자": "master_architect",
+    "Master Architect": "master_architect",
+    "여유로운 탐험가": "optimistic_explorer",
+    "Optimistic Explorer": "optimistic_explorer",
+    "신중한 성취자": "anxious_achiever",
+    "Anxious Achiever": "anxious_achiever",
+    "성장이 필요한 도전가": "sensitive_challenger",
+    "성장 도전가": "sensitive_challenger",
+    "Sensitive Challenger": "sensitive_challenger",
+    "전략적 레버리지 전문가": "strategic_builder",
+    "전략적 레버리지": "strategic_builder",
+    "Strategic Builder": "strategic_builder",
+    "열정적인 행동파": "active_risk_taker",
+    "열정적 행동파": "active_risk_taker",
+    "Active Risk-Taker": "active_risk_taker",
+    "안정 중심 자산가": "safe_haven_keeper",
+    "안정 자산가": "safe_haven_keeper",
+    "Safe-Haven Keeper": "safe_haven_keeper",
+    "성실한 저축가": "diligent_saver",
+    "Diligent Saver": "diligent_saver",
+  };
+
+  // nameLine에서 매칭되는 키 찾기
+  for (const [name, key] of Object.entries(PERSONA_KEY_MAP)) {
+    if (nameLine.includes(name)) {
+      // 배포 환경 도메인 사용 (markdown 이미지가 클라이언트에서 로드됨)
+      const PROD_DOMAIN = "https://cashflow-coach.vercel.app";
+      return `${PROD_DOMAIN}/personas/${key}.png`;
+    }
+  }
+  return null;
 }
 
 // 🆕 evidence 텍스트의 약어를 일상 표현으로 풀어쓰기
@@ -10711,7 +10822,7 @@ RULES:
               <div style={{ fontSize: 13, lineHeight: 2, color: "#d4d4d8", whiteSpace: "pre-wrap" }}>{displayText}</div>
             </div>
 
-            {/* 🆕 카카오톡 공유 버튼 */}
+            {/* 🆕 카카오톡 공유 버튼 - 개별 공유 링크 생성 후 전송 */}
             <button
               onClick={async () => {
                 const kakaoKey = process.env.NEXT_PUBLIC_KAKAO_JS_KEY;
@@ -10720,7 +10831,29 @@ RULES:
                   return;
                 }
                 try {
-                  // Kakao SDK 동적 로드 (1회만)
+                  // 1. 공유 링크 생성 (Supabase에 저장)
+                  console.log("[DebriefSection 카카오 공유] 1단계: 공유 링크 생성 중...");
+                  const shareUrl = await createShareLink({
+                    gameKey: gameSnapshot?.gameKey || gameSnapshot?.id || null,
+                    version,
+                    job: gameSnapshot?.job || "캐쉬플로우",
+                    turnCount: turns,
+                    escaped: gameSnapshot?.escaped || false,
+                    datePlayed: new Date().toISOString().slice(0, 10),
+                    analysis: gameSnapshot?.analysis || null,
+                    feedbackText: displayText,
+                    feedbackTier: tier,
+                    personaKey: gameSnapshot?.personaKey || null,
+                    personaName: gameSnapshot?.personaName || null,
+                  });
+
+                  if (!shareUrl) {
+                    // 공유 링크 생성 실패 시 PROD_DOMAIN으로 fallback
+                    console.warn("[DebriefSection] 공유 링크 생성 실패, 메인 도메인으로 폴백");
+                  }
+                  const finalUrl = shareUrl || "https://cashflow-coach.vercel.app";
+
+                  // 2. Kakao SDK 동적 로드
                   if (!window.Kakao) {
                     await new Promise((resolve, reject) => {
                       const script = document.createElement("script");
@@ -10740,7 +10873,7 @@ RULES:
                   const snippet = displayText.length > 200 ? displayText.substring(0, 200) + "..." : displayText;
                   const PROD_DOMAIN = "https://cashflow-coach.vercel.app";
 
-                  console.log("[DebriefSection 카카오 공유] 전송 URL:", PROD_DOMAIN);
+                  console.log("[DebriefSection 카카오 공유] 2단계: 카카오 전송, URL:", finalUrl);
 
                   window.Kakao.Share.sendDefault({
                     objectType: "feed",
@@ -10748,11 +10881,11 @@ RULES:
                       title: `${tierIcon} ${tierLabel} - ${job}`,
                       description: `📅 ${new Date().toLocaleDateString("ko-KR")} · ${version} · ${turns}턴\n\n${snippet}`,
                       imageUrl: `${PROD_DOMAIN}/og-image.png`,
-                      link: { mobileWebUrl: PROD_DOMAIN, webUrl: PROD_DOMAIN },
+                      link: { mobileWebUrl: finalUrl, webUrl: finalUrl },
                     },
                     buttons: [{
-                      title: "캐쉬플로우 코치 열기",
-                      link: { mobileWebUrl: PROD_DOMAIN, webUrl: PROD_DOMAIN },
+                      title: "디브리핑 전체 보기",
+                      link: { mobileWebUrl: finalUrl, webUrl: finalUrl },
                     }],
                   });
                 } catch (e) {
