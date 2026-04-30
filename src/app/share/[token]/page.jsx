@@ -20,9 +20,40 @@ export default function SharePage() {
   const [share, setShare] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [inappBlocked, setInappBlocked] = useState(false);
 
+  // 🆕 useEffect 1: 카카오톡 인앱브라우저 감지 + 외부 브라우저 자동 호출
+  // ─────────────────────────────────────────────────────────────────
+  // 카카오톡 인앱브라우저는 vercel.app 같은 일부 도메인에서 클릭 무반응 이슈가 있음.
+  // 페이지 로드 시 카카오톡 인앱브라우저면 즉시 외부 브라우저(크롬/사파리)로 자동 전환.
+  // 한국 서비스 표준 패턴 (삼쩜삼, 쿠팡 등 사용 중).
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof navigator === "undefined") return;
+
+    const ua = navigator.userAgent.toLowerCase();
+    const isKakaoTalk = ua.includes("kakaotalk");
+    const isLine = ua.includes("line/");
+    const isFacebook = ua.includes("fb_iab") || ua.includes("fbav");
+    const isInstagram = ua.includes("instagram");
+
+    if (isKakaoTalk) {
+      // 카카오톡: 외부 브라우저로 직접 전환 시도 (가장 효과적)
+      const targetUrl = window.location.href;
+      console.log("[share] 카카오톡 감지 → 외부 브라우저 전환 시도");
+      window.location.href = "kakaotalk://web/openExternal?url=" + encodeURIComponent(targetUrl);
+
+      // 만약 위 호출이 실패하면 1.5초 후 안내 화면 표시
+      setTimeout(() => setInappBlocked(true), 1500);
+    } else if (isLine || isFacebook || isInstagram) {
+      // 다른 인앱브라우저: 안내 화면 표시
+      setInappBlocked(true);
+    }
+  }, []);
+
+  // useEffect 2: 공유 데이터 조회
   useEffect(() => {
     if (!token) return;
+    if (inappBlocked) return; // 인앱브라우저면 스킵
     let cancelled = false;
     
     async function load() {
@@ -47,7 +78,69 @@ export default function SharePage() {
     
     load();
     return () => { cancelled = true; };
-  }, [token]);
+  }, [token, inappBlocked]);
+
+  // 인앱브라우저 차단 안내 화면 (가장 먼저 체크)
+  if (inappBlocked) {
+    return (
+      <div style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "#0a0a0f",
+        color: "#fafafa",
+        fontFamily: "system-ui, -apple-system, sans-serif",
+        padding: 20,
+      }}>
+        <div style={{
+          maxWidth: 400, textAlign: "center",
+          padding: 30, borderRadius: 16,
+          background: "#1a1a24", border: "1px solid #27272a",
+        }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>🌐</div>
+          <h2 style={{ fontSize: 18, marginBottom: 12, color: "#fafafa" }}>
+            외부 브라우저에서 열어주세요
+          </h2>
+          <p style={{ fontSize: 13, color: "#a1a1aa", marginBottom: 16, lineHeight: 1.6 }}>
+            현재 인앱브라우저에서는 정상 표시가 어렵습니다.<br />
+            아래 방법으로 외부 브라우저(Chrome/Safari)에서 열어주세요.
+          </p>
+          <div style={{
+            padding: 14, borderRadius: 8, marginBottom: 16,
+            background: "#0a0a0f", border: "1px solid #27272a",
+            fontSize: 12, color: "#d4d4d8", textAlign: "left", lineHeight: 1.8,
+          }}>
+            <strong style={{ color: "#fde68a" }}>📱 안드로이드:</strong><br />
+            우측 상단 <strong>⋮</strong> → <strong>다른 브라우저로 열기</strong><br /><br />
+            <strong style={{ color: "#fde68a" }}>🍎 아이폰:</strong><br />
+            우측 하단 <strong>나침반(⊕)</strong> 아이콘 → <strong>Safari로 열기</strong>
+          </div>
+          <button
+            onClick={() => {
+              const url = window.location.href;
+              if (navigator.clipboard) {
+                navigator.clipboard.writeText(url).then(() => {
+                  alert("URL이 복사되었습니다.\n외부 브라우저 주소창에 붙여넣으세요.");
+                }).catch(() => {
+                  prompt("이 URL을 복사하여 외부 브라우저에 붙여넣으세요:", url);
+                });
+              } else {
+                prompt("이 URL을 복사하여 외부 브라우저에 붙여넣으세요:", url);
+              }
+            }}
+            style={{
+              padding: "10px 20px", borderRadius: 8,
+              background: "#3b82f6", color: "#fff", border: "none",
+              fontSize: 13, fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            🔗 URL 복사
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // 로딩
   if (loading) {
