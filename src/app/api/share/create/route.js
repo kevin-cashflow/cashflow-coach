@@ -94,7 +94,21 @@ export async function POST(request) {
       job: body.job || null,
       turn_count: body.turnCount || 0,
       escaped: body.escaped || false,
-      date_played: body.datePlayed || null,
+      date_played: (() => {
+        // 날짜 안전 변환: ISO 8601 (YYYY-MM-DD) 형식만 허용
+        if (!body.datePlayed) return null;
+        const str = String(body.datePlayed).trim();
+        // 이미 ISO 형식이면 그대로
+        if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+        // 한국식 "2026. 4. 30." 같은 포맷 변환
+        try {
+          const parsed = new Date(str);
+          if (!isNaN(parsed.getTime())) {
+            return parsed.toISOString().slice(0, 10);
+          }
+        } catch {}
+        return null; // 변환 실패 시 NULL
+      })(),
       analysis: body.analysis || null,
       feedback_text: body.feedbackText || null,
       feedback_tier: body.feedbackTier ?? null,

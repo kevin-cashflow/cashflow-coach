@@ -2720,7 +2720,36 @@ function DebriefResultModal({ modal, onClose }) {
                   job: game?.job || "캐쉬플로우",
                   turnCount: game?.turnCount || 0,
                   escaped: game?.escaped || false,
-                  datePlayed: game?.date || (game?.dateTime ? new Date(game.dateTime).toISOString().slice(0, 10) : null),
+                  datePlayed: (() => {
+                    // 날짜를 항상 ISO 형식 (YYYY-MM-DD)로 변환
+                    // Supabase DATE 컬럼은 ISO 형식만 허용
+                    try {
+                      // 1순위: dateTime이 있으면 그걸로 ISO 변환
+                      if (game?.dateTime) {
+                        return new Date(game.dateTime).toISOString().slice(0, 10);
+                      }
+                      // 2순위: game.date가 있으면 파싱 시도
+                      if (game?.date) {
+                        // "2026. 4. 30. " 같은 한국식 포맷 정리
+                        const cleaned = game.date.replace(/\s/g, "").replace(/\.$/, "");
+                        // "2026.4.30" → "2026-04-30"
+                        const parts = cleaned.split(".").filter(Boolean);
+                        if (parts.length === 3) {
+                          const [y, m, d] = parts;
+                          return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+                        }
+                        // 그냥 Date로 파싱 시도
+                        const parsed = new Date(game.date);
+                        if (!isNaN(parsed.getTime())) {
+                          return parsed.toISOString().slice(0, 10);
+                        }
+                      }
+                      // 3순위: 오늘 날짜 폴백
+                      return new Date().toISOString().slice(0, 10);
+                    } catch {
+                      return new Date().toISOString().slice(0, 10);
+                    }
+                  })(),
                   analysis: game?.debrief?.analysis || analysis || null,
                   feedbackText: text,
                   feedbackTier: meta?.tier ?? null,
