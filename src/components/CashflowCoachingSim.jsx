@@ -1555,7 +1555,7 @@ const TurnRow = memo(function TurnRow({ t, i, isSub, onEdit, onDelete }) {
           {t.time != null && <span style={{ fontSize: 9, color: "#f59e0b", marginLeft: 4 }}>⏱{fmtTime(t.time)}</span>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {t.decisionSec != null && <span style={{ fontSize: 9, color: "#a78bfa" }}>{t.decisionSec}초</span>}
+          
           {t.action && (() => {
             const badge = ACTION_BADGE[t.action] || ACTION_BADGE.hold;
             return <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: badge.bg, color: badge.color }}>{badge.label}</span>;
@@ -1854,7 +1854,6 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
   const [timerOn, setTimerOn] = useState(true); // 타이머 켜기/끄기
   const [startTime, setStartTime] = useState(null);
   const [elapsed, setElapsed] = useState(0); // 초 단위
-  const [cardSelectedAt, setCardSelectedAt] = useState(null); // 카드 선택 시점(ms)
 
   // 🆕 미저장 상태에서 페이지 떠나려 할 때 경고 (5턴 이상 진행 시)
   // 자동 저장(gameSession)이 있어도 영구 저장(window.storage)이 안 되어 있으면
@@ -2106,7 +2105,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     setAction(null);
     setShares("");
     setSellPriceInput(0);
-    if (timerOn) setCardSelectedAt(null);
+    if (timerOn)
   };
 
   const checkSellEligibility = (card) => {
@@ -2189,7 +2188,6 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
   const addTurn = () => {
     if (!selectedCard && !["PAYDAY","CHARITY","BABY","DOWNSIZED"].includes(cellType)) return;
 
-    const decisionSec = (timerOn && cardSelectedAt && action) ? Math.round((Date.now() - cardSelectedAt) / 1000) : null;
     const sharesNum = parseInt(shares) || 0;
     const time = timerOn ? elapsed : null;
     const dice = parseInt(diceInput) || 0;
@@ -2217,7 +2215,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         buyCost: down, cf: type === "주식" ? 0 : cf, assetType: type, assetName,
         shares: type === "주식" ? sharesNum : undefined,
         stockPrice: type === "주식" ? (selectedCard.price || "") : undefined,
-        loan, time, decisionSec,
+        loan, time,
       });
       transaction = type === "주식"
         ? `${selectedCard.sub||"주식"} ${sharesNum}주 구매 @${selectedCard.price} → -$${fmtNum(down)}`
@@ -2229,7 +2227,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         turn, boardPos, dice, passedPaydays, dealType: dealTypeName, card: selectedCard,
         stockName: (selectedCard.sub || "").trim(),
         sellQty: sharesNum, sellPrice: sellPriceInput,
-        time, decisionSec,
+        time,
       });
       transaction = `${selectedCard.sub||"주식"} ${sharesNum}주 매각 @$${sellPriceInput} → +$${fmtNum(sellTotal)}`;
     }
@@ -2238,7 +2236,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       entry = {
         turn, cellType: "OPPORTUNITY", boardPos, dice, passedPaydays,
         dealType: dealTypeName, card: selectedCard, action: "rights",
-        time, decisionSec,
+        time,
         _schemaVersion: SCHEMA_VERSION,
         _rightsPrice: rightsPrice,
       };
@@ -2248,7 +2246,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       entry = {
         turn, cellType: "OPPORTUNITY", boardPos, dice, passedPaydays,
         dealType: dealTypeName, card: selectedCard, action: "pass",
-        time, decisionSec,
+        time,
         _schemaVersion: SCHEMA_VERSION,
       };
       transaction = `${selectedCard?.sub||"카드"} 패스`;
@@ -2264,7 +2262,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         entry = {
           turn, cellType: "OPPORTUNITY", boardPos, dice, passedPaydays,
           dealType: dealTypeName, card: selectedCard, action: "split",
-          time, decisionSec,
+          time,
           _schemaVersion: SCHEMA_VERSION,
           _stockName: stockName,
           _multiplier: mult,
@@ -2278,7 +2276,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         entry = {
           turn, cellType: "OPPORTUNITY", boardPos, dice, passedPaydays,
           dealType: dealTypeName, card: selectedCard, action: "split",
-          time, decisionSec,
+          time,
           _schemaVersion: SCHEMA_VERSION,
           _stockName: stockName,
           _multiplier: 1, // 무효 — 재계산에 영향 없음
@@ -2325,7 +2323,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
           sellPrice: isRateDrop ? sellPrice + assetLoan : sellPrice,
           assetCF: sellAsset.cf,
           assetLoan,
-          time, decisionSec,
+          time,
         });
         transaction = isRateDrop
           ? `${sellAsset.name}(${sellAsset.type}) 매각 차익 $${fmtNum(netProceeds)} (공식: 가격 + $50K - 대출)`
@@ -2335,7 +2333,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         entry = {
           turn, cellType: "MARKET", boardPos, dice, passedPaydays,
           dealType: "MARKET", card: selectedCard, action: "sell",
-          time, decisionSec,
+          time,
           _schemaVersion: SCHEMA_VERSION,
         };
         transaction = "MARKET 매각 — 대상 자산 없음";
@@ -2358,7 +2356,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         entry = {
           turn, cellType: "MARKET", boardPos, dice, passedPaydays,
           dealType: "MARKET", card: selectedCard, action: hasMultiFamily ? "damage" : "na",
-          time, decisionSec,
+          time,
           _schemaVersion: SCHEMA_VERSION,
           _damageAmount: plumbingCost,
         };
@@ -2373,7 +2371,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         entry = {
           turn, cellType: "MARKET", boardPos, dice, passedPaydays,
           dealType: "MARKET", card: selectedCard, action: "damage",
-          time, decisionSec,
+          time,
           _schemaVersion: SCHEMA_VERSION,
           _damageAmount: damageTotal,
         };
@@ -2386,7 +2384,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       entry = {
         turn, cellType: "MARKET", boardPos, dice, passedPaydays,
         dealType: "MARKET", card: selectedCard, action,
-        time, decisionSec,
+        time,
         _schemaVersion: SCHEMA_VERSION,
       };
       transaction = action === "na" ? "MARKET 해당없음" : "MARKET 홀딩";
@@ -2399,7 +2397,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       entry = createDoodadTurn({
         turn, boardPos, dice, passedPaydays, card: selectedCard,
         amount: amt, isChildCard,
-        time, decisionSec,
+        time,
       });
       transaction = isChildCard
         ? `DOODAD ${selectedCard.desc?.substring(0,15)} 자녀${babies}명×$${amt} = -$${fmtNum(actualAmt)}`
@@ -2422,14 +2420,14 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         entry = createCharityTurn({
           turn, boardPos, dice, passedPaydays,
           donated: true, donationAmount: charityAmount,
-          time, decisionSec,
+          time,
         });
         transaction = `기부 -$${fmtNum(charityAmount)} → 주사위2개×3턴`;
       } else {
         entry = createCharityTurn({
           turn, boardPos, dice, passedPaydays,
           donated: false, donationAmount: 0,
-          time, decisionSec,
+          time,
         });
         transaction = "기부 안함";
       }
@@ -2437,7 +2435,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     // ── BABY ──
     else if (cellType === "BABY") {
       entry = createBabyTurn({
-        turn, boardPos, dice, passedPaydays, time, decisionSec,
+        turn, boardPos, dice, passedPaydays, time,
       });
       transaction = babies >= 3
         ? `베이비 칸 — 자녀 3명 제한, 기록만 (총 양육비 $${fmtNum((jobData?.childCost || 0) * 3)}/월 유지)`
@@ -2448,7 +2446,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       const expense = totalExpense;
       entry = createDownsizedTurn({
         turn, boardPos, dice, passedPaydays, expense,
-        time, decisionSec,
+        time,
       });
       transaction = `다운사이즈 — 한 달 총지출 -$${fmtNum(expense)} (이후 2턴 휴식)`;
     }
@@ -2476,7 +2474,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
 
     setTurnLog(prev => [...prev, ...paydayLogs, entry]);
     setCurrentTurn(prev => prev + 1);
-    setSelectedCard(null); setAction(null); setShares(""); setCardSelectedAt(null);
+    setSelectedCard(null); setAction(null); setShares("");
     setSellPriceInput(0); setRightsPrice(0);
     setDiceInput(""); setDiceConfirmed(false); setPassedPaydays(0); setCellType("");
     setDealType("deal1"); setViewTab("input");
@@ -2564,7 +2562,6 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     const gameResults = turnLog.map(t => ({
       turn: t.turn, cell: { type: t.cellType, label: t.cellType }, dealType: t.dealType,
       card: t.card ? { ...t.card, _action: t.action, _shares: t.shares } : null,
-      decisionSec: t.decisionSec,
       splitApplied: t.splitApplied, // 무상증자/감자 적용 여부
       dice: [0], total: 0, pos: 0,
     }));
@@ -2610,7 +2607,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     setSelectedCard(null); setAction(null); setShares("");
     setSellPriceInput(0); setRightsPrice(0);
     setViewTab("input"); setCellType("");
-    setStartTime(null); setElapsed(0); setCardSelectedAt(null);
+    setStartTime(null); setElapsed(0);
     setGameEnded(false); setGameSaved(false);
     setReSellIdx(0); setReSellPrice(""); setStockSellQty({}); setStockSellPrice({});
     setCardCategory(null); setCardSubtype(null);
@@ -2910,7 +2907,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                 left: timerOn ? 23 : 3, transition: "left 0.2s",
               }}></div>
             </button>
-            <span style={{ fontSize: 10, color: "#71717a" }}>{timerOn ? "켜짐 — 결정 속도 분석 가능" : "꺼짐"}</span>
+            <span style={{ fontSize: 10, color: "#71717a" }}>{timerOn ? "켜짐" : "꺼짐"}</span>
           </div>
         )}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -3056,7 +3053,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                   turn: currentTurn, cellType: "DOWNSIZED_REST", boardPos,
                   dice: 0, passedPaydays: 0, dealType: "DOWNSIZED",
                   card: null, action: "rest", shares: null,
-                  time: timerOn ? elapsed : null, decisionSec: null,
+                  time: timerOn ? elapsed : null: null,
                   _schemaVersion: SCHEMA_VERSION,
                   transaction: `다운사이즈 휴식 (잔여 ${downsizeRestTurns - 1}턴)`,
                 };
@@ -3272,7 +3269,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                   </div>
                   <select
                     value={selectedCard ? cardList.indexOf(selectedCard) : ""}
-                    onChange={e => { const idx = parseInt(e.target.value); const c = idx >= 0 ? cardList[idx] : null; setSelectedCard(c); setShares(""); setCardSelectedAt(idx >= 0 ? Date.now() : null); setSellPriceInput(c ? parseNum(c.price) : 0); setAction(c && isSplitCard(c) ? "split" : null); }}
+                    onChange={e => { const idx = parseInt(e.target.value); const c = idx >= 0 ? cardList[idx] : null; setSelectedCard(c); setShares(""); setSellPriceInput(c ? parseNum(c.price) : 0); setAction(c && isSplitCard(c) ? "split" : null); }}
                     style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #27272a", background: "#18181b", color: "#e4e4e7", fontSize: 13, outline: "none", appearance: "auto" }}
                   >
                     <option value="">카드를 선택하세요</option>
@@ -3358,7 +3355,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                   </div>
                   <select
                     value={selectedCard ? cardList.indexOf(selectedCard) : ""}
-                    onChange={e => { const idx = parseInt(e.target.value); const c = idx >= 0 ? cardList[idx] : null; setSelectedCard(c); setShares(""); setCardSelectedAt(idx >= 0 ? Date.now() : null); setSellPriceInput(c ? parseNum(c.price) : 0); setAction(c && isSplitCard(c) ? "split" : null); }}
+                    onChange={e => { const idx = parseInt(e.target.value); const c = idx >= 0 ? cardList[idx] : null; setSelectedCard(c); setShares(""); setSellPriceInput(c ? parseNum(c.price) : 0); setAction(c && isSplitCard(c) ? "split" : null); }}
                     style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #27272a", background: "#18181b", color: "#e4e4e7", fontSize: 13, outline: "none", appearance: "auto" }}
                   >
                     <option value="">카드를 선택하세요</option>
@@ -3382,7 +3379,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
               <label style={{ fontSize: 11, color: "#71717a", display: "block", marginBottom: 4 }}>카드 선택</label>
               <select
                 value={selectedCard ? cardList.indexOf(selectedCard) : ""}
-                onChange={e => { const idx = parseInt(e.target.value); const c = idx >= 0 ? cardList[idx] : null; setSelectedCard(c); setShares(""); setCardSelectedAt(idx >= 0 ? Date.now() : null); setSellPriceInput(c ? parseNum(c.price) : 0); setAction(c && isSplitCard(c) ? "split" : null); }}
+                onChange={e => { const idx = parseInt(e.target.value); const c = idx >= 0 ? cardList[idx] : null; setSelectedCard(c); setShares(""); setSellPriceInput(c ? parseNum(c.price) : 0); setAction(c && isSplitCard(c) ? "split" : null); }}
                 style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #27272a", background: "#18181b", color: "#e4e4e7", fontSize: 13, outline: "none", appearance: "auto" }}
               >
                 <option value="">카드를 선택하세요</option>
@@ -4107,7 +4104,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                           card: { sub: asset_.name, desc: `타인 마켓카드로 ${asset_.name} 매도` },
                           action: "sell", shares: null,
                           assetType: asset_.type || "부동산",
-                          time: timerOn ? elapsed : null, decisionSec: null,
+                          time: timerOn ? elapsed : null: null,
                           _schemaVersion: SCHEMA_VERSION,
                           _sellAssetId: asset_.id,
                           _sellPrice: sellPrice_,
@@ -5027,7 +5024,6 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
               cell: { type: t.cellType, label: t.cellType },
               dealType: t.dealType,
               card: t.card ? { ...t.card, _action: t.action, _shares: t.shares } : null,
-              decisionSec: t.decisionSec,
               splitApplied: t.splitApplied,
               dice: [0], total: 0, pos: 0,
             }));
@@ -6677,7 +6673,6 @@ export function buildPromptText(results, version, turns) {
     if (c.sell) s += ` 매각${c.sell}`;
     if (c._action) s += ` [${c._action}]`;
     if (c._shares) s += ` ${c._shares}주`;
-    if (r.decisionSec != null) s += ` (${r.decisionSec}초결정)`;
     if (r.bought) s += ` [구매]`;
     if (r.sold === true) s += ` [판매]`;
     if (r.sold === false && (r.dealType === "MARKET")) s += ` [해당없음]`;
@@ -6703,7 +6698,7 @@ export const computeBestWorstPaths = (turnLogData, totalTurns) => {
   }
 
   // 🔧 results(gameResults) 구조를 turnLog 구조로 변환 (어댑터)
-  // results: { turn, cell:{type}, card:{...,_action,_shares}, decisionSec, ... }
+  // results: { turn, cell:{type}, card:{...,_action,_shares}, ... }
   // turnLog: { turn, cellType, card:{...}, action, shares, transaction, ... }
   const normalized = turnLogData.map(t => {
     // 이미 turnLog 구조면 그대로 사용
@@ -6717,7 +6712,6 @@ export const computeBestWorstPaths = (turnLogData, totalTurns) => {
       action: t.card?._action || t.action,
       shares: t.card?._shares || t.shares,
       transaction: t.transaction,
-      decisionSec: t.decisionSec,
     };
   });
 
@@ -7626,7 +7620,6 @@ ${turns <= 8 ? `    {"title": "출발과 탐색", "age": "20~30세", "turns": "T
   "finalQuestion": "debriefing question",
   "timeAnalysis": {
     "holdingPeriods": [{"asset":"name","buyTurn":1,"buyAge":20,"holdTurns":5,"holdYears":10,"totalCF":0,"insight":"analysis"}],
-    "decisionSpeed": [],
     "opportunityCost": "one sentence",
     "timeMessage": "core message about time and assets"
   }
@@ -8087,13 +8080,43 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
               <div style={{ fontSize: 10, color: "#a1a1aa", marginBottom: 8, textAlign: "right" }}>
                 {activeTier === 0 ? "💬 요약 피드백" : activeTier === 1 ? "📝 상세 피드백" : "💎 프리미엄 피드백"}
               </div>
-              <div style={{
-                fontSize: 12, lineHeight: 1.7, color: "#e4e4e7",
-                whiteSpace: "pre-wrap", wordBreak: "break-word",
-                maxHeight: 600, overflow: "auto",
-              }}>
-                {activeFeedbackText}
-              </div>
+              {(() => {
+                // 🆕 프리미엄(2) 일 때만 PersonaCard 분리 렌더 + 본문 카드화
+                const { cleanedText, personaData } = activeTier === 2
+                  ? extractPersonaFromText(activeFeedbackText)
+                  : { cleanedText: activeFeedbackText, personaData: null };
+
+                return (
+                  <>
+                    {activeTier === 2 ? (
+                      // 프리미엄: 카드형 시각화 + maxHeight 해제 (스크롤 자연스럽게)
+                      <div style={{ maxHeight: 700, overflow: "auto" }}>
+                        <FeedbackSections text={cleanedText} />
+                      </div>
+                    ) : (
+                      // 요약/상세: 기존 plain text 유지
+                      <div style={{
+                        fontSize: 12, lineHeight: 1.7, color: "#e4e4e7",
+                        whiteSpace: "pre-wrap", wordBreak: "break-word",
+                        maxHeight: 600, overflow: "auto",
+                      }}>
+                        {cleanedText}
+                      </div>
+                    )}
+
+                    {/* 🆕 프리미엄 페르소나 카드 */}
+                    {personaData && personaData.name && (
+                      <PersonaCard
+                        personaName={personaData.name}
+                        personaClass={personaData.class}
+                        evidence={personaData.evidence}
+                        meaning={personaData.meaning}
+                        nextStep={personaData.nextStep}
+                      />
+                    )}
+                  </>
+                );
+              })()}
             </div>
           )}
 
@@ -8188,7 +8211,11 @@ if (!analysis) return null;
   // 🆕 hasPaths: 배열 길이만 아니라 실제 CF/asset 값이 의미있는지 확인
   //    무행동 게임(CHARITY만 있는 턴 등)이면 bp/wp가 있어도 모두 0 → 그래프 무의미
   const hasAnyValue = (arr) => arr.some(p => (p.cf || 0) !== 0 || (p.asset || 0) !== 0);
-  const hasPaths = bp.length > 0 && wp.length > 0 && (hasAnyValue(bp) || hasAnyValue(wp));
+  const hasData = bp.length > 0 && wp.length > 0 && (hasAnyValue(bp) || hasAnyValue(wp));
+  // 🆕 충분한 턴 진행 체크: 10턴 미만이면 그래프가 의미 없음 (거래 데이터 부족)
+  const MIN_TURNS_FOR_GRAPH = 10;
+  const hasEnoughTurns = (turns || 0) >= MIN_TURNS_FOR_GRAPH;
+  const hasPaths = hasData && hasEnoughTurns;
 
   // 🔧 턴 시간축 기반으로 bp/wp 정합성 맞추기
   const allTurns = Array.from(new Set([
@@ -8272,8 +8299,30 @@ if (!analysis) return null;
       )}
 
       {/* ── 2. 최상의 선택 vs 최악의 선택 비교 그래프 ── */}
-      {/* 🆕 무행동 안내: 자산 매수/매도가 없어서 비교할 데이터가 없는 경우 */}
-      {!hasPaths && Array.isArray(analysis.phases) && analysis.phases.length > 0 && (
+      {/* 🆕 턴 수 부족 안내: 10턴 미만이면 그래프가 의미 없음 */}
+      {!hasEnoughTurns && Array.isArray(analysis.phases) && analysis.phases.length > 0 && (
+      <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #3b82f640", marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "#93c5fd", marginBottom: 6 }}>📈 최상의 선택 vs 최악의 선택</div>
+        <div style={{
+          padding: "14px 16px", borderRadius: 10, background: "#3b82f610",
+          fontSize: 12, color: "#93c5fd", lineHeight: 1.6, marginTop: 10,
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>⏳ 분석을 위한 데이터가 부족합니다</div>
+          <div style={{ color: "#d4d4d8" }}>
+            현재 <strong>{turns || 0}턴</strong> 진행되었습니다.
+            의미 있는 비교 분석을 위해서는 <strong>{MIN_TURNS_FOR_GRAPH}턴 이상</strong>의 플레이가 필요합니다.
+          </div>
+          <div style={{ fontSize: 10, color: "#a1a1aa", marginTop: 8, paddingTop: 8, borderTop: "1px solid #3b82f630" }}>
+            💡 <strong>왜 {MIN_TURNS_FOR_GRAPH}턴이 필요한가요?</strong><br />
+            짧은 게임은 우연 요소가 크고, 자산이 시간에 따라 만들어내는 누적 효과를 보기 어렵습니다.
+            충분한 턴이 쌓여야 "어떤 선택이 좋았고 나빴는지" 패턴이 드러납니다.
+          </div>
+        </div>
+      </div>
+      )}
+
+      {/* 🆕 무행동 안내: 10턴 이상 진행했지만 자산 매수/매도가 없는 경우 */}
+      {hasEnoughTurns && !hasData && Array.isArray(analysis.phases) && analysis.phases.length > 0 && (
       <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #f59e0b40", marginBottom: 16 }}>
         <div style={{ fontSize: 14, fontWeight: 800, color: "#fde68a", marginBottom: 6 }}>📈 최상의 선택 vs 최악의 선택</div>
         <div style={{
@@ -8415,7 +8464,7 @@ if (!analysis) return null;
       </div>
       )}
 
-      {/* ── 4. 시간 분석 (턴 기반 + 결정 속도) ── */}
+      {/* ── 4. 시간 분석 (턴 기반) ── */}
       {analysis.timeAnalysis && (
         <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #a78bfa30", marginBottom: 16 }}>
           <div style={{ fontSize: 14, fontWeight: 800, color: "#a78bfa", marginBottom: 14 }}>⏱ 시간 분석 — 자산에 시간을 줘야 합니다</div>
@@ -8434,24 +8483,6 @@ if (!analysis) return null;
                     </div>
                   </div>
                   <p style={{ fontSize: 11, color: "#a1a1aa", margin: 0, lineHeight: 1.5 }}>{h.insight}</p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* 결정 속도 분석 */}
-          {analysis.timeAnalysis.decisionSpeed && analysis.timeAnalysis.decisionSpeed.length > 0 && (
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#c4b5fd", marginBottom: 8 }}>결정 속도 분석</div>
-              {analysis.timeAnalysis.decisionSpeed.map((d, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, background: "#1a1a2e", marginBottom: 4 }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#27272a", color: "#a1a1aa" }}>T{d.turn}</span>
-                  <span style={{ fontSize: 11, color: "#e4e4e7", flex: 1 }}>{d.card}</span>
-                  <span style={{ fontSize: 11, fontWeight: 800, color: d.seconds <= 10 ? "#86efac" : d.seconds <= 20 ? "#fde68a" : "#fca5a5" }}>{d.seconds}초</span>
-                  <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4,
-                    background: d.action === "buy" ? "#22c55e20" : d.action === "pass" ? "#ef444420" : "#f59e0b20",
-                    color: d.action === "buy" ? "#86efac" : d.action === "pass" ? "#fca5a5" : "#fde68a",
-                  }}>{d.action === "buy" ? "구매" : d.action === "sell" ? "판매" : "패스"}</span>
                 </div>
               ))}
             </div>
@@ -9121,7 +9152,15 @@ ${humanizedNextStep || "(권장 사항 미확보)"}
 function getPersonaImageUrl(nameLine) {
   if (!nameLine || typeof window === "undefined") return null;
 
-  // 한글명 또는 영문명으로 매핑 (어느 쪽이 들어와도 매치)
+  const key = getPersonaKey(nameLine);
+  if (!key) return null;
+  const PROD_DOMAIN = "https://cashflow-coach.vercel.app";
+  return `${PROD_DOMAIN}/personas/${key}.png`;
+}
+
+// 🆕 페르소나 이름에서 key 추출 (이미지 + 메타 모두 사용)
+export function getPersonaKey(nameLine) {
+  if (!nameLine) return null;
   const PERSONA_KEY_MAP = {
     "완성형 설계자": "master_architect",
     "Master Architect": "master_architect",
@@ -9144,16 +9183,1010 @@ function getPersonaImageUrl(nameLine) {
     "성실한 저축가": "diligent_saver",
     "Diligent Saver": "diligent_saver",
   };
-
-  // nameLine에서 매칭되는 키 찾기
   for (const [name, key] of Object.entries(PERSONA_KEY_MAP)) {
-    if (nameLine.includes(name)) {
-      // 배포 환경 도메인 사용 (markdown 이미지가 클라이언트에서 로드됨)
-      const PROD_DOMAIN = "https://cashflow-coach.vercel.app";
-      return `${PROD_DOMAIN}/personas/${key}.png`;
-    }
+    if (nameLine.includes(name)) return key;
   }
   return null;
+}
+
+// 🆕 8 페르소나 메타데이터 (강점 / 약점 / 추천 행동 / 임팩트 키워드)
+//
+// 각 페르소나의 본질을 보여주는 고정 데이터.
+// PersonaCard에서 시각적으로 표시.
+export const PERSONA_META = {
+  master_architect: {
+    icon: "👑",
+    color: "#fbbf24",        // 골드
+    accentColor: "#fde68a",
+    gradient: "linear-gradient(135deg, #fbbf2420, #f59e0b15)",
+    keywords: ["균형", "장기 시야", "통제력", "전략적 사고", "자산 다각화"],
+    strengths: [
+      "기회를 정확히 식별하고 적시에 행동함",
+      "자산 포트폴리오를 다각화하여 위험 분산",
+      "장기 보유 전략으로 누적 효과 극대화",
+    ],
+    weaknesses: [
+      "이미 잘하고 있어 큰 개선점이 적음",
+      "안주하지 않고 지속적 학습이 필요",
+    ],
+    nextActions: [
+      "사업 영역 확장 - B 분면 진입 시도",
+      "다른 사람의 재무 멘토링 시작",
+      "더 큰 부동산 거래나 합자 투자 도전",
+    ],
+  },
+  optimistic_explorer: {
+    icon: "🌟",
+    color: "#fb923c",        // 오렌지
+    accentColor: "#fdba74",
+    gradient: "linear-gradient(135deg, #fb923c20, #ea580c15)",
+    keywords: ["탐험", "낙관", "기회 발견", "적극성", "유연한 사고"],
+    strengths: [
+      "기회 카드를 두려워하지 않고 적극 검토",
+      "다양한 자산군에 시도해보는 호기심",
+      "변화에 빠르게 적응하는 유연성",
+    ],
+    weaknesses: [
+      "충동적 매수로 자산 회전율이 높음",
+      "한 자산을 오래 보유하지 못함",
+      "재무제표 분석보다 직관에 의존",
+    ],
+    nextActions: [
+      "매수 전 P/E Ratio 1.0 룰 적용 - 월 현금흐름이 가격의 1% 이상인지 확인",
+      "최소 5턴 이상 보유 다짐",
+      "분기당 자산 1개씩 전략적으로 늘리기",
+    ],
+  },
+  anxious_achiever: {
+    icon: "🛡️",
+    color: "#60a5fa",        // 블루
+    accentColor: "#93c5fd",
+    gradient: "linear-gradient(135deg, #60a5fa20, #3b82f615)",
+    keywords: ["신중함", "분석", "리스크 회피", "장기 보유", "안정 추구"],
+    strengths: [
+      "재무제표를 꼼꼼히 검토하는 분석력",
+      "한 번 매수한 자산은 장기 보유",
+      "부채 사용을 최소화하는 보수적 운영",
+    ],
+    weaknesses: [
+      "분석 마비로 좋은 기회를 놓침",
+      "활용률이 낮아 자산 축적이 느림",
+      "리스크 회피가 과도하여 성장 제한",
+    ],
+    nextActions: [
+      '"분석은 3분만, 결정은 즉시" 룰 적용',
+      "현금흐름이 양수인 자산은 무조건 매수",
+      "작은 부동산부터 레버리지 1번 시도",
+    ],
+  },
+  sensitive_challenger: {
+    icon: "🌱",
+    color: "#a78bfa",        // 보라
+    accentColor: "#c4b5fd",
+    gradient: "linear-gradient(135deg, #a78bfa20, #8b5cf615)",
+    keywords: ["성장 가능성", "감정 민감", "학습 의지", "도전 정신", "발전 중"],
+    strengths: [
+      "도전을 두려워하지 않는 용기",
+      "실패를 학습으로 전환하는 능력",
+      "감정 변화에 민감하여 시장 분위기를 빠르게 감지",
+    ],
+    weaknesses: [
+      "감정에 휘둘려 매수/매도 결정이 흔들림",
+      "전략보다 그때그때의 직감에 의존",
+      "손실 회피 본능이 강해 손절을 못 함",
+    ],
+    nextActions: [
+      "매수/매도 전 24시간 룰 - 감정이 진정된 후 결정",
+      "사전에 매도 조건(예: -20%)을 명문화",
+      "투자 일지 작성으로 감정 패턴 객관화",
+    ],
+  },
+  strategic_builder: {
+    icon: "🏗️",
+    color: "#34d399",        // 에메랄드
+    accentColor: "#6ee7b7",
+    gradient: "linear-gradient(135deg, #34d39920, #10b98115)",
+    keywords: ["레버리지", "현금흐름 중심", "전략적", "자산 구축", "B 분면 사고"],
+    strengths: [
+      "부채를 자산 매입에 활용하는 레버리지 전략",
+      "월 현금흐름이 양수인 자산만 선별",
+      "자산 매입 → 운영 → 수확 사이클 이해",
+    ],
+    weaknesses: [
+      "레버리지 의존도가 너무 높을 수 있음",
+      "시장 충격(금리 인상, 공실 등)에 취약",
+      "수동적 수입 외 다양화 부족",
+    ],
+    nextActions: [
+      "부채 비율 50% 이하로 유지",
+      "비상 자금 6개월치 확보",
+      "사업체 매수로 B 분면 영역 확장",
+    ],
+  },
+  active_risk_taker: {
+    icon: "⚡",
+    color: "#f87171",        // 레드
+    accentColor: "#fca5a5",
+    gradient: "linear-gradient(135deg, #f8717120, #ef444415)",
+    keywords: ["행동력", "리스크 감수", "공격적", "주식 집중", "단기 관심"],
+    strengths: [
+      "기회가 보이면 즉시 행동하는 결단력",
+      "큰 변동성을 견디는 멘탈",
+      "고수익 자산에 집중 투자할 용기",
+    ],
+    weaknesses: [
+      "과도한 리스크로 큰 손실 가능성",
+      "주식 단타 위주로 패시브 인컴 부족",
+      "분산 투자 부족으로 한 번에 무너질 위험",
+    ],
+    nextActions: [
+      "포트폴리오 30% 이상은 부동산/사업 등 현금흐름 자산으로",
+      "레버리지 비율 50% 이하 룰",
+      "장기 보유 자산 1개 이상 확보",
+    ],
+  },
+  safe_haven_keeper: {
+    icon: "🏦",
+    color: "#94a3b8",        // 슬레이트
+    accentColor: "#cbd5e1",
+    gradient: "linear-gradient(135deg, #94a3b820, #64748b15)",
+    keywords: ["안정", "현금 중심", "보수적", "리스크 회피", "장기 안정"],
+    strengths: [
+      "시장 충격에서 자산을 지키는 능력",
+      "현금 비중을 높게 유지해 기회 대응 가능",
+      "감정 동요 없이 일관된 운영",
+    ],
+    weaknesses: [
+      "성장 정체 - 자산이 시간만큼 못 자람",
+      "인플레이션으로 현금 가치 잠식",
+      "복리 효과를 누리지 못함",
+    ],
+    nextActions: [
+      "현금 비중 30% 이하로 줄이기",
+      "월 현금흐름 양수 자산 1개 매수",
+      '"잃지 않는 것" 보다 "성장하는 것"에 무게 두기',
+    ],
+  },
+  diligent_saver: {
+    icon: "💰",
+    color: "#22c55e",        // 그린
+    accentColor: "#86efac"  ,
+    gradient: "linear-gradient(135deg, #22c55e20, #16a34a15)",
+    keywords: ["저축", "성실함", "근면", "출발선", "노동 수입 의존"],
+    strengths: [
+      "재무 기초가 튼튼함 - 지출 통제 능력",
+      "꾸준히 모으는 인내심",
+      "부채를 기피하는 신중함",
+    ],
+    weaknesses: [
+      '"돈을 모으는 것"과 "돈이 일하게 하는 것"의 차이를 이해 못 함',
+      "노동 수입(E/S 분면)에 100% 의존",
+      "자산 매수 결정이 거의 없음 - 활용률 낮음",
+    ],
+    nextActions: [
+      '소액이라도 자산 1개를 매수해 "주인" 경험 쌓기',
+      "월 지출의 10%만이라도 패시브 인컴 자산으로 전환",
+      "재무제표의 자산/부채 칸 채우기 시작",
+    ],
+  },
+};
+
+// 🆕 PersonaCard 컴포넌트 - 프리미엄 페르소나 카드
+//
+// displayText의 마크다운 페르소나 섹션을 대체하는 React 시각 컴포넌트.
+// 좌측: 큰 이미지 + 그라데이션 배경
+// 우측: 이름/분류/강점/약점/추천 행동/키워드 카드들
+export function PersonaCard({ personaName, personaClass, evidence, meaning, nextStep }) {
+  if (!personaName) return null;
+
+  const key = getPersonaKey(personaName);
+  const meta = key ? PERSONA_META[key] : null;
+  const imageUrl = key ? `https://cashflow-coach.vercel.app/personas/${key}.png` : null;
+
+  // 메타가 없으면 기본값 (예외 케이스 - 매핑 안 되는 페르소나)
+  const m = meta || {
+    icon: "🎭",
+    color: "#a78bfa",
+    accentColor: "#c4b5fd",
+    gradient: "linear-gradient(135deg, #a78bfa20, #8b5cf615)",
+    keywords: [],
+    strengths: [],
+    weaknesses: [],
+    nextActions: [],
+  };
+
+  return (
+    <div style={{
+      marginTop: 24, marginBottom: 24,
+      padding: 0,
+      borderRadius: 18,
+      background: m.gradient,
+      border: `2px solid ${m.color}40`,
+      boxShadow: `0 4px 20px ${m.color}15`,
+      overflow: "hidden",
+    }}>
+      {/* 헤더 - 그라데이션 라벨 */}
+      <div style={{
+        padding: "10px 20px",
+        background: `${m.color}25`,
+        borderBottom: `1px solid ${m.color}30`,
+        display: "flex", alignItems: "center", gap: 8,
+      }}>
+        <span style={{ fontSize: 16 }}>🎭</span>
+        <span style={{
+          fontSize: 11, fontWeight: 800, letterSpacing: 2,
+          color: m.color, textTransform: "uppercase",
+        }}>
+          당신의 재무 페르소나
+        </span>
+      </div>
+
+      {/* 메인 컨텐츠 - 이미지 + 정보 */}
+      <div style={{
+        padding: 20,
+        display: "flex", flexDirection: "row", gap: 20,
+        flexWrap: "wrap",
+      }}>
+        {/* 좌측: 큰 이미지 */}
+        {imageUrl && (
+          <div style={{
+            flex: "0 0 auto",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+          }}>
+            <div style={{
+              width: 140, height: 140, borderRadius: 16,
+              background: `${m.color}10`,
+              padding: 8,
+              border: `1px solid ${m.color}30`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <img
+                src={imageUrl}
+                alt={personaName}
+                style={{
+                  width: "100%", height: "100%", objectFit: "contain",
+                  borderRadius: 10,
+                }}
+                onError={(e) => { e.currentTarget.style.display = "none"; }}
+              />
+            </div>
+            <div style={{ fontSize: 32 }}>{m.icon}</div>
+          </div>
+        )}
+
+        {/* 우측: 이름 + 분류 + 의미 */}
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <h3 style={{
+            fontSize: 22, fontWeight: 900, color: m.color,
+            margin: "0 0 4px", lineHeight: 1.2,
+          }}>
+            {personaName}
+          </h3>
+          {personaClass && (
+            <div style={{
+              fontSize: 11, color: "#a1a1aa", marginBottom: 12,
+            }}>
+              {personaClass}
+            </div>
+          )}
+
+          {/* 임팩트 키워드 - 칩 형태 */}
+          {m.keywords && m.keywords.length > 0 && (
+            <div style={{
+              display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14,
+            }}>
+              {m.keywords.map((kw, i) => (
+                <span key={i} style={{
+                  fontSize: 10, fontWeight: 700,
+                  padding: "4px 10px", borderRadius: 12,
+                  background: `${m.color}25`,
+                  color: m.accentColor,
+                  border: `1px solid ${m.color}40`,
+                }}>
+                  #{kw}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* 핵심 의미 (LLM이 쓴 그 사람만의 진단) */}
+          {meaning && (
+            <div style={{
+              padding: 12, borderRadius: 10,
+              background: "#0a0a0f60",
+              border: `1px solid ${m.color}20`,
+              fontSize: 12, lineHeight: 1.7, color: "#d4d4d8",
+            }}>
+              <div style={{
+                fontSize: 9, fontWeight: 800, color: m.color,
+                marginBottom: 6, letterSpacing: 1,
+              }}>💡 핵심 진단</div>
+              {meaning}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 진단 근거 (LLM 생성) */}
+      {evidence && (
+        <div style={{
+          padding: "0 20px 16px",
+        }}>
+          <div style={{
+            padding: 14, borderRadius: 10,
+            background: "#0a0a0f60",
+            border: `1px solid ${m.color}20`,
+          }}>
+            <div style={{
+              fontSize: 9, fontWeight: 800, color: m.color,
+              marginBottom: 8, letterSpacing: 1,
+            }}>📊 진단 근거 (이 게임 데이터 기반)</div>
+            <div style={{
+              fontSize: 11, lineHeight: 1.8, color: "#d4d4d8",
+              whiteSpace: "pre-wrap",
+            }}>
+              {evidence}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 강점 / 약점 그리드 */}
+      <div style={{
+        padding: "0 20px 16px",
+        display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10,
+      }}>
+        {/* 강점 */}
+        <div style={{
+          padding: 14, borderRadius: 10,
+          background: "#22c55e08",
+          border: "1px solid #22c55e30",
+        }}>
+          <div style={{
+            fontSize: 9, fontWeight: 800, color: "#86efac",
+            marginBottom: 8, letterSpacing: 1,
+          }}>✨ 강점</div>
+          {m.strengths.length > 0 ? (
+            <ul style={{
+              margin: 0, paddingLeft: 16,
+              fontSize: 11, lineHeight: 1.7, color: "#d4d4d8",
+            }}>
+              {m.strengths.map((s, i) => (
+                <li key={i} style={{ marginBottom: i < m.strengths.length - 1 ? 4 : 0 }}>{s}</li>
+              ))}
+            </ul>
+          ) : (
+            <div style={{ fontSize: 11, color: "#71717a" }}>(분석 중)</div>
+          )}
+        </div>
+
+        {/* 약점 */}
+        <div style={{
+          padding: 14, borderRadius: 10,
+          background: "#ef444408",
+          border: "1px solid #ef444430",
+        }}>
+          <div style={{
+            fontSize: 9, fontWeight: 800, color: "#fca5a5",
+            marginBottom: 8, letterSpacing: 1,
+          }}>⚠️ 약점</div>
+          {m.weaknesses.length > 0 ? (
+            <ul style={{
+              margin: 0, paddingLeft: 16,
+              fontSize: 11, lineHeight: 1.7, color: "#d4d4d8",
+            }}>
+              {m.weaknesses.map((w, i) => (
+                <li key={i} style={{ marginBottom: i < m.weaknesses.length - 1 ? 4 : 0 }}>{w}</li>
+              ))}
+            </ul>
+          ) : (
+            <div style={{ fontSize: 11, color: "#71717a" }}>(분석 중)</div>
+          )}
+        </div>
+      </div>
+
+      {/* 추천 행동 (가장 액션 지향) */}
+      {(m.nextActions.length > 0 || nextStep) && (
+        <div style={{
+          padding: "0 20px 20px",
+        }}>
+          <div style={{
+            padding: 14, borderRadius: 10,
+            background: `${m.color}10`,
+            border: `1px solid ${m.color}40`,
+          }}>
+            <div style={{
+              fontSize: 9, fontWeight: 800, color: m.color,
+              marginBottom: 8, letterSpacing: 1,
+            }}>🎯 추천 행동</div>
+
+            {/* LLM이 제안한 다음 시도 (개인화된 제안) */}
+            {nextStep && (
+              <div style={{
+                fontSize: 12, lineHeight: 1.7, color: "#fafafa",
+                fontWeight: 600,
+                paddingBottom: 10, marginBottom: 10,
+                borderBottom: m.nextActions.length > 0 ? `1px solid ${m.color}20` : "none",
+              }}>
+                <span style={{ color: m.accentColor, marginRight: 6 }}>▶</span>
+                {nextStep}
+              </div>
+            )}
+
+            {/* 메타데이터 추천 행동 (페르소나 일반 가이드) */}
+            {m.nextActions.length > 0 && (
+              <ul style={{
+                margin: 0, paddingLeft: 16,
+                fontSize: 11, lineHeight: 1.7, color: "#d4d4d8",
+              }}>
+                {m.nextActions.map((a, i) => (
+                  <li key={i} style={{ marginBottom: i < m.nextActions.length - 1 ? 4 : 0 }}>{a}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 🆕 displayText에서 페르소나 섹션을 분리 + 데이터 추출
+//
+// LLM이 만든 마크다운 또는 buildHardcodedPersonaCard가 만든 마크다운에서
+// 페르소나 정보를 추출하고, 본문 텍스트에서는 그 섹션을 제거.
+//
+// returns: { cleanedText, personaData: {name, class, evidence, meaning, nextStep} | null }
+export function extractPersonaFromText(displayText) {
+  if (!displayText) return { cleanedText: displayText, personaData: null };
+
+  // "## 🎭 당신의 재무 페르소나" 또는 "## 🎭 당신의 페르소나" 패턴 감지
+  const sectionStartRegex = /(?:^|\n)##\s*🎭\s*당신의\s*(?:재무\s*)?페르소나/;
+  const startMatch = displayText.match(sectionStartRegex);
+  if (!startMatch) {
+    return { cleanedText: displayText, personaData: null };
+  }
+
+  const startIdx = startMatch.index;
+  const beforeText = displayText.substring(0, startIdx);
+
+  // 섹션 끝 찾기: 다음 ## 헤더 또는 텍스트 끝
+  const remainingText = displayText.substring(startIdx + startMatch[0].length);
+  const nextHeaderMatch = remainingText.match(/\n##\s/);
+  const sectionEndIdx = nextHeaderMatch
+    ? startIdx + startMatch[0].length + nextHeaderMatch.index
+    : displayText.length;
+
+  const sectionText = displayText.substring(startIdx, sectionEndIdx);
+  const afterText = displayText.substring(sectionEndIdx);
+  const cleanedText = (beforeText + afterText).replace(/\n{3,}/g, "\n\n").trim();
+
+  // 섹션 내부에서 데이터 추출
+  const lines = sectionText.split("\n");
+  let name = "";
+  let className = "";
+  let evidence = "";
+  let meaning = "";
+  let nextStep = "";
+  let mode = "";
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // 마크다운 이미지 ![](url) 라인 무시
+    if (/^!\[.*\]\(.*\)$/.test(trimmed)) continue;
+
+    // **이름** 라인 (페르소나 이름)
+    if (!name) {
+      const nameMatch = trimmed.match(/^\*\*(.+?)\*\*$/);
+      if (nameMatch && !trimmed.startsWith("**진단")) {
+        name = nameMatch[1].trim();
+        continue;
+      }
+    }
+
+    // 분류 라인
+    if (trimmed.startsWith("분류:") || trimmed.startsWith("**분류:")) {
+      className = trimmed.replace(/^\*?\*?분류:\*?\*?/, "").trim();
+      continue;
+    }
+
+    // 섹션 헤더로 모드 변경
+    if (/^###\s*📊\s*진단\s*근거/.test(trimmed)) { mode = "evidence"; continue; }
+    if (/^###\s*💡\s*의미/.test(trimmed)) { mode = "meaning"; continue; }
+    if (/^###\s*🌱\s*다음\s*시도/.test(trimmed)) { mode = "nextStep"; continue; }
+    if (/^###\s/.test(trimmed)) { mode = ""; continue; }
+
+    // ">" 인용은 용어 풀이 - 무시
+    if (trimmed.startsWith(">")) continue;
+
+    // 모드별 누적
+    if (mode === "evidence" && trimmed) {
+      evidence += (evidence ? "\n" : "") + trimmed;
+    } else if (mode === "meaning" && trimmed) {
+      meaning += (meaning ? " " : "") + trimmed;
+    } else if (mode === "nextStep" && trimmed) {
+      nextStep += (nextStep ? " " : "") + trimmed;
+    }
+  }
+
+  return {
+    cleanedText,
+    personaData: {
+      name,
+      class: className,
+      evidence,
+      meaning,
+      nextStep,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════════
+// 🆕 FeedbackSections — 마크다운 텍스트를 시각적 카드로 변환
+// ═══════════════════════════════════════════════════
+//
+// LLM이 만든 마크다운 형식의 본문을 섹션별로 파싱해서
+// 각각을 React 카드 컴포넌트로 렌더링. 프리미엄 피드백의 가독성과
+// 시각적 임팩트를 높이는 핵심 컴포넌트.
+//
+// 인식하는 마크다운:
+//   # H1            → 헤더 카드 (인사말)
+//   ## H2           → 섹션 카드 (큰 박스)
+//   ### H3          → 서브섹션 (섹션 안의 작은 카드)
+//   **bold**        → 컬러 강조
+//   > quote         → 인용 박스
+//   - / 1. list     → 리스트 (들여쓰기)
+//   $1,000          → 금액 강조
+//   ---             → 구분선
+
+// 마크다운 파싱 → 섹션 배열로 변환
+export function parseMarkdownSections(text) {
+  if (!text) return [];
+
+  const lines = text.split("\n");
+  const sections = [];
+  let currentH2 = null; // { type: "h2", title, items: [...] }
+  let currentH3 = null; // { type: "h3", title, content: [] }
+  let buffer = []; // 본문 라인 누적
+  let firstH1Done = false; // 첫 H1 (인사) 처리 완료
+
+  const flushBuffer = () => {
+    if (buffer.length > 0) {
+      const content = buffer.join("\n").trim();
+      if (content) {
+        if (currentH3) {
+          currentH3.content.push({ type: "text", value: content });
+        } else if (currentH2) {
+          currentH2.items.push({ type: "text", value: content });
+        } else {
+          sections.push({ type: "intro", value: content });
+        }
+      }
+      buffer = [];
+    }
+  };
+
+  const flushH3 = () => {
+    if (currentH3) {
+      currentH2.items.push(currentH3);
+      currentH3 = null;
+    }
+  };
+
+  const flushH2 = () => {
+    flushBuffer();
+    flushH3();
+    if (currentH2) {
+      sections.push(currentH2);
+      currentH2 = null;
+    }
+  };
+
+  for (let line of lines) {
+    const raw = line;
+    const trimmed = line.trim();
+
+    // 페르소나 섹션은 PersonaCard로 별도 처리되므로 무시
+    if (/^##\s*🎭/.test(trimmed)) continue;
+
+    // 구분선 (---)
+    if (/^---+$/.test(trimmed)) {
+      flushBuffer();
+      if (currentH3) flushH3();
+      else if (currentH2) {} // H2 안의 ---는 무시 (이미 카드로 분리되니까)
+      continue;
+    }
+
+    // H1: 첫 번째만 인사 헤더, 이후는 H2처럼 처리
+    const h1Match = trimmed.match(/^#\s+(.+)$/);
+    if (h1Match) {
+      flushH2();
+      if (!firstH1Done) {
+        sections.push({ type: "h1", title: h1Match[1] });
+        firstH1Done = true;
+      } else {
+        currentH2 = { type: "h2", title: h1Match[1], items: [] };
+      }
+      continue;
+    }
+
+    // H2: 큰 섹션 시작
+    const h2Match = trimmed.match(/^##\s+(.+)$/);
+    if (h2Match) {
+      flushH2();
+      currentH2 = { type: "h2", title: h2Match[1], items: [] };
+      continue;
+    }
+
+    // H3: 서브섹션 시작
+    const h3Match = trimmed.match(/^###\s+(.+)$/);
+    if (h3Match) {
+      flushBuffer();
+      flushH3();
+      currentH3 = { type: "h3", title: h3Match[1], content: [] };
+      continue;
+    }
+
+    // 인용
+    const quoteMatch = raw.match(/^>\s?(.*)$/);
+    if (quoteMatch) {
+      flushBuffer();
+      const target = currentH3
+        ? currentH3.content
+        : currentH2
+        ? currentH2.items
+        : sections;
+      const last = target[target.length - 1];
+      if (last && last.type === "quote") {
+        last.value += "\n" + quoteMatch[1];
+      } else {
+        target.push({ type: "quote", value: quoteMatch[1] });
+      }
+      continue;
+    }
+
+    // 그 외는 본문 버퍼에 누적
+    buffer.push(raw);
+  }
+
+  flushH2();
+  return sections;
+}
+
+// 인라인 마크다운 (볼드, 금액 강조 등)을 JSX로 변환
+function renderInlineMarkdown(text, accentColor = "#fde68a") {
+  if (!text) return null;
+
+  // **bold** 와 $금액 패턴을 동시에 처리
+  const parts = [];
+  let lastIdx = 0;
+
+  // 통합 정규식: **bold** | $1,234 | $1.5K | $1.2M
+  const regex = /(\*\*([^*]+)\*\*)|(\$[\d,]+(?:\.\d+)?[KMkm]?)/g;
+  let match;
+
+  while ((match = regex.exec(text)) !== null) {
+    // 매칭 이전 평문
+    if (match.index > lastIdx) {
+      parts.push(text.substring(lastIdx, match.index));
+    }
+
+    if (match[1]) {
+      // **bold**
+      parts.push(
+        <strong key={match.index} style={{ color: accentColor, fontWeight: 800 }}>
+          {match[2]}
+        </strong>
+      );
+    } else if (match[3]) {
+      // $금액
+      parts.push(
+        <span key={match.index} style={{
+          color: "#86efac",
+          fontWeight: 700,
+          fontFamily: "'Pretendard Variable', monospace",
+        }}>
+          {match[3]}
+        </span>
+      );
+    }
+
+    lastIdx = match.index + match[0].length;
+  }
+
+  // 나머지 평문
+  if (lastIdx < text.length) {
+    parts.push(text.substring(lastIdx));
+  }
+
+  return parts.length > 0 ? parts : text;
+}
+
+// 본문(text 타입) 렌더 - 리스트 + 인라인 마크다운 처리
+function renderTextBlock(value, accentColor) {
+  if (!value) return null;
+  const lines = value.split("\n");
+  const elements = [];
+  let listBuffer = []; // 연속된 리스트 항목 모으기
+  let listKey = 0;
+
+  const flushList = () => {
+    if (listBuffer.length > 0) {
+      const items = [...listBuffer];
+      elements.push(
+        <ul key={`list-${listKey++}`} style={{
+          margin: "8px 0", paddingLeft: 20,
+          fontSize: 13, lineHeight: 1.9, color: "#d4d4d8",
+        }}>
+          {items.map((item, i) => (
+            <li key={i} style={{ marginBottom: 4 }}>
+              {renderInlineMarkdown(item, accentColor)}
+            </li>
+          ))}
+        </ul>
+      );
+      listBuffer = [];
+    }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      flushList();
+      continue;
+    }
+
+    // 리스트 항목: - 또는 1. 2. 3.
+    const listMatch = trimmed.match(/^[-*]\s+(.+)$/) || trimmed.match(/^\d+\.\s+(.+)$/);
+    if (listMatch) {
+      listBuffer.push(listMatch[1]);
+      continue;
+    }
+
+    flushList();
+    elements.push(
+      <p key={`p-${i}`} style={{
+        margin: "6px 0",
+        fontSize: 13, lineHeight: 1.9, color: "#d4d4d8",
+      }}>
+        {renderInlineMarkdown(line, accentColor)}
+      </p>
+    );
+  }
+  flushList();
+
+  return elements;
+}
+
+// 섹션 타입 감지 → 적절한 아이콘/컬러 반환
+function detectSectionTheme(title) {
+  const t = (title || "").toLowerCase();
+
+  // 처방/권장/추천 행동
+  if (/처방|다음 게임|다음 시도|추천|권장|action|제안/.test(title)) {
+    return { icon: "🎯", color: "#fb923c", accentColor: "#fdba74", bg: "linear-gradient(135deg, #fb923c08, #ea580c05)" };
+  }
+  // 이야기/여정/타임라인
+  if (/이야기|여정|타임라인|story|journey|당신의 \d+턴/.test(title)) {
+    return { icon: "📖", color: "#a78bfa", accentColor: "#c4b5fd", bg: "linear-gradient(135deg, #a78bfa08, #8b5cf605)" };
+  }
+  // 마무리/맺음
+  if (/마무리|맺음|마지막|conclusion|closing|마무리하며/.test(title)) {
+    return { icon: "🌟", color: "#fbbf24", accentColor: "#fde68a", bg: "linear-gradient(135deg, #fbbf2408, #f59e0b05)" };
+  }
+  // 분석/진단
+  if (/분석|진단|review|analysis|상황|현재/.test(title)) {
+    return { icon: "🔍", color: "#60a5fa", accentColor: "#93c5fd", bg: "linear-gradient(135deg, #60a5fa08, #3b82f605)" };
+  }
+  // 강점/장점
+  if (/강점|좋은|잘한|훌륭|성과|strength/.test(title)) {
+    return { icon: "✨", color: "#22c55e", accentColor: "#86efac", bg: "linear-gradient(135deg, #22c55e08, #16a34a05)" };
+  }
+  // 약점/개선
+  if (/약점|아쉬|개선|부족|weakness|놓친/.test(title)) {
+    return { icon: "⚠️", color: "#f87171", accentColor: "#fca5a5", bg: "linear-gradient(135deg, #f8717108, #ef444405)" };
+  }
+  // 통찰/교훈
+  if (/통찰|교훈|insight|lesson|배움/.test(title)) {
+    return { icon: "💡", color: "#fde68a", accentColor: "#fef3c7", bg: "linear-gradient(135deg, #fde68a08, #f59e0b05)" };
+  }
+  // 기본
+  return { icon: "📌", color: "#94a3b8", accentColor: "#cbd5e1", bg: "linear-gradient(135deg, #94a3b808, #64748b05)" };
+}
+
+// 섹션 카드 - H2 큰 박스
+function SectionCard({ title, items }) {
+  const theme = detectSectionTheme(title);
+
+  return (
+    <div style={{
+      marginTop: 20, marginBottom: 20,
+      borderRadius: 16,
+      background: theme.bg,
+      border: `1px solid ${theme.color}30`,
+      overflow: "hidden",
+    }}>
+      {/* 헤더 */}
+      <div style={{
+        padding: "14px 20px",
+        background: `${theme.color}15`,
+        borderBottom: `1px solid ${theme.color}20`,
+        display: "flex", alignItems: "center", gap: 10,
+      }}>
+        <span style={{ fontSize: 20 }}>{theme.icon}</span>
+        <h3 style={{
+          margin: 0, fontSize: 16, fontWeight: 800,
+          color: theme.color, letterSpacing: 0.3,
+        }}>
+          {renderInlineMarkdown(title, theme.accentColor)}
+        </h3>
+      </div>
+
+      {/* 본문 - items 순회 */}
+      <div style={{ padding: "16px 20px" }}>
+        {items.map((item, idx) => {
+          if (item.type === "h3") {
+            return (
+              <SubSectionCard
+                key={idx}
+                title={item.title}
+                content={item.content}
+                accentColor={theme.accentColor}
+                index={idx}
+              />
+            );
+          }
+          if (item.type === "text") {
+            return (
+              <div key={idx}>
+                {renderTextBlock(item.value, theme.accentColor)}
+              </div>
+            );
+          }
+          if (item.type === "quote") {
+            return <QuoteBox key={idx} value={item.value} color={theme.color} />;
+          }
+          return null;
+        })}
+      </div>
+    </div>
+  );
+}
+
+// 서브섹션 (H3) - 섹션 안의 작은 카드
+function SubSectionCard({ title, content, accentColor, index }) {
+  // 번호로 시작하는 H3는 우선순위 강조 (예: "1턴: 20세, 사회 첫 발", "1. 첫째 처방")
+  const numMatch = title.match(/^(\d+)([턴.:])\s*(.*)$/);
+  const turnMatch = title.match(/^(\d+)턴[:\s]*(.*)$/);
+  const isNumbered = !!numMatch || !!turnMatch;
+
+  return (
+    <div style={{
+      marginTop: index > 0 ? 14 : 8,
+      marginBottom: 6,
+      paddingLeft: 14,
+      borderLeft: `3px solid ${accentColor}40`,
+    }}>
+      <h4 style={{
+        margin: "0 0 8px",
+        fontSize: 14, fontWeight: 700,
+        color: accentColor,
+        display: "flex", alignItems: "center", gap: 8,
+      }}>
+        {isNumbered && (
+          <span style={{
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            minWidth: 22, height: 22, borderRadius: 6,
+            background: `${accentColor}25`,
+            fontSize: 11, fontWeight: 900,
+            color: accentColor,
+          }}>
+            {numMatch ? numMatch[1] : turnMatch[1]}
+          </span>
+        )}
+        <span>
+          {renderInlineMarkdown(
+            isNumbered ? (numMatch ? numMatch[3] : turnMatch[2]) : title,
+            accentColor
+          )}
+        </span>
+      </h4>
+
+      {content.map((c, i) => {
+        if (c.type === "text") {
+          return <div key={i}>{renderTextBlock(c.value, accentColor)}</div>;
+        }
+        if (c.type === "quote") {
+          return <QuoteBox key={i} value={c.value} color={accentColor} small />;
+        }
+        return null;
+      })}
+    </div>
+  );
+}
+
+// 인용 박스 (>)
+function QuoteBox({ value, color, small = false }) {
+  return (
+    <div style={{
+      margin: "10px 0",
+      padding: small ? "8px 12px" : "12px 16px",
+      borderRadius: 10,
+      background: `${color}10`,
+      borderLeft: `3px solid ${color}`,
+      fontSize: small ? 12 : 13,
+      lineHeight: 1.8,
+      color: "#e4e4e7",
+      fontStyle: "italic",
+    }}>
+      {renderInlineMarkdown(value, color)}
+    </div>
+  );
+}
+
+// 메인 컴포넌트 - 전체 마크다운을 카드들로 렌더링
+export function FeedbackSections({ text }) {
+  if (!text) return null;
+  const sections = parseMarkdownSections(text);
+  if (sections.length === 0) {
+    // 파싱 실패 시 폴백 - plain text
+    return (
+      <div style={{
+        padding: "20px 18px", borderRadius: 12,
+        background: "#111118", border: "1px solid #27272a",
+        fontSize: 13, lineHeight: 2, color: "#d4d4d8",
+        whiteSpace: "pre-wrap",
+      }}>
+        {text}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {sections.map((sec, idx) => {
+        if (sec.type === "h1") {
+          return (
+            <div key={idx} style={{
+              marginBottom: 16,
+              padding: "20px 24px", borderRadius: 16,
+              background: "linear-gradient(135deg, #3b82f615, #8b5cf615)",
+              border: "1px solid #3b82f640",
+              textAlign: "center",
+            }}>
+              <h1 style={{
+                margin: 0, fontSize: 20, fontWeight: 900,
+                color: "#fafafa", lineHeight: 1.4,
+              }}>
+                {renderInlineMarkdown(sec.title, "#93c5fd")}
+              </h1>
+            </div>
+          );
+        }
+        if (sec.type === "intro") {
+          return (
+            <div key={idx} style={{
+              marginBottom: 16,
+              padding: "16px 20px", borderRadius: 12,
+              background: "#111118",
+              border: "1px solid #27272a",
+            }}>
+              {renderTextBlock(sec.value, "#fde68a")}
+            </div>
+          );
+        }
+        if (sec.type === "h2") {
+          return <SectionCard key={idx} title={sec.title} items={sec.items} />;
+        }
+        if (sec.type === "quote") {
+          return <QuoteBox key={idx} value={sec.value} color="#a78bfa" />;
+        }
+        return null;
+      })}
+    </div>
+  );
 }
 
 // 🆕 evidence 텍스트의 약어를 일상 표현으로 풀어쓰기
@@ -9472,7 +10505,7 @@ function DebriefSection({ results, version, turns, deck, gameSnapshot }) {
     }
 
     // 🔧 results(gameResults) 구조를 turnLog 구조로 변환 (어댑터)
-    // results: { turn, cell:{type}, card:{...,_action,_shares}, decisionSec, ... }
+    // results: { turn, cell:{type}, card:{...,_action,_shares}, ... }
     // turnLog: { turn, cellType, card:{...}, action, shares, transaction, ... }
     const normalized = turnLogData.map(t => {
       // 이미 turnLog 구조면 그대로 사용
@@ -9486,7 +10519,6 @@ function DebriefSection({ results, version, turns, deck, gameSnapshot }) {
         action: t.card?._action || t.action,
         shares: t.card?._shares || t.shares,
         transaction: t.transaction,
-        decisionSec: t.decisionSec,
       };
     });
 
@@ -10381,7 +11413,6 @@ ${turns <= 8 ? `    {"title": "출발과 탐색", "age": "20~30세", "turns": "T
   "finalQuestion": "debriefing question",
   "timeAnalysis": {
     "holdingPeriods": [{"asset":"name","buyTurn":1,"buyAge":20,"holdTurns":5,"holdYears":10,"totalCF":0,"insight":"analysis"}],
-    "decisionSpeed": [],
     "opportunityCost": "one sentence",
     "timeMessage": "core message about time and assets"
   }
@@ -10715,7 +11746,12 @@ RULES:
     if (!analysis) return null;
     const bp = analysis.bestPath || [];
     const wp = analysis.worstPath || [];
-    const hasPaths = bp.length > 0 && wp.length > 0;
+    // 🆕 hasPaths 강화: 거래 데이터 있고 + 충분한 턴 진행됐을 때만 true
+    const hasAnyValue = (arr) => arr.some(p => (p.cf || 0) !== 0 || (p.asset || 0) !== 0);
+    const hasData = bp.length > 0 && wp.length > 0 && (hasAnyValue(bp) || hasAnyValue(wp));
+    const MIN_TURNS_FOR_GRAPH = 10;
+    const hasEnoughTurns = (turns || 0) >= MIN_TURNS_FOR_GRAPH;
+    const hasPaths = hasData && hasEnoughTurns;
 
     // 🔧 턴 시간축 기반으로 bp/wp 정합성 맞추기
     const allTurns = Array.from(new Set([
@@ -10895,7 +11931,37 @@ RULES:
               }
             </span>
           </div>
-          </>) : (
+          </>) : !hasEnoughTurns ? (
+            <div style={{
+              padding: "14px 16px", borderRadius: 10, background: "#3b82f610",
+              border: "1px solid #3b82f630",
+              fontSize: 12, color: "#93c5fd", lineHeight: 1.6,
+            }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>⏳ 분석을 위한 데이터가 부족합니다</div>
+              <div style={{ color: "#d4d4d8" }}>
+                현재 <strong>{turns || 0}턴</strong> 진행되었습니다.
+                의미 있는 비교 분석을 위해서는 <strong>{MIN_TURNS_FOR_GRAPH}턴 이상</strong>의 플레이가 필요합니다.
+              </div>
+              <div style={{ fontSize: 10, color: "#a1a1aa", marginTop: 8, paddingTop: 8, borderTop: "1px solid #3b82f630" }}>
+                💡 짧은 게임은 우연 요소가 크고, 자산이 시간에 따라 만들어내는 누적 효과를 보기 어렵습니다.
+                충분한 턴이 쌓여야 "어떤 선택이 좋았고 나빴는지" 패턴이 드러납니다.
+              </div>
+            </div>
+          ) : !hasData ? (
+            <div style={{
+              padding: "14px 16px", borderRadius: 10, background: "#f59e0b10",
+              border: "1px solid #f59e0b30",
+              fontSize: 12, color: "#fde68a", lineHeight: 1.6,
+            }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>⚠️ 비교 데이터 없음</div>
+              <div style={{ color: "#d4d4d8" }}>
+                이 게임에서는 <strong>자산 매수/매도 행동이 없어</strong> 선택에 따른 결과 차이를 비교할 수 없습니다.
+              </div>
+              <div style={{ fontSize: 10, color: "#a1a1aa", marginTop: 8, paddingTop: 8, borderTop: "1px solid #f59e0b30" }}>
+                💡 <strong>캐쉬플로우의 핵심은 기회를 잡는 것</strong>입니다. 다음 게임에서는 OPPORTUNITY 칸에서 부동산/주식/사업에 적극 투자해보세요.
+              </div>
+            </div>
+          ) : (
             <div style={{ padding: "20px 0", textAlign: "center" }}>
               <p style={{ fontSize: 13, color: "#71717a", marginBottom: 8 }}>비교 데이터가 생성되지 않았습니다.</p>
               <p style={{ fontSize: 10, color: "#52525b" }}>
@@ -10921,7 +11987,7 @@ RULES:
           ))}
         </div>
 
-        {/* ── 4. 시간 분석 (턴 기반 + 결정 속도) ── */}
+        {/* ── 4. 시간 분석 (턴 기반) ── */}
         {analysis.timeAnalysis && (
           <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #a78bfa30", marginBottom: 16 }}>
             <div style={{ fontSize: 14, fontWeight: 800, color: "#a78bfa", marginBottom: 14 }}>⏱ 시간 분석 — 자산에 시간을 줘야 합니다</div>
@@ -10940,24 +12006,6 @@ RULES:
                       </div>
                     </div>
                     <p style={{ fontSize: 11, color: "#a1a1aa", margin: 0, lineHeight: 1.5 }}>{h.insight}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* 결정 속도 분석 */}
-            {analysis.timeAnalysis.decisionSpeed && analysis.timeAnalysis.decisionSpeed.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#c4b5fd", marginBottom: 8 }}>결정 속도 분석</div>
-                {analysis.timeAnalysis.decisionSpeed.map((d, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, background: "#1a1a2e", marginBottom: 4 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#27272a", color: "#a1a1aa" }}>T{d.turn}</span>
-                    <span style={{ fontSize: 11, color: "#e4e4e7", flex: 1 }}>{d.card}</span>
-                    <span style={{ fontSize: 11, fontWeight: 800, color: d.seconds <= 10 ? "#86efac" : d.seconds <= 20 ? "#fde68a" : "#fca5a5" }}>{d.seconds}초</span>
-                    <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4,
-                      background: d.action === "buy" ? "#22c55e20" : d.action === "pass" ? "#ef444420" : "#f59e0b20",
-                      color: d.action === "buy" ? "#86efac" : d.action === "pass" ? "#fca5a5" : "#fde68a",
-                    }}>{d.action === "buy" ? "구매" : d.action === "sell" ? "판매" : "패스"}</span>
                   </div>
                 ))}
               </div>
@@ -11091,9 +12139,37 @@ RULES:
           </div>
         ) : displayText ? (
           <>
-            <div style={{ padding: "20px 18px", borderRadius: 12, background: "#111118", border: "1px solid #27272a" }}>
-              <div style={{ fontSize: 13, lineHeight: 2, color: "#d4d4d8", whiteSpace: "pre-wrap" }}>{displayText}</div>
-            </div>
+            {(() => {
+              // 🆕 프리미엄 (tier === 2) 일 때만 PersonaCard 분리 렌더 + 본문 카드화
+              const { cleanedText, personaData } = tier === 2
+                ? extractPersonaFromText(displayText)
+                : { cleanedText: displayText, personaData: null };
+
+              return (
+                <>
+                  {tier === 2 ? (
+                    // 프리미엄: 카드형 시각화
+                    <FeedbackSections text={cleanedText} />
+                  ) : (
+                    // 요약/상세: 기존 plain text 박스
+                    <div style={{ padding: "20px 18px", borderRadius: 12, background: "#111118", border: "1px solid #27272a" }}>
+                      <div style={{ fontSize: 13, lineHeight: 2, color: "#d4d4d8", whiteSpace: "pre-wrap" }}>{cleanedText}</div>
+                    </div>
+                  )}
+
+                  {/* 🆕 프리미엄 페르소나 카드 */}
+                  {personaData && personaData.name && (
+                    <PersonaCard
+                      personaName={personaData.name}
+                      personaClass={personaData.class}
+                      evidence={personaData.evidence}
+                      meaning={personaData.meaning}
+                      nextStep={personaData.nextStep}
+                    />
+                  )}
+                </>
+              );
+            })()}
 
             {/* 🆕 디브리핑 공유 - URL 복사 우선 + 카카오 보조 */}
             <ShareButtonGroup
