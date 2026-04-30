@@ -7742,28 +7742,40 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
   const [feedbackError, setFeedbackError] = useState("");
   const [kakaoLoading, setKakaoLoading] = useState(false);
 
-  const handleRunAnalysis = async () => {
+  // 🆕 시작 나이 (사용자 실제 나이) - localStorage에서 불러오기
+  // 디브리핑 시작 시 모달로 입력받음. 모든 분석/표시에 반영.
+  const [startAge, setStartAge] = useState(20);
+  const [showAgeModal, setShowAgeModal] = useState(false);
+
+  // 컴포넌트 마운트 시 localStorage에서 startAge 복원
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = window.localStorage.getItem("cashflow:userStartAge");
+      if (saved) {
+        const num = parseInt(saved);
+        if (!isNaN(num) && num >= 10 && num <= 80) {
+          setStartAge(num);
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }, []);
+
+  // 🆕 모달에서 나이 확인 후 호출되는 실제 분석 함수
+  // (window.confirm 제거 → StartAgeModal로 대체됨)
+  const performAnalysis = async (effectiveStartAge) => {
     if (loading) return;
     if (!results || results.length === 0) {
       setError("턴 기록이 없어 분석을 생성할 수 없습니다.");
       return;
     }
-    const confirmed = window.confirm(
-      `📋 디브리핑 분석 (무료)\n\n` +
-      `AI가 당신의 플레이를 4단계(사회 초년생 → 자산 형성기 → 성장과 전환 → 수확과 정리)로 나누어 분석합니다.\n` +
-      `최상의 선택 vs 최악의 선택 비교 그래프와 5가지 교훈이 포함됩니다.\n\n` +
-      `⏱️ 생성 시간: 약 1~2분\n` +
-      `⚠️ 생성 중 화면을 닫지 마세요.\n\n` +
-      `진행하시겠습니까?`
-    );
-    if (!confirmed) return;
 
     setLoading(true);
     setError("");
     try {
       const simText = buildPromptText(results, version, turns);
-      console.log(`[InlineDebrief] 📋 총평 runFullAnalysis 호출 시작 (gameKey=${gameKey})`);
-      const fullAnalysis = await runFullAnalysis({ simText, version, turns, results });
+      console.log(`[InlineDebrief] 📋 총평 runFullAnalysis 호출 시작 (gameKey=${gameKey}, startAge=${effectiveStartAge})`);
+      const fullAnalysis = await runFullAnalysis({ simText, version, turns, results, startAge: effectiveStartAge });
       console.log("[InlineDebrief] ✅ 총평 생성 성공 — phases:", fullAnalysis?.phases?.length, "lessons:", fullAnalysis?.lessons?.length);
 
       // 🆕 6 Levels 진단을 게임 데이터로 계산 (정확한 수치 기반)
@@ -8192,7 +8204,7 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
       )}
 
       <button
-        onClick={handleRunAnalysis}
+        onClick={() => setShowAgeModal(true)}
         disabled={loading}
         style={{
           width: "100%", padding: "12px 20px", borderRadius: 10,
@@ -8208,6 +8220,28 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
       <div style={{ fontSize: 9, color: "#52525b", marginTop: 10 }}>
         💡 무료 · 한 번 생성되면 영구 저장되어 프로필에서 다시 볼 수 있습니다
       </div>
+
+      {/* 🆕 시작 나이 입력 모달 */}
+      {showAgeModal && (
+        <StartAgeModal
+          initialAge={startAge}
+          onConfirm={(age) => {
+            setStartAge(age);
+            try {
+              window.localStorage.setItem("cashflow:userStartAge", String(age));
+            } catch (e) { /* ignore */ }
+            setShowAgeModal(false);
+            performAnalysis(age);  // 입력한 나이로 분석 시작
+          }}
+          onSkip={() => {
+            // 건너뛰기: 기본 20세로 분석 시작
+            setStartAge(20);
+            setShowAgeModal(false);
+            performAnalysis(20);
+          }}
+          onCancel={() => setShowAgeModal(false)}
+        />
+      )}
     </div>
   );
 }
