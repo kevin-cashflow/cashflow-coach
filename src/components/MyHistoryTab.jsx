@@ -785,7 +785,7 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
           // 🆕 풀 analysis도 레거시에 저장
           ...(analysisToSave && { analysis: analysisToSave }),
           ...(tier === "free"    && { feedbackTier: 0, feedback: feedbackText }),
-          ...(// detail 제거됨
+          // 🆕 detail 티어 제거됨 (premium으로 통합)
           ...(tier === "premium" && { feedbackTier: 2, feedback: feedbackText }),
         };
       } else {
