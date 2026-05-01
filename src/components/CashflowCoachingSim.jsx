@@ -7860,22 +7860,22 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
     if (feedbackLoading !== null) return;
 
     // 캐시에 있으면 바로 표시
-    const cacheKey = tier === 0 ? "free" : tier === 1 ? "detail" : "premium";
+    const cacheKey = tier === 0 ? "free" : "premium";
     if (feedbackCache[cacheKey]) {
       setActiveTier(tier);
       return;
     }
 
-    const tierName = tier === 0 ? "요약" : tier === 1 ? "상세" : "프리미엄";
-    const tierPrice = tier === 0 ? "무료" : tier === 1 ? "$9" : "$20";
-    const tierTime = tier === 0 ? "30초" : tier === 1 ? "1~2분" : "2~3분";
+    const tierName = tier === 0 ? "요약" : "프리미엄";
+    const tierPrice = tier === 0 ? "무료" : "$15";
+    const tierTime = tier === 0 ? "30초" : "2~3분";
 
     if (tier !== 0) {
       const confirmed = window.confirm(
         `💎 ${tierName} 피드백 (${tierPrice})\n\n` +
-        `Claude AI(${tier === 2 ? "Opus" : "Sonnet"})가 ${tier === 2 ? "5,000자" : "2,000자"} 분량의 ` +
+        `Claude AI(${"Opus"})가 ${"5,000자"} 분량의 ` +
         `전문 코칭 리포트를 생성합니다.\n\n` +
-        `${tier === 2 ? "🎭 페르소나 진단 자동 통합\n" : ""}` +
+        `${"🎭 페르소나 진단 자동 통합\n"}` +
         `⏱️ 생성 시간: 약 ${tierTime}\n\n` +
         `진행하시겠습니까?`
       );
@@ -7948,7 +7948,7 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
       alert("먼저 피드백을 생성해주세요.");
       return;
     }
-    const cacheKey = activeTier === 0 ? "free" : activeTier === 1 ? "detail" : "premium";
+    const cacheKey = activeTier === 0 ? "free" : "premium";
     const text = feedbackCache[cacheKey];
     if (!text) {
       alert("표시할 피드백이 없습니다.");
@@ -7994,8 +7994,8 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
       }
       if (!window.Kakao.isInitialized()) window.Kakao.init(kakaoKey);
 
-      const tierLabel = activeTier === 0 ? "요약 피드백" : activeTier === 1 ? "상세 피드백" : "프리미엄 피드백";
-      const tierIcon = activeTier === 0 ? "💬" : activeTier === 1 ? "📝" : "💎";
+      const tierLabel = activeTier === 0 ? "요약 피드백" : "프리미엄 피드백";
+      const tierIcon = activeTier === 0 ? "💬" : "💎";
       const job = gameSnapshot?.job || "캐쉬플로우";
       const snippet = text.length > 200 ? text.substring(0, 200) + "..." : text;
 
@@ -8026,7 +8026,7 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
 
   // 분석 결과가 있으면 AnalysisReport 렌더링
   if (analysis) {
-    const cacheKey = activeTier === 0 ? "free" : activeTier === 1 ? "detail" : activeTier === 2 ? "premium" : null;
+    const cacheKey = activeTier === 0 ? "free" : activeTier === 2 ? "premium" : null;
     const activeFeedbackText = cacheKey ? feedbackCache[cacheKey] : null;
 
     return (
@@ -8055,8 +8055,8 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
           <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
             {[
               { tier: 0, label: "요약", price: "무료", icon: "💬", color: "#22c55e", key: "free" },
-              { tier: 1, label: "상세", price: "$9", icon: "📝", color: "#3b82f6", key: "detail" },
-              { tier: 2, label: "프리미엄", price: "$20", icon: "💎", color: "#f59e0b", key: "premium" },
+              // 🆕 상세 피드백 제거 (프리미엄으로 통합)
+              { tier: 2, label: "프리미엄", price: "$15", icon: "💎", color: "#f59e0b", key: "premium" },
             ].map(t => {
               const isLoading = feedbackLoading === t.tier;
               const isActive = activeTier === t.tier;
@@ -8105,7 +8105,7 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
               marginBottom: 12,
             }}>
               <div style={{ fontSize: 10, color: "#a1a1aa", marginBottom: 8, textAlign: "right" }}>
-                {activeTier === 0 ? "💬 요약 피드백" : activeTier === 1 ? "📝 상세 피드백" : "💎 프리미엄 피드백"}
+                {activeTier === 0 ? "💬 요약 피드백" : "💎 프리미엄 피드백"}
               </div>
               {(() => {
                 // 🆕 프리미엄(2) 일 때만 PersonaCard 분리 렌더 + 본문 카드화
@@ -8139,6 +8139,7 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
                         evidence={personaData.evidence}
                         meaning={personaData.meaning}
                         nextStep={personaData.nextStep}
+                        traits={personaData.traits}
                       />
                     )}
                   </>
@@ -8165,7 +8166,7 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
                 personaName: gameSnapshot?.personaName || null,
               }}
               kakaoTemplate={{
-                title: `${activeTier === 0 ? "💬" : activeTier === 1 ? "📝" : "💎"} ${activeTier === 0 ? "요약 피드백" : activeTier === 1 ? "상세 피드백" : "프리미엄 피드백"} - ${gameSnapshot?.job || "캐쉬플로우"}`,
+                title: `${activeTier === 0 ? "💬" : "💎"} ${activeTier === 0 ? "요약 피드백" : "프리미엄 피드백"} - ${gameSnapshot?.job || "캐쉬플로우"}`,
                 description: `📅 ${new Date().toLocaleDateString("ko-KR")} · ${version} · ${turns}턴`,
               }}
             />
@@ -9046,11 +9047,12 @@ const SYSTEM_PROMPT = `캐쉬플로우 보드게임 전문 코칭 딜러(13년/5
 
 // ── 유료 피드백 생성 공통 함수 (API 호출 중복 제거) ──
 // tier 1 = $9 Sonnet 2000자, tier 2 = $20 Opus 5000자
+// 🆕 티어 단순화 (2025): 1번(상세) 제거됨, 프리미엄으로 통합
+// FEEDBACK_DETAIL[1]은 폴백 안전장치로 유지 (혹시 호출되면 프리미엄 가이드 사용)
 const FEEDBACK_DETAIL = {
-  1: "2000자. 스토리텔링. 감정→행동(모임참석). 희망적. 현실경제연결. 억지마케팅X.",
   2: "5000자. 전턴분석+현실매핑+최상의 선택/최악의 선택 비교(수치)+전략제안+마인드셋. 스토리텔링. 모임가치를 진심으로. 당신의 최고 수준의 한국어 스토리텔링으로 작성하세요.",
 };
-const FEEDBACK_MAX_TOKENS = { 1: 2500, 2: 6000 };
+const FEEDBACK_MAX_TOKENS = { 2: 6000 };
 
 // 🆕 페르소나 진단 import (프리미엄 피드백 전용)
 // personaDiagnosis.js의 diagnoseAndGenerate를 직접 호출하기 위한 동적 import 헬퍼
@@ -9074,11 +9076,140 @@ async function tryDiagnosePersona(gameSnapshot, turnLog) {
       playerName: gameSnapshot?.playerName || "플레이어",
     };
     const insight = mod.diagnoseAndGenerate(game);
-    return insight; // { id, nameKr, nameEn, classification, evidence, diagnosis, meaning, nextStep, ... }
+    if (!insight) return null;
+
+    // 🆕 4축 성향 점수 계산 (MBTI 스타일)
+    const traits = computePersonaTraits(game);
+    return { ...insight, traits };
   } catch (e) {
     console.warn("[generatePaidFeedback] 페르소나 진단 실패 (무시):", e?.message);
     return null;
   }
+}
+
+// 🆕 4축 성향 점수 계산 (MBTI 스타일)
+//
+// 게임 데이터를 분석하여 4가지 축으로 점수화 (0~100):
+//   1. aggression  — 적극성: 보수적(0) ↔ 적극적(100) — 매수 비율 기반
+//   2. speed       — 결정 속도: 신중(0) ↔ 행동(100) — 매수/패스 결정 빈도
+//   3. diversity   — 분산도: 집중(0) ↔ 분산(100) — 자산 종류 다양성
+//   4. holding     — 보유 성향: 단기(0) ↔ 장기(100) — 평균 보유 턴
+//
+// 일반론 수준 코칭 지표 추가 (대부분의 투자자 분포 등)
+export function computePersonaTraits(game) {
+  const turnLog = game?.turnLog || [];
+  const totalTurns = turnLog.length;
+  const assets = game?.assets || [];
+
+  // ── 1. 적극성 (aggression) ──
+  // 매수 결정 / (매수 결정 + 패스 결정) 비율
+  // 기회 카드를 만나서 행동한 비율
+  const buyTurns = turnLog.filter(t => t.action === "buy").length;
+  const passTurns = turnLog.filter(t => t.action === "pass").length;
+  const dealTurns = buyTurns + passTurns;
+  const aggression = dealTurns > 0
+    ? Math.round((buyTurns / dealTurns) * 100)
+    : 50;  // 데이터 없으면 중립
+
+  // ── 2. 결정 속도 (speed) ──
+  // "활발도" - 전체 턴 중 행동(매수/매도) 비율 + 패시브하지 않은 정도
+  // 매수+매도 / 전체 턴
+  const sellTurns = turnLog.filter(t => t.action === "sell").length;
+  const actionTurns = buyTurns + sellTurns;
+  const speed = totalTurns > 0
+    ? Math.round((actionTurns / totalTurns) * 100)
+    : 50;
+
+  // ── 3. 분산도 (diversity) ──
+  // 자산 카테고리 다양성: 부동산 / 주식 / 사업 중 몇 종류 보유
+  // 0종류=0, 1종류=33, 2종류=66, 3종류=100
+  const categories = new Set();
+  for (const a of assets) {
+    const name = (a.name || a.sub || "").toLowerCase();
+    const type = (a.type || "").toLowerCase();
+    if (type.includes("주식") || type.includes("stock") || /tesla|disney|merck|월트|디즈니|테슬라/i.test(name)) {
+      categories.add("stock");
+    } else if (type.includes("부동산") || type.includes("real") || /house|condo|apt|아파트|주택|부동산/i.test(name)) {
+      categories.add("real_estate");
+    } else if (type.includes("사업") || type.includes("business") || /business|사업/i.test(name)) {
+      categories.add("business");
+    } else {
+      // 미분류는 일단 부동산으로 추정 (BIG DEAL 대부분이 부동산)
+      categories.add("real_estate");
+    }
+  }
+  const diversity = categories.size === 0
+    ? 0
+    : Math.min(100, Math.round((categories.size / 3) * 100));
+
+  // ── 4. 보유 성향 (holding) ──
+  // 매수한 자산이 매도되지 않고 끝까지 보유된 비율
+  // 또는 평균 보유 턴 / 전체 턴 비율
+  let holding = 50;  // 기본값
+  if (buyTurns > 0) {
+    // 매도 비율이 낮을수록 장기 보유 성향
+    const sellRatio = sellTurns / Math.max(buyTurns, 1);
+    holding = Math.max(0, Math.min(100, Math.round((1 - sellRatio) * 100)));
+  } else if (assets.length === 0 && totalTurns > 5) {
+    // 자산도 없고 거래도 안 한 경우 = 매우 보수적 (장기 = 100이 아니라 의미 없음)
+    holding = 50;  // 중립
+  }
+
+  // ── 일반론 코멘트 (4축별로 추가) ──
+  const trait_comments = {
+    aggression: getTraitComment("aggression", aggression),
+    speed: getTraitComment("speed", speed),
+    diversity: getTraitComment("diversity", diversity),
+    holding: getTraitComment("holding", holding),
+  };
+
+  return {
+    aggression,
+    speed,
+    diversity,
+    holding,
+    comments: trait_comments,
+    // raw 값들 (디버깅/표시용)
+    raw: {
+      totalTurns,
+      buyTurns,
+      passTurns,
+      sellTurns,
+      assetCount: assets.length,
+      categoryCount: categories.size,
+    },
+  };
+}
+
+// 4축 점수에 따른 일반론 코멘트
+// "대부분의 투자자는~" 수준의 자연스러운 표현
+function getTraitComment(axis, score) {
+  if (axis === "aggression") {
+    if (score >= 80) return "매우 적극적 — 기회를 놓치지 않는 행동가형";
+    if (score >= 60) return "적극적 — 대부분의 기회에 도전";
+    if (score >= 40) return "균형잡힌 선택 — 신중하면서도 행동력 있음";
+    if (score >= 20) return "보수적 — 신중하게 검토 후 결정";
+    return "매우 보수적 — 확실한 기회만 선별";
+  }
+  if (axis === "speed") {
+    if (score >= 70) return "활발한 행동 — 매 턴마다 변화를 만듦";
+    if (score >= 50) return "꾸준한 행동 — 적절한 간격으로 결정";
+    if (score >= 30) return "신중한 페이스 — 충분히 생각 후 행동";
+    return "관망형 — 시장을 충분히 지켜본 후 결정";
+  }
+  if (axis === "diversity") {
+    if (score >= 80) return "포트폴리오 다각화 — 위험 분산 잘함";
+    if (score >= 50) return "균형잡힌 분산 — 2가지 이상 자산군 보유";
+    if (score >= 30) return "선택적 집중 — 잘 아는 분야에 집중";
+    return "단일 자산 집중 — 한 분야에 모든 자원 투입";
+  }
+  if (axis === "holding") {
+    if (score >= 80) return "장기 보유형 — 자산을 시간에 맡김";
+    if (score >= 50) return "균형 보유 — 적절한 시점에 매도";
+    if (score >= 30) return "회전 매매형 — 차익실현 적극적";
+    return "단기 트레이더 — 빠른 매매로 차익";
+  }
+  return "";
 }
 
 // 🆕 페르소나 결과를 LLM 프롬프트용 텍스트로 정형화
@@ -9089,6 +9220,17 @@ function buildPersonaContext(persona) {
   const evidenceText = evidence.length > 0
     ? evidence.map((e, i) => `  ${i + 1}. ${e}`).join("\n")
     : "  (진단 근거 미확보)";
+
+  // 🆕 4축 성향 점수 표시 (있을 때만)
+  const t = persona.traits;
+  const traitsText = t ? `
+
+📊 4축 성향 점수 (MBTI 스타일 분석):
+  🎯 적극성:    ${t.aggression}/100  → ${t.comments.aggression}
+  ⚡ 결정 속도:  ${t.speed}/100  → ${t.comments.speed}
+  📊 분산도:    ${t.diversity}/100  → ${t.comments.diversity}
+  ⏰ 보유 성향:  ${t.holding}/100  → ${t.comments.holding}
+` : "";
 
   return `
 ═══════════════════════════════════════════════════
@@ -9102,7 +9244,7 @@ function buildPersonaContext(persona) {
 
 📊 진단 근거 (구체적 게임 데이터):
 ${evidenceText}
-
+${traitsText}
 📊 핵심 진단 (관찰): 
 ${persona.diagnosis || "(진단 내용 미확보)"}
 
@@ -9199,18 +9341,23 @@ ${persona.nextStep || "(권장 행동 미확보)"}
 }
 
 export async function generatePaidFeedback({ tier, version, turns, simText, extraContext = "", gameSnapshot = null, turnLog = null, startAge = 20 }) {
-  const model = tier === 2 ? MODEL_OPUS : MODEL_SONNET;
-  const detail = FEEDBACK_DETAIL[tier] || FEEDBACK_DETAIL[1];
-  const maxTokens = FEEDBACK_MAX_TOKENS[tier] || 2500;
+  // 🆕 티어 단순화: 유료는 무조건 프리미엄(2)으로 처리
+  // 혹시 tier=1로 호출돼도 안전하게 프리미엄으로 폴백
+  if (tier === 1) tier = 2;
+  const model = MODEL_OPUS;  // 모든 유료는 Opus
+  const detail = FEEDBACK_DETAIL[2];
+  const maxTokens = FEEDBACK_MAX_TOKENS[2];
 
   // 🆕 프리미엄(tier=2)일 때만 페르소나 진단 실행 → 프롬프트에 추가
   let personaContext = "";
+  let personaForCard = null;  // 🆕 buildHardcodedPersonaCard용 traits 보존
   if (tier === 2 && turnLog && Array.isArray(turnLog) && turnLog.length > 0) {
     console.log(`[generatePaidFeedback] 🎭 페르소나 진단 시작 (turnLog ${turnLog.length}개)`);
     const persona = await tryDiagnosePersona(gameSnapshot, turnLog);
     if (persona) {
       personaContext = buildPersonaContext(persona);
-      console.log(`[generatePaidFeedback] ✅ 페르소나 진단 완료: ${persona?.personaInfo?.name || "?"}`);
+      personaForCard = persona;  // 🆕 traits 포함된 persona 보존
+      console.log(`[generatePaidFeedback] ✅ 페르소나 진단 완료: ${persona?.personaInfo?.name || "?"}, traits=${JSON.stringify(persona.traits)}`);
     } else {
       console.log(`[generatePaidFeedback] ⚠️ 페르소나 진단 결과 없음 (게임 데이터 부족 가능)`);
     }
@@ -9321,10 +9468,18 @@ export async function generatePaidFeedback({ tier, version, turns, simText, extr
     if (!hasPersonaSection) {
       console.log(`[generatePaidFeedback] ⚠️ LLM이 페르소나 섹션 누락 → 하드코딩 카드 자동 prepend`);
       // personaContext에서 진단 결과만 추출해 카드 형태로 변환
-      const card = buildHardcodedPersonaCard(personaContext);
+      // 🆕 traits 함께 전달 (4축 점수가 마크다운에 인코딩됨)
+      const card = buildHardcodedPersonaCard(personaContext, personaForCard?.traits);
       llmText = card + "\n\n---\n\n" + llmText;
     } else {
       console.log(`[generatePaidFeedback] ✅ LLM이 페르소나 섹션 자체 생성`);
+      // 🆕 LLM이 만든 섹션에도 traits 마커 주입 (PersonaCard가 인식하도록)
+      if (personaForCard?.traits) {
+        const t = personaForCard.traits;
+        const traitsMarker = `\n<!-- TRAITS:aggression=${t.aggression},speed=${t.speed},diversity=${t.diversity},holding=${t.holding} -->\n`;
+        // ## 🎭 헤더 직후에 마커 삽입
+        llmText = llmText.replace(/(##\s*🎭[^\n]*\n)/, `$1${traitsMarker}`);
+      }
     }
   }
 
@@ -9333,7 +9488,7 @@ export async function generatePaidFeedback({ tier, version, turns, simText, extr
 
 // 🆕 페르소나 컨텍스트에서 사용자에게 보일 카드 텍스트 추출
 // LLM이 페르소나 섹션을 안 만들었을 때 폴백으로 사용
-function buildHardcodedPersonaCard(personaContext) {
+function buildHardcodedPersonaCard(personaContext, traits = null) {
   // personaContext는 buildPersonaContext()의 반환 텍스트
   // 그 안에서 사용자에게 보여줄 부분만 추출 (LLM 지침은 제외)
   const lines = personaContext.split("\n");
@@ -9386,13 +9541,20 @@ function buildHardcodedPersonaCard(personaContext) {
   // nameLine 예: "👑 완성형 설계자 (Master Architect)" → "master_architect"
   const personaImageUrl = getPersonaImageUrl(nameLine);
 
+  // 🆕 4축 점수를 마크다운에 인코딩 (extractPersonaFromText가 파싱)
+  // 형식: <!-- TRAITS:aggression=80,speed=65,diversity=33,holding=90 -->
+  // (HTML 주석은 표시 안 되지만 텍스트로는 남음 → 추출 가능)
+  const traitsMarker = traits
+    ? `\n<!-- TRAITS:aggression=${traits.aggression},speed=${traits.speed},diversity=${traits.diversity},holding=${traits.holding} -->\n`
+    : "";
+
   return `## 🎭 당신의 재무 페르소나
 
 ${personaImageUrl ? `![${nameLine || "페르소나"}](${personaImageUrl})
 
 ` : ""}**${nameLine || "(페르소나 진단 결과)"}**
 ${classLine ? `분류: ${classLine}` : ""}
-
+${traitsMarker}
 ### 📊 진단 근거 (게임 데이터 기반)
 
 ${humanizedEvidence || "(진단 근거 미확보)"}
@@ -9642,7 +9804,7 @@ export const PERSONA_META = {
 // displayText의 마크다운 페르소나 섹션을 대체하는 React 시각 컴포넌트.
 // 좌측: 큰 이미지 + 그라데이션 배경
 // 우측: 이름/분류/강점/약점/추천 행동/키워드 카드들
-export function PersonaCard({ personaName, personaClass, evidence, meaning, nextStep }) {
+export function PersonaCard({ personaName, personaClass, evidence, meaning, nextStep, traits }) {
   if (!personaName) {
     if (typeof window !== "undefined") {
       console.warn("[PersonaCard] ⚠️ personaName이 비어있어 렌더링 안 함");
@@ -9807,6 +9969,101 @@ export function PersonaCard({ personaName, personaClass, evidence, meaning, next
           )}
         </div>
       </div>
+
+      {/* 🆕 4축 성향 점수 바 (MBTI 스타일) */}
+      {traits && (
+        <div style={{ padding: "0 20px 16px" }}>
+          <div style={{
+            padding: 16, borderRadius: 10,
+            background: "#0a0a0f60",
+            border: `1px solid ${m.color}25`,
+          }}>
+            <div style={{
+              fontSize: 9, fontWeight: 800, color: m.color,
+              marginBottom: 12, letterSpacing: 1,
+            }}>📊 4축 성향 분석 (MBTI 스타일)</div>
+
+            {[
+              { axis: "aggression", label: "🎯 적극성", left: "보수적", right: "적극적", score: traits.aggression },
+              { axis: "speed", label: "⚡ 결정 속도", left: "신중", right: "빠른 행동", score: traits.speed },
+              { axis: "diversity", label: "📊 분산도", left: "집중", right: "분산", score: traits.diversity },
+              { axis: "holding", label: "⏰ 보유 성향", left: "단기", right: "장기", score: traits.holding },
+            ].map((t, i) => {
+              // 점수에 따라 좌/우 어느 쪽이 강조될지
+              const isRightDominant = t.score >= 50;
+              const dominantSide = isRightDominant ? t.right : t.left;
+              const barColor = m.color;
+
+              return (
+                <div key={t.axis} style={{ marginBottom: i < 3 ? 14 : 0 }}>
+                  {/* 라벨 + 점수 */}
+                  <div style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    marginBottom: 4,
+                  }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#d4d4d8" }}>
+                      {t.label}
+                    </span>
+                    <span style={{
+                      fontSize: 10, fontWeight: 800, color: m.accentColor,
+                      padding: "2px 8px", borderRadius: 10,
+                      background: `${m.color}20`,
+                    }}>
+                      {dominantSide} {Math.max(t.score, 100 - t.score)}%
+                    </span>
+                  </div>
+
+                  {/* 점수 바 (좌우 양방향 표시) */}
+                  <div style={{
+                    position: "relative",
+                    height: 8, borderRadius: 4,
+                    background: "#27272a",
+                    overflow: "hidden",
+                    marginBottom: 4,
+                  }}>
+                    {/* 채워진 부분 */}
+                    <div style={{
+                      position: "absolute",
+                      top: 0, bottom: 0,
+                      left: isRightDominant ? "50%" : `${t.score}%`,
+                      right: isRightDominant ? `${100 - t.score}%` : "50%",
+                      background: `linear-gradient(${isRightDominant ? "90deg" : "270deg"}, ${barColor}, ${barColor}aa)`,
+                      borderRadius: 4,
+                    }} />
+                    {/* 중앙 분리선 */}
+                    <div style={{
+                      position: "absolute",
+                      top: 0, bottom: 0,
+                      left: "50%",
+                      width: 1,
+                      background: "#52525b",
+                    }} />
+                  </div>
+
+                  {/* 좌우 라벨 */}
+                  <div style={{
+                    display: "flex", justifyContent: "space-between",
+                    fontSize: 9, color: "#71717a",
+                  }}>
+                    <span style={{ color: !isRightDominant ? m.accentColor : "#71717a" }}>{t.left}</span>
+                    <span style={{ color: isRightDominant ? m.accentColor : "#71717a" }}>{t.right}</span>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* 일반론 코멘트 */}
+            <div style={{
+              marginTop: 14, paddingTop: 12,
+              borderTop: `1px solid ${m.color}20`,
+              fontSize: 10, color: "#a1a1aa", lineHeight: 1.6,
+              fontStyle: "italic",
+            }}>
+              💬 대부분의 투자자는 이 4가지 축에서 균형을 추구하지만, 자신의 강한 축을 알면 의사결정이 더 명확해집니다.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 진단 근거 (LLM 생성) */}
       {evidence && (
@@ -10010,6 +10267,31 @@ export function extractPersonaFromText(displayText) {
     }
   }
 
+  // 🆕 4축 점수 마커 파싱 (HTML 주석 형태)
+  // 형식: <!-- TRAITS:aggression=80,speed=65,diversity=33,holding=90 -->
+  let traits = null;
+  const traitsMatch = sectionText.match(/<!--\s*TRAITS:([^>]+?)\s*-->/);
+  if (traitsMatch) {
+    try {
+      const params = traitsMatch[1];
+      const parsed = {};
+      params.split(",").forEach(pair => {
+        const [k, v] = pair.split("=");
+        if (k && v) parsed[k.trim()] = parseInt(v.trim());
+      });
+      if (parsed.aggression !== undefined && !isNaN(parsed.aggression)) {
+        traits = {
+          aggression: parsed.aggression,
+          speed: parsed.speed || 0,
+          diversity: parsed.diversity || 0,
+          holding: parsed.holding || 0,
+        };
+        // cleanedText에서도 마커 제거 (사용자에게 보이지 않도록)
+        // (이미 cleanedText는 페르소나 섹션이 통째로 제거된 상태니 영향 없음)
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   return {
     cleanedText,
     personaData: {
@@ -10018,6 +10300,7 @@ export function extractPersonaFromText(displayText) {
       evidence,
       meaning,
       nextStep,
+      traits,  // 🆕 4축 점수
     },
   };
 }
@@ -10524,10 +10807,14 @@ function humanizeMetricTerms(text) {
 }
 
 // 디브리핑 티어 정의 — 모듈 스코프 상수 (매 렌더마다 재생성되지 않도록)
+// 🆕 티어 구조 단순화 (2025): 3개 → 2개 (무료 + 프리미엄)
+// - 상세($9) 제거, 프리미엄으로 통합 (가격 $20→$15로 인하)
+// - tier 인덱스는 호환성 유지: [0]=요약 무료, [1]=비활성(null), [2]=프리미엄
+//   (이전 데이터의 feedbackTier=2가 그대로 작동하도록)
 const TIERS = [
   { label: "요약 피드백", chars: "500자", price: "무료", color: "#22c55e", sub: "게임 결과 요약 + 핵심 인사이트", model: "" },
-  { label: "상세 피드백", chars: "2,000자", price: "$9", color: "#3b82f6", sub: "스토리텔링 + 현실 연결 + 행동 설계", model: "Sonnet" },
-  { label: "프리미엄 피드백", chars: "5,000자", price: "$20", color: "#f59e0b", sub: "전문 코칭 리포트 + 맞춤 전략", model: "Opus" },
+  null,  // [1] 상세 피드백 제거됨 (프리미엄으로 통합)
+  { label: "프리미엄 피드백", chars: "5,000자", price: "$15", color: "#f59e0b", sub: "🎭 페르소나 카드 + 4축 성향 분석 + 전문 코칭 리포트 + 맞춤 전략", model: "Opus" },
 ];
 
 // ═══════════════════════════════════════════════════
@@ -12651,6 +12938,8 @@ RULES:
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {TIERS.map((t, i) => {
+            // 🆕 null 티어(상세 피드백 제거됨) 건너뛰기
+            if (!t) return null;
             const isCached = !!feedbackCache[i];
             return (
               <button key={i} onClick={() => selectTierForConfirm(i)} style={{
@@ -12719,6 +13008,7 @@ RULES:
                       evidence={personaData.evidence}
                       meaning={personaData.meaning}
                       nextStep={personaData.nextStep}
+                        traits={personaData.traits}
                     />
                   )}
                 </>
@@ -12742,16 +13032,16 @@ RULES:
                 personaName: gameSnapshot?.personaName || null,
               }}
               kakaoTemplate={{
-                title: `${tier === 0 ? "💬" : tier === 1 ? "📝" : "💎"} ${currentTier.label.replace(/\s*\(\$\d+\)/, "")} - ${gameSnapshot?.job || "캐쉬플로우"}`,
+                title: `${tier === 0 ? "💬" : "💎"} ${currentTier.label.replace(/\s*\(\$\d+\)/, "")} - ${gameSnapshot?.job || "캐쉬플로우"}`,
                 description: `📅 ${new Date().toLocaleDateString("ko-KR")} · ${version} · ${turns}턴`,
               }}
             />
 
-            {tier < 2 && (
-              <div style={{ marginTop: 12, padding: "12px 16px", borderRadius: 10, textAlign: "center", background: TIERS[tier + 1].color + "10", border: `1px solid ${TIERS[tier + 1].color}30` }}>
+            {tier === 0 && TIERS[2] && (
+              <div style={{ marginTop: 12, padding: "12px 16px", borderRadius: 10, textAlign: "center", background: TIERS[2].color + "10", border: `1px solid ${TIERS[2].color}30` }}>
                 <p style={{ fontSize: 11, color: "#a1a1aa", margin: "0 0 6px" }}>더 깊은 분석이 필요하시다면</p>
-                <button onClick={() => { setMode("analysis-done"); setTier(null); setPaidText(""); setFreeText(""); setError(""); setPendingTier(tier + 1); }} style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: TIERS[tier + 1].color, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                  {TIERS[tier + 1].label} ({TIERS[tier + 1].price})
+                <button onClick={() => { setMode("analysis-done"); setTier(null); setPaidText(""); setFreeText(""); setError(""); setPendingTier(2); }} style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: TIERS[2].color, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                  {TIERS[2].label} ({TIERS[2].price})
                 </button>
               </div>
             )}

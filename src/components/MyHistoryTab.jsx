@@ -785,7 +785,7 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
           // 🆕 풀 analysis도 레거시에 저장
           ...(analysisToSave && { analysis: analysisToSave }),
           ...(tier === "free"    && { feedbackTier: 0, feedback: feedbackText }),
-          ...(tier === "detail"  && { feedbackTier: 1, feedback: feedbackText }),
+          ...(// detail 제거됨
           ...(tier === "premium" && { feedbackTier: 2, feedback: feedbackText }),
         };
       } else {
@@ -1008,7 +1008,7 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
 
       // 유료(detail/premium)일 때만 financialLevel 보강
       // (무료는 차별화 차원에서 6 Levels 표시 안 함)
-      if ((tier === "detail" || tier === "premium")) {
+      if (tier === "premium") {
         const hasFL = cachedAnalysis && cachedAnalysis.financialLevel && cachedAnalysis.financialLevel.snapshot;
         if (!hasFL) {
           try {
@@ -1060,13 +1060,19 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
     }
 
     // ─── 유료 티어 확인 팝업 (상세 $9, 프리미엄 $20) ───
-    if (tier === "detail" || tier === "premium") {
-      const tierInfo = tier === "detail"
-        ? { name: "상세 피드백", price: "$9", desc: "AI가 당신의 플레이를 상세히 분석하여\n구조적인 피드백과 개선 방향을 제시합니다.", timeNote: "⏱️ 생성 시간: 약 30초~1분" }
-        : { name: "프리미엄 피드백", price: "$20", desc: "최고 수준의 AI 분석으로\n기요사키 철학 기반의 심층 조언을 받을 수 있습니다.\n\n가장 깊이 있는 통찰을 제공합니다.", timeNote: "⏱️ 생성 시간: 약 1~2분 (최고 모델 사용)" };
+    // 🆕 티어 단순화: detail은 premium으로 통합되었으므로 들어오면 자동 변환
+    if (tier === "detail") tier = "premium";
+
+    if (tier === "premium") {
+      const tierInfo = {
+        name: "프리미엄 피드백",
+        price: "$15",
+        desc: "🎭 페르소나 진단 + 4축 성향 분석 + 카드형 시각화\n\n최고 수준의 AI 분석(Opus)으로\n기요사키 철학 기반의 심층 코칭을 받을 수 있습니다.",
+        timeNote: "⏱️ 생성 시간: 약 1~2분 (최고 모델 사용)",
+      };
 
       const confirmed = window.confirm(
-        `📝 ${tierInfo.name} (${tierInfo.price})\n\n${tierInfo.desc}\n\n` +
+        `💎 ${tierInfo.name} (${tierInfo.price})\n\n${tierInfo.desc}\n\n` +
         `${tierInfo.timeNote}\n` +
         `⚠️ 생성 중 화면을 닫지 마세요.\n\n` +
         `한 번 생성되면 영구 저장되어 이후 재호출 없이 언제든 다시 보실 수 있습니다.\n\n` +
@@ -1132,8 +1138,8 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
           }
         }
       } else {
-        // 상세/프리미엄: API 호출 + 6단계 진단
-        const numericTier = tier === "detail" ? 1 : 2;
+        // 🆕 프리미엄(detail은 위에서 자동으로 premium으로 변환됨)
+        const numericTier = 2;
         let simText = currentGame.simText;
         if (!simText) {
           const results = currentGame.gameResults || (currentGame.turnLog || []).map(t => ({
@@ -2012,8 +2018,9 @@ function DebriefResultModal({ modal, onClose }) {
   const TIER_LABEL = {
     free: { icon: "💬", name: "요약 피드백", color: "#22c55e" },
     analysis: { icon: "📋", name: "총평 분석", color: "#a855f7" },
-    detail: { icon: "📝", name: "상세 피드백 ($9)", color: "#3b82f6" },
-    premium: { icon: "💎", name: "프리미엄 피드백 ($20)", color: "#f59e0b" },
+    // 🆕 detail 제거됨 (premium으로 통합) - 호환성 위해 detail이 와도 premium으로 표시
+    detail: { icon: "💎", name: "프리미엄 피드백 ($15)", color: "#f59e0b" },
+    premium: { icon: "💎", name: "프리미엄 피드백 ($15)", color: "#f59e0b" },
   };
   const meta = TIER_LABEL[tier] || TIER_LABEL.free;
 
@@ -2777,6 +2784,7 @@ function DebriefResultModal({ modal, onClose }) {
                         evidence={personaData.evidence}
                         meaning={personaData.meaning}
                         nextStep={personaData.nextStep}
+                        traits={personaData.traits}
                       />
                     )}
                   </div>

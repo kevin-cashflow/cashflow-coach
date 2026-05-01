@@ -321,6 +321,7 @@ export default function SharePage() {
                   evidence={personaData.evidence}
                   meaning={personaData.meaning}
                   nextStep={personaData.nextStep}
+                        traits={personaData.traits}
                 />
               )}
             </div>
