@@ -2565,10 +2565,19 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       dice: [0], total: 0, pos: 0,
     }));
     const now = new Date();
-    // Phase B: 대회 모드 및 탈출 관련 정보
-    const passiveIncome = assets
-      .filter(a => a.type !== "주식")
-      .reduce((sum, a) => sum + (a.cf || 0), 0);
+    // 🆕 게임 화면(재무제표)에 표시되는 값을 그대로 저장
+    // 디브리핑/6 Levels 진단 시 정확히 동일한 값을 사용하기 위함
+    const jobData = JOBS.find(x => x.name === job) || null;
+    const childTotal = jobData ? babies * (jobData.childCost || 0) : 0;
+    // 게임 화면 정의: passiveIncome = totalCF (자산들의 cf 합산, 주식 포함)
+    // 게임 코드 1946라인: const passiveIncome = totalCF;
+    const passiveIncome = totalCF;
+    // 게임 화면 정의: totalExpense = 직무 지출 + 양육비 + 대출 이자
+    const totalExpense = (jobData?.expense || 0) + childTotal + (loanInterest || 0);
+    // 게임 화면 정의: 월별 현금흐름 = jobData.cashflow + totalCF - childTotal - loanInterest
+    const monthlyCashflow = jobData ? (jobData.cashflow + totalCF - childTotal - loanInterest) : 0;
+    // 총 수입 = 월급 + 패시브 인컴
+    const totalIncome = (jobData?.salary || 0) + passiveIncome;
     return {
       version, job, turnCount: turnLog.length,
       date: now.toLocaleDateString("ko-KR"),
@@ -2576,6 +2585,17 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       dateTime: now.toISOString(),
       turnLog, assets, cash, totalCF, bankLoan, loanInterest, babies, gameEnded,
       initialLoan, // 파생 상태 재계산용 (복구 시 필수)
+      // 🆕 재무제표 스냅샷 (게임 저장 시점, 게임 화면과 동일한 값)
+      // 디브리핑 시 동일한 값을 표시하기 위해 명시적으로 저장
+      jobData,           // 직무 정보 (월급, 지출, 양육비)
+      salary: jobData?.salary || 0,
+      passiveIncome,     // 게임 화면 "패시브 인컴" 값 (= totalCF)
+      totalExpense,      // 게임 화면 "총지출" 값
+      totalIncome,       // 월급 + 패시브 인컴
+      monthlyCashflow,   // 게임 화면 "월별 현금흐름" 값
+      childTotal,        // 양육비 합계
+      // 🆕 핵심 비율: 패시브 인컴 / 지출 (쥐경주 탈출 = 1.0 이상)
+      peRatio: totalExpense > 0 ? (passiveIncome / totalExpense) : 0,
       simText: buildPromptText(gameResults, version, turnLog.length),
       gameResults, // 디브리핑 재계산용 (deck 구조 일치)
       // Phase B 추가 필드
@@ -3967,76 +3987,196 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                   const unitCount = asset ? getAssetUnits(asset) : 1;
 
                   let priceOptions = []; // { label, value, card }
+
+                  // 🆕 풀 가격 표시 헬퍼 (예: "$45K" → "$45,000", "$45,000" → "$45,000")
+                  // sell 필드가 약어이거나 풀이거나 모두 풀 형태로 통일
+                  const formatFullPrice = (raw) => {
+                    if (!raw) return "";
+                    const s = String(raw);
+                    // 이미 풀 형태(예: "$45,000")면 그대로
+                    if (/^\$[\d,]+$/.test(s) && /,/.test(s)) return s;
+                    // K/M 약어 처리
+                    const num = parseInt(s.replace(/[^0-9]/g, "")) || 0;
+                    let value = num;
+                    if (/[Kk]/.test(s)) value = num * 1000;
+                    else if (/[Mm]/.test(s)) value = num * 1000000;
+                    return `$${fmtNum(value)}`;
+                  };
+
+                  // 카드의 desc에서 풀 가격 추출 (예: "$30,000")
+                  const extractFullPriceFromDesc = (card) => {
+                    const m = (card.desc || "").match(/\$([0-9]{1,3}(?:,[0-9]{3})+)/);
+                    return m ? parseInt(m[1].replace(/,/g, "")) || 0 : 0;
+                  };
+
+                  // ─── 1. 콘도 (방2/욕실1) ───
                   if (/콘도/.test(assetName)) {
+                    // 카드 형식: "콘도 매수 - 방2/욕실1: ... $XX,XXX에 팔라"
                     priceOptions = deck.market
-                      .filter(c => /콘도/.test(c.desc || "") && c.sell && /^\$/.test(c.sell))
-                      .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
-                  } else if ((/주택 3\/2|3\/2|방3|욕실2/.test(assetName)) && !/가구|다가구|아파트/.test(assetName)) {
-                    // 주택 3/2 계열 (SMALL DEAL: "주택 방3/욕실2" + BIG DEAL: "주택 3/2")
-                    priceOptions = deck.market
-                      .filter(c => /주택 3\/2를 \$|콘도 2\/1/.test(c.desc || "") && c.sell && /^\$/.test(c.sell))
-                      .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
-                    // SMALL DEAL 주택(더 저렴)은 콘도 2/1 판매가도 적용 가능 (가격대 유사)
-                    // 하지만 기본적으로 "주택 3/2를 $XX,XXX에 팔라" 카드만 사용
-                    priceOptions = deck.market
-                      .filter(c => /주택 3\/2를 \$/.test(c.desc || "") && c.sell)
-                      .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
-                  } else if (/가구|다가구/.test(assetName)) {
-                    // 가구당 단가 × 유닛수
-                    // desc에 "$30,000" 형식으로 정확한 금액 있음. sell 필드는 "가구당$30K" 약어.
-                    const parseUnitPriceFromCard = (card) => {
-                      // 1) desc에서 "$30,000" 같은 명시적 금액 추출 (우선순위 높음)
-                      const descMatch = (card.desc || "").match(/\$([0-9]{1,3}(?:,[0-9]{3})+)/);
-                      if (descMatch) return parseInt(descMatch[1].replace(/,/g, "")) || 0;
-                      // 2) sell 필드의 K/M 처리 fallback
-                      const s = String(card.sell || "");
-                      const num = parseInt(s.replace(/[^0-9]/g, "")) || 0;
-                      if (/[Kk]/.test(s)) return num * 1000;
-                      if (/[Mm]/.test(s)) return num * 1000000;
-                      return num;
-                    };
-                    priceOptions = deck.market
-                      .filter(c => /다가구 주택 가구당/.test(c.desc || "") && c.sell)
+                      .filter(c =>
+                        c.sell && /^\$/.test(c.sell) &&
+                        /콘도 매수 - 방2\/욕실1/.test(c.desc || "")
+                      )
                       .map(c => {
-                        const unitPrice = parseUnitPriceFromCard(c);
-                        const total = unitPrice * unitCount;
-                        return { label: `가구당 $${fmtNum(unitPrice)} × ${unitCount}채 = $${fmtNum(total)}`, value: total, card: c };
+                        const value = parseNum(c.sell);
+                        return { label: `$${fmtNum(value)}`, value, card: c };
                       });
-                  } else if (/아파트/.test(assetName)) {
-                    // 아파트 1채당 단가 × 세대수 (desc에서 추출 우선)
-                    const parseUnitPriceFromCard = (card) => {
-                      const descMatch = (card.desc || "").match(/\$([0-9]{1,3}(?:,[0-9]{3})+)/);
-                      if (descMatch) return parseInt(descMatch[1].replace(/,/g, "")) || 0;
-                      const s = String(card.sell || "");
-                      const num = parseInt(s.replace(/[^0-9]/g, "")) || 0;
-                      if (/[Kk]/.test(s)) return num * 1000;
-                      if (/[Mm]/.test(s)) return num * 1000000;
-                      return num;
-                    };
-                    priceOptions = deck.market
-                      .filter(c => /아파트 단지 1채당/.test(c.desc || "") && c.sell)
-                      .map(c => {
-                        const unitPrice = parseUnitPriceFromCard(c);
-                        const total = unitPrice * unitCount;
-                        return { label: `1채당 $${fmtNum(unitPrice)} × ${unitCount}채 = $${fmtNum(total)}`, value: total, card: c };
-                      });
-                  } else if (/땅|12,000|24,000/.test(assetName)) {
-                    priceOptions = deck.market
-                      .filter(c => /땅을 \$/.test(c.desc || "") && c.sell)
-                      .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
-                  } else if (/세차/.test(assetName)) {
-                    priceOptions = deck.market
-                      .filter(c => /세차장/.test(c.desc || "") && c.sell)
-                      .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
-                  } else if (/쇼핑몰/.test(assetName)) {
-                    priceOptions = deck.market
-                      .filter(c => /쇼핑몰/.test(c.desc || "") && c.sell)
-                      .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
-                  } else if (/B&B|모텔/.test(assetName)) {
-                    priceOptions = deck.market
-                      .filter(c => /B&B/.test(c.desc || "") && c.sell)
-                      .map(c => ({ label: c.sell, value: parseNum(c.sell), card: c }));
                   }
+                  // ─── 2. 주택 3/2 (방3/욕실2) ───
+                  else if ((/주택 3\/2|3\/2|방3|욕실2/.test(assetName)) && !/가구|다가구|아파트/.test(assetName)) {
+                    // 카드 형식: "주택 매수 - 방3/욕실2: ... $XX,XXX에 팔라"
+                    priceOptions = deck.market
+                      .filter(c =>
+                        c.sell && /^\$/.test(c.sell) &&
+                        /주택 매수 - 방3\/욕실2/.test(c.desc || "")
+                      )
+                      .map(c => {
+                        const value = parseNum(c.sell);
+                        return { label: `$${fmtNum(value)}`, value, card: c };
+                      });
+                  }
+                  // ─── 3. Starter House (방2/욕실1) ───
+                  else if (/Starter|2\/1|방2\/욕실1/i.test(assetName)) {
+                    // 카드 형식: "Starter House(방2/욕실1)를 $XX,XXX에 팔라"
+                    priceOptions = deck.market
+                      .filter(c =>
+                        c.sell && /Starter House/.test(c.desc || "")
+                      )
+                      .map(c => {
+                        const value = extractFullPriceFromDesc(c) || parseNum(c.sell);
+                        return { label: `$${fmtNum(value)}`, value, card: c };
+                      });
+                  }
+                  // ─── 4. 다가구 주택 (가구당 × 가구수) ───
+                  else if (/가구|다가구/.test(assetName)) {
+                    // 카드 형식: "다가구 주택 매수: ... 가구당 $XX,XXX에 팔라" 또는 "다가구 주택을 가구당 $XX,XXX에 팔라"
+                    priceOptions = deck.market
+                      .filter(c => /다가구 주택.*가구당/.test(c.desc || "") && c.sell)
+                      .map(c => {
+                        const unitPrice = extractFullPriceFromDesc(c);
+                        const total = unitPrice * unitCount;
+                        return {
+                          label: `가구당 $${fmtNum(unitPrice)} × ${unitCount}가구 = $${fmtNum(total)}`,
+                          value: total,
+                          card: c,
+                        };
+                      });
+                  }
+                  // ─── 5. 아파트 단지 (1채당 × 채수) ───
+                  else if (/아파트/.test(assetName)) {
+                    // 카드 형식 1: "아파트 단지 매수: 아파트 1채당 $XX,XXX을 제안함"
+                    // 카드 형식 2: "...아파트를 세대당 $XX,XXX에 매수" (REIT, 의사, 대기업)
+                    priceOptions = deck.market
+                      .filter(c =>
+                        c.sell &&
+                        (/아파트 단지 매수.*1채당|아파트.*세대당|아파트를 세대당/.test(c.desc || ""))
+                      )
+                      .map(c => {
+                        const unitPrice = extractFullPriceFromDesc(c);
+                        const total = unitPrice * unitCount;
+                        // 카드 표현에 따라 "1채당" vs "세대당" 라벨링
+                        const unitWord = /세대당/.test(c.desc || "") ? "세대당" : "1채당";
+                        return {
+                          label: `${unitWord} $${fmtNum(unitPrice)} × ${unitCount}채 = $${fmtNum(total)}`,
+                          value: total,
+                          card: c,
+                        };
+                      });
+                  }
+                  // ─── 6. 땅 (평수 기반 매칭) ───
+                  else if (/땅|평/.test(assetName)) {
+                    // 카드 형식 1: "12,000평의 땅을 보유한 ... $150,000에 팔 수 있다"
+                    // 카드 형식 2: "24,000평의 땅을 보유한 ... $250,000에 팔 수 있다"
+                    // 카드 형식 3: "12,000평 땅을 $125,000에 팔라는 제안"
+                    // 자산명에서 평수를 추출해 매칭 (12,000평 / 24,000평 / 6,000평)
+                    const sizeMatch = assetName.match(/([\d,]+)\s*평/);
+                    const assetSize = sizeMatch ? sizeMatch[1].replace(/,/g, "") : "";
+                    priceOptions = deck.market
+                      .filter(c => {
+                        const desc = c.desc || "";
+                        if (!c.sell) return false;
+                        // 평수 매칭 (자산과 카드의 평수가 같아야)
+                        if (assetSize) {
+                          const cardSizeMatch = desc.match(/([\d,]+)\s*평/);
+                          if (!cardSizeMatch) return false;
+                          const cardSize = cardSizeMatch[1].replace(/,/g, "");
+                          return cardSize === assetSize && /땅/.test(desc);
+                        }
+                        // 평수 추출 실패 시 모든 땅 카드 반환
+                        return /땅을/.test(desc);
+                      })
+                      .map(c => {
+                        const value = extractFullPriceFromDesc(c) || parseNum(c.sell);
+                        return { label: `$${fmtNum(value)}`, value, card: c };
+                      });
+                  }
+                  // ─── 7. 세차장 ───
+                  else if (/세차/.test(assetName)) {
+                    // 카드 형식: "세차장 매수: ... 최대 $250,000의 현금을 지불"
+                    priceOptions = deck.market
+                      .filter(c => /세차장 매수/.test(c.desc || "") && c.sell)
+                      .map(c => {
+                        const value = extractFullPriceFromDesc(c) || parseNum(c.sell);
+                        return { label: `최대 $${fmtNum(value)}`, value, card: c };
+                      });
+                  }
+                  // ─── 8. 쇼핑몰 ───
+                  else if (/쇼핑몰/.test(assetName)) {
+                    priceOptions = deck.market
+                      .filter(c => /쇼핑몰 매수/.test(c.desc || "") && c.sell)
+                      .map(c => {
+                        const value = extractFullPriceFromDesc(c) || parseNum(c.sell);
+                        return { label: `$${fmtNum(value)}`, value, card: c };
+                      });
+                  }
+                  // ─── 9. B&B / 모텔 ───
+                  else if (/B&B|모텔/.test(assetName)) {
+                    priceOptions = deck.market
+                      .filter(c => /B&B 매수|모텔/.test(c.desc || "") && c.sell)
+                      .map(c => {
+                        const value = extractFullPriceFromDesc(c) || parseNum(c.sell);
+                        return { label: `$${fmtNum(value)}`, value, card: c };
+                      });
+                  }
+                  // ─── 10. 동업 (지분×N배) ───
+                  else if (/동업/.test(assetName)) {
+                    // 카드 형식: "동업 파트너가 지분 가격의 N배에 매수."
+                    // 동업 자산의 매수가(price)를 추출해서 N배로 계산
+                    const assetPrice = asset?.price ? parseNum(asset.price) : (asset?.loan || 0);
+                    priceOptions = deck.market
+                      .filter(c => /동업 파트너.*지분 가격/.test(c.desc || "") && c.sell)
+                      .map(c => {
+                        // sell 필드: "지분×3", "지분×5", "지분×2"
+                        const multMatch = String(c.sell).match(/×(\d+)/);
+                        const mult = multMatch ? parseInt(multMatch[1]) : 1;
+                        const total = assetPrice * mult;
+                        return {
+                          label: `지분 $${fmtNum(assetPrice)} × ${mult}배 = $${fmtNum(total)}`,
+                          value: total,
+                          card: c,
+                        };
+                      });
+                  }
+                  // ─── 11. 소프트웨어 회사 ───
+                  else if (/소프트웨어/.test(assetName)) {
+                    priceOptions = deck.market
+                      .filter(c => /소프트웨어 회사/.test(c.desc || "") && c.sell)
+                      .map(c => {
+                        const value = extractFullPriceFromDesc(c) || parseNum(c.sell);
+                        return { label: `$${fmtNum(value)}`, value, card: c };
+                      });
+                  }
+                  // ─── 12. 작은 상품 회사 (부업으로 사업 시작) ───
+                  else if (/작은 상품|부업|상품 판매/.test(assetName)) {
+                    priceOptions = deck.market
+                      .filter(c => /작은 상품 판매 회사/.test(c.desc || "") && c.sell)
+                      .map(c => {
+                        const value = extractFullPriceFromDesc(c) || parseNum(c.sell);
+                        return { label: `$${fmtNum(value)}`, value, card: c };
+                      });
+                  }
+                  // ※ 문구 도매(SMALL/BIG DEAL 자산)는 전용 매도 카드가 없음
+                  //    → priceOptions 빈 배열 → 매도 불가 안내 메시지 표시 (정상 동작)
 
                   // 중복 제거 (같은 값이면 하나만 표시)
                   const seen = new Set();
@@ -5029,17 +5169,34 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
           })()}
           version={version}
           turns={turnLog.length}
-          gameSnapshot={{
-            job, jobData: JOBS.find(x => x.name === job),
-            babies, assets, cash, loanInterest, bankLoan,
-            startingCF: JOBS.find(x => x.name === job)?.cf || 0,
-            finalCF: totalCF,
-            finalAssets: assets,
-            totalCF,
-            // 🆕 페르소나 진단용 turnLog 추가
-            turnLog,
-            playerName: currentPlayer?.name || authUser?.user_metadata?.nickname || "플레이어",
-          }}
+          gameSnapshot={(() => {
+            const jobData = JOBS.find(x => x.name === job);
+            // 🆕 게임 화면(재무제표)과 동일한 값 사용 (일관성 보장)
+            // 게임 코드 1946라인 정의: passiveIncome = totalCF (주식 포함)
+            const childTotal = jobData ? babies * (jobData.childCost || 0) : 0;
+            const passiveIncomeValue = totalCF;  // 게임 화면 "패시브 인컴" 값
+            const computedExpense = (jobData?.expense || 0) + childTotal + (loanInterest || 0);
+            const monthlyCashflow = jobData ? (jobData.cashflow + totalCF - childTotal - loanInterest) : 0;
+            return {
+              job, jobData,
+              salary: jobData?.salary || 0,
+              babies, assets, cash, loanInterest, bankLoan,
+              startingCF: jobData?.cf || 0,
+              finalCF: totalCF,
+              finalAssets: assets,
+              totalCF,
+              // 🆕 게임 화면 재무제표와 동일한 값들 (일관성)
+              passiveIncome: passiveIncomeValue,
+              totalExpense: computedExpense,
+              monthlyCashflow,
+              childTotal,
+              totalIncome: (jobData?.salary || 0) + passiveIncomeValue,
+              peRatio: computedExpense > 0 ? (passiveIncomeValue / computedExpense) : 0,
+              // 🆕 페르소나 진단용 turnLog 추가
+              turnLog,
+              playerName: currentPlayer?.name || authUser?.user_metadata?.nickname || "플레이어",
+            };
+          })()}
         />
       )}
 
@@ -6277,7 +6434,11 @@ export default function CoachingSimulator() {
               const ts = Date.now();
               // 플레이어 있으면 사용, 없으면 "solo" 사용 (user_id 기반으로 저장)
               const playerId = currentPlayer?.id || "solo";
-              const playerName = currentPlayer?.name || "개인플레이";
+              // 🆕 닉네임 우선순위: currentPlayer.name > user_metadata.nickname > 이메일 username > "플레이어"
+              const playerName = currentPlayer?.name
+                || authUser?.user_metadata?.nickname
+                || (authUser?.email ? authUser.email.split("@")[0] : null)
+                || "플레이어";
               const key = `game:${playerId}:${ts}`;
 
               // 🆕 저장자 정보 로그 — 누가 / 언제 / 어떤 세션으로 저장했는지
@@ -6689,7 +6850,18 @@ function buildCompactSummary(analysis) {
 }
 
 export const computeBestWorstPaths = (turnLogData, totalTurns, startAge = 20) => {
+  // 🆕 디버그: 입력 데이터 검사
+  if (typeof window !== "undefined") {
+    console.log("[computeBestWorstPaths] 📊 입력:", {
+      turnLogLength: turnLogData?.length || 0,
+      totalTurns,
+      startAge,
+      sampleTurn: turnLogData?.[0] || null,
+    });
+  }
+
   if (!turnLogData || turnLogData.length === 0) {
+    console.warn("[computeBestWorstPaths] ⚠️ turnLogData 없음 - 빈 경로 반환");
     return {
       bestPath: [{ turn: 1, age: startAge, cf: 0, asset: 0, note: "기록 없음" }],
       worstPath: [{ turn: 1, age: startAge, cf: 0, asset: 0, note: "기록 없음" }],
@@ -7182,16 +7354,19 @@ export const computeBestWorstPaths = (turnLogData, totalTurns, startAge = 20) =>
 
   // 모두 중립이면 기본 값 (교육적 메시지)
   if (bestPath.length <= 2 && worstPath.length <= 2 && bestCF === 0 && worstCF === 0 && bestAsset === 0 && worstAsset === 0) {
+    if (typeof window !== "undefined") {
+      console.log("[computeBestWorstPaths] ℹ️ 중립 게임 - 교육 가이드 폴백 반환");
+    }
     return {
       bestPath: [
-        { turn: 1, age: 20, cf: 0, asset: 0, note: "출발 (20세)" },
+        { turn: 1, age: startAge, cf: 0, asset: 0, note: `출발 (${startAge}세)` },
         { turn: Math.floor(totalTurns / 3), age: ageAtTurn(Math.floor(totalTurns / 3)), cf: 100, asset: 5000, note: "저축 + 첫 자산 매수" },
         { turn: Math.floor(totalTurns / 2), age: ageAtTurn(Math.floor(totalTurns / 2)), cf: 300, asset: 15000, note: "현금흐름 자산 확장" },
         { turn: Math.floor(totalTurns * 2 / 3), age: ageAtTurn(Math.floor(totalTurns * 2 / 3)), cf: 600, asset: 35000, note: "사업체 매수 (B사분면)" },
         { turn: totalTurns, age: ageAtTurn(totalTurns), cf: 1000, asset: 60000, note: "다양한 행동이 있었다면" },
       ],
       worstPath: [
-        { turn: 1, age: 20, cf: 0, asset: 0, note: "출발 (20세)" },
+        { turn: 1, age: startAge, cf: 0, asset: 0, note: `출발 (${startAge}세)` },
         { turn: Math.floor(totalTurns / 3), age: ageAtTurn(Math.floor(totalTurns / 3)), cf: 0, asset: 0, note: "저축도 투자도 없음" },
         { turn: Math.floor(totalTurns / 2), age: ageAtTurn(Math.floor(totalTurns / 2)), cf: 0, asset: 0, note: "기회 계속 패스" },
         { turn: totalTurns, age: ageAtTurn(totalTurns), cf: 0, asset: 0, note: "행동 없이 시간만 흘렀다면" },
@@ -7224,10 +7399,23 @@ export const computeBestWorstPaths = (turnLogData, totalTurns, startAge = 20) =>
     return [first, ...topChanges.map(({ _delta, ...p }) => p), last];
   };
 
-  return {
+  const result = {
     bestPath: compressPath(bestPath),
     worstPath: compressPath(worstPath),
   };
+
+  if (typeof window !== "undefined") {
+    console.log("[computeBestWorstPaths] ✅ 결과:", {
+      bestPathLength: result.bestPath.length,
+      worstPathLength: result.worstPath.length,
+      bestFinalCF: result.bestPath[result.bestPath.length - 1]?.cf,
+      worstFinalCF: result.worstPath[result.worstPath.length - 1]?.cf,
+      bestFinalAsset: result.bestPath[result.bestPath.length - 1]?.asset,
+      worstFinalAsset: result.worstPath[result.worstPath.length - 1]?.asset,
+    });
+  }
+
+  return result;
 };
 
 
@@ -8278,14 +8466,32 @@ if (!analysisRaw) return null;
   }
   const bp = analysis.bestPath || [];
   const wp = analysis.worstPath || [];
-  // 🆕 hasPaths: 배열 길이만 아니라 실제 CF/asset 값이 의미있는지 확인
-  //    무행동 게임(CHARITY만 있는 턴 등)이면 bp/wp가 있어도 모두 0 → 그래프 무의미
+  // 🆕 사용자 피드백 반영 (2025-05): 그래프 표시 조건 변경
+  // 이전: 10턴 이상 + 거래 있어야 표시 → 거래 없으면 그래프 안 보임
+  // 이번: 기회 카드 자체가 있으면 표시 (매수=최상 / 패스=최악 비교 가능)
+  //   - bestPath나 worstPath 둘 중 하나라도 의미있는 값이면 그래프 표시
+  //   - 둘 다 0이면 = 기회 카드 자체가 없었음 → 안내 메시지
   const hasAnyValue = (arr) => arr.some(p => (p.cf || 0) !== 0 || (p.asset || 0) !== 0);
-  const hasData = bp.length > 0 && wp.length > 0 && (hasAnyValue(bp) || hasAnyValue(wp));
-  // 🆕 충분한 턴 진행 체크: 10턴 미만이면 그래프가 의미 없음 (거래 데이터 부족)
-  const MIN_TURNS_FOR_GRAPH = 10;
-  const hasEnoughTurns = (turns || 0) >= MIN_TURNS_FOR_GRAPH;
-  const hasPaths = hasData && hasEnoughTurns;
+  const hasOpportunity = hasAnyValue(bp) || hasAnyValue(wp);  // 기회 카드 발생 여부
+  const hasPaths = bp.length > 0 && wp.length > 0 && hasOpportunity;
+  // 호환성 유지 (기존 변수명 그대로)
+  const hasData = hasPaths;
+  const hasEnoughTurns = true;  // 더 이상 턴 수 제한 없음
+  const MIN_TURNS_FOR_GRAPH = 0;  // 호환성 유지
+
+  // 🆕 디버그: 그래프 표시 조건 로그
+  if (typeof window !== "undefined") {
+    console.log("[AnalysisReport] 📈 그래프 조건 검사 (v2 - 기회카드 기반):", {
+      bestPathLength: bp.length,
+      worstPathLength: wp.length,
+      hasBestValue: hasAnyValue(bp),
+      hasWorstValue: hasAnyValue(wp),
+      hasOpportunity,
+      turns,
+      hasPaths,
+      decision: hasPaths ? "✅ 그래프 표시" : "⚠️ 기회 카드 없음 → 안내",
+    });
+  }
 
   // 🔧 턴 시간축 기반으로 bp/wp 정합성 맞추기
   const allTurns = Array.from(new Set([
@@ -8369,42 +8575,20 @@ if (!analysisRaw) return null;
       )}
 
       {/* ── 2. 최상의 선택 vs 최악의 선택 비교 그래프 ── */}
-      {/* 🆕 턴 수 부족 안내: 10턴 미만이면 그래프가 의미 없음 */}
-      {!hasEnoughTurns && Array.isArray(analysis.phases) && analysis.phases.length > 0 && (
-      <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #3b82f640", marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 800, color: "#93c5fd", marginBottom: 6 }}>📈 최상의 선택 vs 최악의 선택</div>
-        <div style={{
-          padding: "14px 16px", borderRadius: 10, background: "#3b82f610",
-          fontSize: 12, color: "#93c5fd", lineHeight: 1.6, marginTop: 10,
-        }}>
-          <div style={{ fontWeight: 700, marginBottom: 4 }}>⏳ 분석을 위한 데이터가 부족합니다</div>
-          <div style={{ color: "#d4d4d8" }}>
-            현재 <strong>{turns || 0}턴</strong> 진행되었습니다.
-            의미 있는 비교 분석을 위해서는 <strong>{MIN_TURNS_FOR_GRAPH}턴 이상</strong>의 플레이가 필요합니다.
-          </div>
-          <div style={{ fontSize: 10, color: "#a1a1aa", marginTop: 8, paddingTop: 8, borderTop: "1px solid #3b82f630" }}>
-            💡 <strong>왜 {MIN_TURNS_FOR_GRAPH}턴이 필요한가요?</strong><br />
-            짧은 게임은 우연 요소가 크고, 자산이 시간에 따라 만들어내는 누적 효과를 보기 어렵습니다.
-            충분한 턴이 쌓여야 "어떤 선택이 좋았고 나빴는지" 패턴이 드러납니다.
-          </div>
-        </div>
-      </div>
-      )}
-
-      {/* 🆕 무행동 안내: 10턴 이상 진행했지만 자산 매수/매도가 없는 경우 */}
-      {hasEnoughTurns && !hasData && Array.isArray(analysis.phases) && analysis.phases.length > 0 && (
+      {/* 🆕 (2025-05) 턴 수 제한 제거. 기회 카드 자체가 없을 때만 안내 표시 */}
+      {!hasPaths && Array.isArray(analysis.phases) && analysis.phases.length > 0 && (
       <div style={{ padding: 20, borderRadius: 14, background: "#111118", border: "1px solid #f59e0b40", marginBottom: 16 }}>
         <div style={{ fontSize: 14, fontWeight: 800, color: "#fde68a", marginBottom: 6 }}>📈 최상의 선택 vs 최악의 선택</div>
         <div style={{
           padding: "14px 16px", borderRadius: 10, background: "#f59e0b10",
           fontSize: 12, color: "#fde68a", lineHeight: 1.6, marginTop: 10,
         }}>
-          <div style={{ fontWeight: 700, marginBottom: 4 }}>⚠️ 비교 데이터 없음</div>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>⚠️ 비교할 기회 카드 없음</div>
           <div style={{ color: "#d4d4d8" }}>
-            이 게임에서는 <strong>자산 매수/매도 행동이 없어</strong> 선택에 따른 결과 차이를 비교할 수 없습니다.
+            이번 게임에서는 <strong>현금흐름 자산 기회 카드</strong>가 거의 등장하지 않아 비교 분석이 어렵습니다.
           </div>
           <div style={{ fontSize: 10, color: "#a1a1aa", marginTop: 8, paddingTop: 8, borderTop: "1px solid #f59e0b30" }}>
-            💡 <strong>캐쉬플로우의 핵심은 기회를 잡는 것</strong>입니다. 다음 게임에서는 OPPORTUNITY 칸에서 부동산/주식/사업에 적극 투자해보세요. 그때부터 "최상의 선택 vs 최악의 선택"이 의미를 갖습니다.
+            💡 다음 게임에서 OPPORTUNITY 칸에 자주 도착해 부동산/주식/사업 카드를 만나보세요. 매수 vs 패스 비교가 의미를 갖게 됩니다.
           </div>
         </div>
       </div>
@@ -8813,32 +8997,58 @@ export function computeFinancialSnapshot(gameSnapshot) {
   // 자산 배열 (다양한 위치에서 찾기)
   const assets = gs.assets || gs.finalAssets || gs.snapshot?.assets || [];
 
-  // 패시브 인컴 (월별 자산 수입)
-  // 우선순위: gs.passiveIncome > gs.totalCF > 자산 합산
+  // 직업 (월급, 직업명)
+  // 🆕 jobData가 없으면 직업명(job)으로 JOBS 테이블에서 자동 보강
+  // (이전에 저장된 게임은 jobData 필드가 없으므로 이 폴백이 필수)
+  const jobName = gs.job || gs.jobData?.name || "";
+  let jobData = gs.jobData || null;
+  if (!jobData && jobName) {
+    jobData = JOBS.find(j => j.name === jobName) || null;
+    if (jobData && typeof window !== "undefined") {
+      console.log(`[computeFinancialSnapshot] 🔧 jobData 자동 보강: "${jobName}" → salary=$${jobData.salary}, expense=$${jobData.expense}`);
+    }
+  }
+  const salary = gs.salary || jobData?.salary || 0;
+
+  // 자녀 수
+  const babies = gs.babies || 0;
+
+  // 은행 대출 + 이자
+  const bankLoan = gs.bankLoan || gs.snapshot?.bankLoan || 0;
+  const loanInterest = gs.loanInterest || (bankLoan * 0.10) || 0;  // 10%/월
+
+  // 🆕 패시브 인컴 — 게임 화면 정의와 일치
+  // 게임 코드 1946라인: const passiveIncome = totalCF;
+  // (totalCF는 자산들의 cf 합산, 주식 포함)
+  // 우선순위: 명시적 passiveIncome > totalCF > 자산 합산
   let passiveIncome = 0;
   if (typeof gs.passiveIncome === "number") {
     passiveIncome = gs.passiveIncome;
   } else if (typeof gs.totalCF === "number") {
-    passiveIncome = gs.totalCF;
+    passiveIncome = gs.totalCF;  // 게임 화면 값과 일치
   } else if (Array.isArray(assets) && assets.length > 0) {
+    // 폴백: 자산 합산 (주식 포함)
     passiveIncome = assets.reduce((sum, a) => sum + (a.cf || 0), 0);
   }
 
-  // 총 지출
-  const totalExpense = gs.totalExpense || gs.expense || gs.snapshot?.totalExpense || 0;
+  // 🆕 총 지출 (명시적 → jobData 계산 → 폴백)
+  // 우선순위: gs.totalExpense > jobData로 계산 > 0
+  let totalExpense = 0;
+  if (typeof gs.totalExpense === "number" && gs.totalExpense > 0) {
+    totalExpense = gs.totalExpense;
+  } else if (typeof gs.expense === "number" && gs.expense > 0) {
+    totalExpense = gs.expense;
+  } else if (jobData) {
+    // 직무 지출 + 양육비 + 대출 이자
+    totalExpense = (jobData.expense || 0)
+      + (babies * (jobData.childCost || 0))
+      + loanInterest;
+  } else if (gs.snapshot?.totalExpense) {
+    totalExpense = gs.snapshot.totalExpense;
+  }
 
   // 보유 현금
   const cash = gs.cash || gs.snapshot?.cash || 0;
-
-  // 은행 대출
-  const bankLoan = gs.bankLoan || gs.snapshot?.bankLoan || 0;
-
-  // 직업 (월급, 직업명)
-  const salary = gs.salary || gs.jobData?.salary || 0;
-  const jobName = gs.job || gs.jobData?.name || "";
-
-  // 자녀 수 (있으면)
-  const babies = gs.babies || 0;
 
   // 월 현금흐름 (총소득 - 총지출)
   // 총 소득 = 월급 + 패시브 인컴
@@ -8881,7 +9091,27 @@ export function computeFinancialSnapshot(gameSnapshot) {
 // 입력: { passiveIncome, totalExpense, cash, assets, bankLoan, savingMonths }
 // 출력: { level, levelName, color, status, guidance[], nextStep }
 export function diagnoseFinancialLevel({ passiveIncome = 0, totalExpense = 1, cash = 0, assets = [], bankLoan = 0, jobName = "" }) {
-  const expense = Math.max(totalExpense, 1);
+  // 🆕 데이터 유효성 검증 - 지출이 0이거나 비정상일 때 안전 처리
+  // 지출 0 = 데이터 없음으로 간주 → Level 1으로 폴백 (Level 6 오판 방지)
+  if (!totalExpense || totalExpense <= 0) {
+    console.warn("[diagnoseFinancialLevel] ⚠️ 총 지출 데이터 없음 - Level 1로 안전 폴백");
+    return {
+      level: 1,
+      levelName: "데이터 부족",
+      english: "Insufficient Data",
+      color: "#71717a",
+      icon: "❓",
+      status: "지출 데이터를 확인할 수 없어 정확한 단계 판정이 어렵습니다. 게임을 처음부터 진행해 주시면 정확한 진단이 가능합니다.",
+      guidance: [
+        "이 화면이 보인다면 게임 데이터 저장 시 지출 정보가 누락된 것입니다.",
+        "다음 게임에서는 정확한 단계 판정을 받아보실 수 있습니다.",
+      ],
+      nextStep: "다음 게임을 진행하면 정확한 6 Levels 진단을 받아보실 수 있습니다.",
+      kpi: { current: "데이터 없음", target: "다음 게임에서 진단" },
+    };
+  }
+
+  const expense = totalExpense;  // 0 체크 위에서 했으니 그대로 사용
   const cfRatio = passiveIncome / expense;          // 수동소득 / 지출
   const savingMonths = cash / expense;              // 비상금 개월 수
   const hasAssets = (assets || []).length > 0;
@@ -9411,6 +9641,40 @@ export async function generatePaidFeedback({ tier, version, turns, simText, extr
   ① 현재 어느 단계에 있는지
   ② 그 단계에서 해야 할 행동
   ③ 다음 단계로 가는 길
+═══════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════
+🤝 "이 모임에 다시 오셔야 하는 이유" — 마무리 직전 풍부하게 작성할 것
+═══════════════════════════════════════════════════
+프리미엄 피드백 끝부분 ("## 마무리" 또는 그 직전)에 반드시 포함하세요.
+"왜 한 번이 아니라 반복해서 와야 하는지"를 다음 4가지 측면에서 자연스럽게 풀어냅니다.
+
+1️⃣ 반복의 힘 — "패턴은 1회로 안 보입니다"
+   - 이번 게임에서 보인 행동은 그저 한 단면. 5번, 10번 반복하면 "내가 매번 같은 실수를 하는 패턴"이 보입니다.
+   - 부의 길은 직선이 아닙니다. 같은 함정에 두 번 빠지지 않으려면 반복 학습이 필요합니다.
+   - Kevin은 13년간 5,000회 넘게 이 게임을 진행했습니다. 매 회 다른 통찰이 나옵니다.
+
+2️⃣ 꾸준함의 동력 — "혼자 하면 작심삼일"
+   - 책 한 권 읽고 끝나는 것 vs 매월 함께 모여 점검하는 것 — 결과는 압도적으로 다릅니다.
+   - 행동 변화는 "환경"이 만듭니다. 모임은 매월 자신을 점검하게 하는 환경입니다.
+   - 한국 직장인 5명 중 4명이 재무 계획을 세워도 6개월 안에 포기. 모임은 그 이유를 해결합니다.
+
+3️⃣ 동료의 힘 — "다른 곳에서 못 나누는 이야기"
+   - 직장에서 "월급 외 수익이 있어야겠다"고 말하면 "꿈깨라"는 답이 돌아옵니다.
+   - 가족·친구는 "아직 어리니까", "안전이 우선이지" 같은 답만 돌려줍니다.
+   - 부의 마인드를 가진 사람들끼리만 나눌 수 있는 솔직한 대화가 모임의 진짜 가치입니다.
+   - 같은 게임을 한 사람들끼리 "당신은 어떤 선택을 했나요?" 묻는 그 순간, 진짜 학습이 일어납니다.
+
+4️⃣ Kevin의 코칭 — "책에 없는 13년의 현장 통찰"
+   - 책은 원리를 가르치지만, 적용은 사람마다 다릅니다. Kevin의 13년 경험은 그 적용 노하우입니다.
+   - 한국적 맥락(전세, 월급, 부동산 집중)에서 부자 아빠 철학을 어떻게 풀어낼지 — 이건 어디서도 못 듣습니다.
+   - 다음 모임에서 당신의 두 번째 게임이 어떻게 변할지 — Kevin이 직접 코칭합니다.
+
+⚠️ 작성 규칙:
+- 위 4가지를 형식적으로 나열하지 말고, 사용자의 이번 게임 결과와 연결해서 자연스럽게 풀어내세요.
+- 예: "오늘 당신이 (구체적 행동)을 한 것은 좋았지만, 이게 패턴이 되려면 반복이 필요합니다. 모임에 와서 두 번째 게임을 해보면..."
+- 마케팅 톤이 아니라 "친구가 진심으로 권하는 톤"으로 작성하세요.
+- 분량: 마무리 섹션 안에 200~400자 정도로 자연스럽게 녹이기.
 ═══════════════════════════════════════════════════
 `;
 
@@ -10217,7 +10481,7 @@ export function extractPersonaFromText(displayText) {
 
   const sectionText = displayText.substring(startIdx, sectionEndIdx);
   const afterText = displayText.substring(sectionEndIdx);
-  const cleanedText = (beforeText + afterText).replace(/\n{3,}/g, "\n\n").trim();
+  let cleanedText = (beforeText + afterText).replace(/\n{3,}/g, "\n\n").trim();
 
   // 섹션 내부에서 데이터 추출
   const lines = sectionText.split("\n");
@@ -10286,11 +10550,13 @@ export function extractPersonaFromText(displayText) {
           diversity: parsed.diversity || 0,
           holding: parsed.holding || 0,
         };
-        // cleanedText에서도 마커 제거 (사용자에게 보이지 않도록)
-        // (이미 cleanedText는 페르소나 섹션이 통째로 제거된 상태니 영향 없음)
       }
     } catch (e) { /* ignore */ }
   }
+
+  // 🆕 cleanedText에서도 TRAITS 마커 제거 (안전장치)
+  // 페르소나 섹션이 정상 분리됐으면 영향 없지만, 누락돼도 마커는 안 보이도록
+  cleanedText = cleanedText.replace(/<!--\s*TRAITS:[^>]*?-->/g, "").replace(/\n{3,}/g, "\n\n").trim();
 
   return {
     cleanedText,

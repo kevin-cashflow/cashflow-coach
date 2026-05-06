@@ -1140,6 +1140,26 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
       } else {
         // 🆕 프리미엄(detail은 위에서 자동으로 premium으로 변환됨)
         const numericTier = 2;
+
+        // 🆕 localStorage에서 시작 나이 가져오기 (모달 입력값)
+        let startAge = 20;
+        try {
+          const saved = window.localStorage.getItem("cashflow:userStartAge");
+          if (saved) {
+            const num = parseInt(saved);
+            if (!isNaN(num) && num >= 10 && num <= 80) startAge = num;
+          }
+        } catch (e) { /* ignore */ }
+
+        // 🆕 닉네임 추출 (게임 → user_metadata → 폴백)
+        let playerName = currentGame.playerName;
+        if (!playerName || playerName === "플레이어" || playerName === "개인플레이") {
+          try {
+            // user_metadata에서 닉네임 시도
+            playerName = window.__userNickname__ || playerName || "플레이어";
+          } catch (e) { /* ignore */ }
+        }
+
         let simText = currentGame.simText;
         if (!simText) {
           const results = currentGame.gameResults || (currentGame.turnLog || []).map(t => ({
@@ -1163,17 +1183,28 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
           version: currentGame.version,
           turns: currentGame.turnCount || 0,
           simText,
+          // 🆕 시작 나이 전달 (디브리핑 결과에 반영)
+          startAge,
           // 🆕 프리미엄(numericTier=2)일 때 페르소나 진단을 위한 게임 데이터 전달
           turnLog: currentGame.turnLog || null,
           gameSnapshot: {
             job: currentGame.job,
+            // 🆕 게임 화면 재무제표 값 (저장 시점) 그대로 전달
+            jobData: currentGame.jobData,
+            salary: currentGame.salary,
+            totalExpense: currentGame.totalExpense,
+            passiveIncome: currentGame.passiveIncome,
+            monthlyCashflow: currentGame.monthlyCashflow,
+            totalIncome: currentGame.totalIncome,
+            childTotal: currentGame.childTotal,
+            peRatio: currentGame.peRatio,
             assets: currentGame.assets || [],
             cash: currentGame.cash,
             totalCF: currentGame.totalCF,
             bankLoan: currentGame.bankLoan,
             babies: currentGame.babies,
             gameEnded: currentGame.gameEnded || currentGame.escaped,
-            playerName: currentGame.playerName || "플레이어",
+            playerName,
           },
         });
 
