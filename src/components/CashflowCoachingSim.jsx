@@ -862,11 +862,23 @@ const getRealEstateSubtype = (card) => {
   return "기타 부동산";
 };
 
-// 사업 서브타입 (dealType 기반으로 "작은/큰 사업" 구분)
+// 사업 서브타입 (dealType + 카드 종류 기반)
 // cardDealType: "deal1" = SMALL, "deal2" = BIG
+// 🆕 BIG DEAL은 "동업 파트너 (지분 매입)" vs "사업체 매수"로 분리
+//    - 동업: sub에 "동업("으로 시작 (자동차리스, 냉동피자, 병원확장, 샌드위치 등)
+//    - 사업체: sub가 "쇼핑몰 / 세차장 / B&B / 게임방 / 빨래방 / 도넛 / 문구 도매" 등
 const getBusinessSubtype = (card, cardDealType) => {
   if (cardDealType === "deal1") return "작은 사업 (SMALL)";
-  if (cardDealType === "deal2") return "큰 사업 (BIG)";
+  if (cardDealType === "deal2") {
+    const sub = (card?.sub || "").trim();
+    // 동업 카드는 sub가 "동업(...)" 형식
+    if (/^동업\(|^동업 /.test(sub)) return "동업 파트너 (지분 매입)";
+    // 부동산 전문가 파트너십도 동업 계열 (사업으로 분류된 경우)
+    if (/파트너십|파트너 매입|지분/.test(sub) || /지분 매입/.test(card?.desc || "")) {
+      return "동업 파트너 (지분 매입)";
+    }
+    return "사업체 매수 (BIG)";
+  }
   return "사업";
 };
 
@@ -2156,9 +2168,24 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
   const extractDown = (card) => {
     if (!card) return 0;
     const d = card.down || "";
-    const m = d.replace(RE_NUM, "");
-    if (d.includes("K")) return (parseInt(m) || 0) * 1000;
-    return parseInt(m) || 0;
+    if (d) {
+      const m = d.replace(RE_NUM, "");
+      if (d.includes("K")) return (parseInt(m) || 0) * 1000;
+      return parseInt(m) || 0;
+    }
+    // 🆕 down 필드가 없을 때 폴백
+    // 1) desc에 "(대출 없음)" 또는 "대출 없음"이 있으면 price 전체가 착수금
+    //    예: "부업으로 사업 시작" 카드 → 착수금 = price
+    const desc = card.desc || "";
+    if (/대출\s*없음/.test(desc) && card.price) {
+      return parseNum(card.price);
+    }
+    // 2) desc에서 "착수금 $X,XXX" 형태로 명시되어 있으면 추출
+    const downMatch = desc.match(/착수금\s*\$([0-9]{1,3}(?:,[0-9]{3})*|[0-9]+)/);
+    if (downMatch) {
+      return parseInt(downMatch[1].replace(/,/g, "")) || 0;
+    }
+    return 0;
   };
 
   const extractLoan = (card) => {
@@ -2407,8 +2434,9 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     }
     // ── PAYDAY (도착 칸) ──
     else if (cellType === "PAYDAY") {
-      const childTotal = jobData ? babies * jobData.childCost : 0;
-      const paydayAmount = jobData ? (jobData.cashflow + totalCF - childTotal - loanInterest) : 0;
+      // 🆕 부채 상환 반영: salary + totalCF - totalExpense
+      // jobData.cashflow는 원본 직업 카드 값이라 부채 상환 후에도 변경되지 않음
+      const paydayAmount = jobData ? (jobData.salary + totalCF - totalExpense) : 0;
       entry = createPaydayTurn({
         turn, boardPos, dice, passedPaydays, payAmount: paydayAmount, time,
       });
@@ -2463,8 +2491,8 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     // PayDay 통과 기록 (도착 칸 외에 지나간 PayDay)
     const paydayLogs = [];
     if (passedPaydays > 0) {
-      const childTotal = jobData ? babies * jobData.childCost : 0;
-      const paydayAmount = jobData ? (jobData.cashflow + totalCF - childTotal - loanInterest) : 0;
+      // 🆕 부채 상환 반영: salary + totalCF - totalExpense
+      const paydayAmount = jobData ? (jobData.salary + totalCF - totalExpense) : 0;
       for (let p = 0; p < passedPaydays; p++) {
         const passEntry = createPaydayPassTurn({
           turn, boardPos, payAmount: paydayAmount, time,
@@ -2575,10 +2603,14 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     // 게임 화면 정의: passiveIncome = totalCF (자산들의 cf 합산, 주식 포함)
     // 게임 코드 1946라인: const passiveIncome = totalCF;
     const passiveIncome = totalCF;
-    // 게임 화면 정의: totalExpense = 직무 지출 + 양육비 + 대출 이자
-    const totalExpense = (jobData?.expense || 0) + childTotal + (loanInterest || 0);
-    // 게임 화면 정의: 월별 현금흐름 = jobData.cashflow + totalCF - childTotal - loanInterest
-    const monthlyCashflow = jobData ? (jobData.cashflow + totalCF - childTotal - loanInterest) : 0;
+    // 🆕 totalExpense는 gameState에서 이미 부채 상환 반영된 값을 사용
+    // (gameState.totalExpense는 jobData.expense에서 상환된 부채의 payment를 차감)
+    // 만약 gameState 값이 없으면 폴백으로 직접 계산
+    const finalTotalExpense = (typeof totalExpense === "number")
+      ? totalExpense
+      : ((jobData?.expense || 0) + childTotal + (loanInterest || 0));
+    // 🆕 월별 현금흐름 = salary + totalCF - totalExpense (부채 상환 반영)
+    const monthlyCashflow = jobData ? ((jobData.salary || 0) + totalCF - finalTotalExpense) : 0;
     // 총 수입 = 월급 + 패시브 인컴
     const totalIncome = (jobData?.salary || 0) + passiveIncome;
     return {
@@ -2593,12 +2625,12 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       jobData,           // 직무 정보 (월급, 지출, 양육비)
       salary: jobData?.salary || 0,
       passiveIncome,     // 게임 화면 "패시브 인컴" 값 (= totalCF)
-      totalExpense,      // 게임 화면 "총지출" 값
+      totalExpense: finalTotalExpense,  // 🆕 부채 상환 반영된 총지출
       totalIncome,       // 월급 + 패시브 인컴
       monthlyCashflow,   // 게임 화면 "월별 현금흐름" 값
       childTotal,        // 양육비 합계
       // 🆕 핵심 비율: 패시브 인컴 / 지출 (쥐경주 탈출 = 1.0 이상)
-      peRatio: totalExpense > 0 ? (passiveIncome / totalExpense) : 0,
+      peRatio: finalTotalExpense > 0 ? (passiveIncome / finalTotalExpense) : 0,
       simText: buildPromptText(gameResults, version, turnLog.length),
       gameResults, // 디브리핑 재계산용 (deck 구조 일치)
       // Phase B 추가 필드
@@ -2976,17 +3008,18 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
             </div>
           ))}
         </div>
-        {/* 월별 현금흐름 계산 = cashflow + totalCF - 양육비 - 이자 */}
+        {/* 월별 현금흐름 계산 = salary + totalCF - totalExpense (부채 상환 반영) */}
+        {/* 🆕 jobData.cashflow는 원본 직업 카드 값이라 부채 상환을 반영하지 않음.
+            대신 totalExpense(부채 상환된 후 지출) 기반으로 재계산 */}
         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 6, padding: "6px 0", marginBottom: 4, borderTop: "1px solid #27272a" }}>
           <span style={{ fontSize: 10, color: "#71717a" }}>월별 현금흐름</span>
-          <span style={{ fontSize: 14, fontWeight: 900, color: (jobData ? jobData.cashflow + totalCF - childTotal - loanInterest : 0) >= 0 ? "#22c55e" : "#ef4444" }}>
-            ${fmtNum((jobData ? jobData.cashflow + totalCF - childTotal - loanInterest : 0))}/월
+          <span style={{ fontSize: 14, fontWeight: 900, color: (jobData ? (jobData.salary || 0) + totalCF - totalExpense : 0) >= 0 ? "#22c55e" : "#ef4444" }}>
+            ${fmtNum((jobData ? (jobData.salary || 0) + totalCF - totalExpense : 0))}/월
           </span>
           <span style={{ fontSize: 9, color: "#52525b" }}>
-            (CF ${fmtNum(jobData?.cashflow || 0)}
-            {totalCF >= 0 ? " +" : " "}${fmtNum(totalCF)}
-            {childTotal > 0 ? ` -${fmtNum(childTotal)}양육비` : ""}
-            {loanInterest > 0 ? ` -${fmtNum(loanInterest)}이자` : ""})
+            (월급 ${fmtNum(jobData?.salary || 0)}
+            {totalCF >= 0 ? " +" : " "}${fmtNum(totalCF)}패시브
+            {totalExpense > 0 ? ` -${fmtNum(totalExpense)}지출` : ""})
           </span>
         </div>
         {bankLoan > 0 && (
@@ -3421,7 +3454,9 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
             const actualDoodadCost = isChildDoodad ? doodadAmt * babies : doodadAmt;
             const cardDown = extractDown(selectedCard);
             const cardPrice = parseNum(selectedCard.price);
-            const cardLoan = (cardPrice > 0 && cardDown > 0) ? cardPrice - cardDown : 0;
+            // 🆕 down이 $0이어도 loan은 정상 계산 (price - down)
+            // 100% 대출 매수 카드 대응 (예: 악성 매물)
+            const cardLoan = cardPrice > 0 ? cardPrice - cardDown : 0;
             const cardCF = parseNumNeg(selectedCard.cf);
             const isOppCard = cellType === "OPPORTUNITY";
             const isStockCard = isStock(selectedCard);
@@ -3434,9 +3469,11 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
               {isOppCard && !isStockCard && (cardPrice > 0 || cardDown > 0 || cardCF !== 0) && (
                 <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #27272a" }}>
                   {[
+                    // 🆕 cardPrice가 있으면 착수금/대출도 항상 표시 ($0이어도)
+                    // 카드의 전체 재무 구조를 한눈에 파악하기 위함
                     cardPrice > 0 && { label: "💰 총 가격", value: `$${fmtNum(cardPrice)}`, color: "#fafafa", bg: "#ffffff08" },
-                    cardLoan > 0 && { label: "🏦 은행 대출", value: `$${fmtNum(cardLoan)}`, color: "#fca5a5", bg: "#ef444408" },
-                    cardDown > 0 && { label: "💵 착수금", value: `$${fmtNum(cardDown)}`, color: "#fde68a", bg: "#f59e0b08" },
+                    cardPrice > 0 && { label: "💵 착수금", value: `$${fmtNum(cardDown)}`, color: "#fde68a", bg: "#f59e0b08" },
+                    cardPrice > 0 && { label: "🏦 은행 대출", value: `$${fmtNum(cardLoan)}`, color: "#fca5a5", bg: "#ef444408" },
                     cardCF !== 0 && { label: "📊 월 현금흐름", value: `${cardCF >= 0 ? "+" : ""}$${fmtNum(cardCF)}`, color: cardCF >= 0 ? "#86efac" : "#fca5a5", bg: cardCF >= 0 ? "#22c55e08" : "#ef444408" },
                     selectedCard.roi && { label: "📈 ROI", value: selectedCard.roi, color: "#93c5fd", bg: "#3b82f608" },
                   ].filter(Boolean).map((row, i) => (
@@ -3602,7 +3639,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                     <BankLoanUI
                       shortage={buyCost - cash}
                       bankLoan={bankLoan}
-                      monthlyCF={jobData ? jobData.cashflow + totalCF - childTotal : 0}
+                      monthlyCF={jobData ? (jobData.salary + totalCF - totalExpense + loanInterest) : 0}
                       currentInterest={loanInterest}
                       onLoan={(amount) => {
                         const loanEntry = createExtraLoanTurn({
@@ -4320,21 +4357,45 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
                       <span style={{ fontSize: 9, color: "#71717a" }}>매각가$</span>
-                      <select
-                        value={stockSellPrice[i] ?? ""}
-                        onChange={e => setStockSellPrice(prev => ({ ...prev, [i]: e.target.value }))}
-                        style={{ width: 58, padding: "4px 2px", borderRadius: 6, border: "1px solid #27272a", background: "#18181b", color: "#fafafa", fontSize: 11, textAlign: "center", outline: "none" }}
-                      >
-                        <option value="">선택</option>
-                        <option value="10">$10</option>
-                        <option value="20">$20</option>
-                        <option value="30">$30</option>
-                        <option value="40">$40</option>
-                        <option value="50">$50</option>
-                        <option value="60">$60</option>
-                        <option value="70">$70</option>
-                        <option value="80">$80</option>
-                      </select>
+                      {(() => {
+                        // 🆕 종목별 실제 카드에 있는 가격만 추출
+                        // 주식명(a.name)으로 deck.deal1 + deck.deal2의 모든 카드를 검색
+                        // 같은 sub(종목명)의 price 필드만 추출 → 중복 제거 → 정렬
+                        const stockName = (a.name || "").trim();
+                        const allDeals = [...(deck.deal1 || []), ...(deck.deal2 || [])];
+                        const priceSet = new Set();
+                        allDeals.forEach(c => {
+                          if (!c || !isStock(c)) return;
+                          const cardSub = (c.sub || "").trim();
+                          // 종목명이 일치하는 카드만 (예: "모더나(MRNA) 주식")
+                          if (cardSub !== stockName) return;
+                          // price가 숫자 형식인 것만 (무상증자/감자 제외)
+                          const p = parseNum(c.price);
+                          if (p > 0 && /^\$?\d/.test(String(c.price || ""))) {
+                            priceSet.add(p);
+                          }
+                        });
+                        const stockPrices = Array.from(priceSet).sort((x, y) => x - y);
+                        return (
+                          <select
+                            value={stockSellPrice[i] ?? ""}
+                            onChange={e => setStockSellPrice(prev => ({ ...prev, [i]: e.target.value }))}
+                            style={{ width: 70, padding: "4px 2px", borderRadius: 6, border: "1px solid #27272a", background: "#18181b", color: "#fafafa", fontSize: 11, textAlign: "center", outline: "none" }}
+                          >
+                            <option value="">선택</option>
+                            {stockPrices.length > 0 ? (
+                              stockPrices.map(p => (
+                                <option key={p} value={p}>${p}</option>
+                              ))
+                            ) : (
+                              // 🆕 폴백: 종목 카드를 못 찾은 경우 기본 옵션
+                              [10, 20, 30, 40, 50, 60, 70, 80].map(p => (
+                                <option key={p} value={p}>${p}</option>
+                              ))
+                            )}
+                          </select>
+                        );
+                      })()}
                     </div>
                     <button onClick={() => {
                       const qtyRaw = stockSellQty[i] ?? a.shares;
@@ -4419,8 +4480,8 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
 
           {/* 은행 대출 섹션 — 항상 표시. 직업 카드 초기 대출 + 신용 대출 통합 관리. */}
           {(() => {
-            // 신용 대출 한도: 월별 현금흐름의 10배까지 (현재 이자 감안해서 남은 여유 CF 기준)
-            const monthlyCFNow = jobData ? jobData.cashflow + totalCF - childTotal - loanInterest : 0;
+            // 🆕 신용 대출 한도: salary + totalCF - totalExpense (부채 상환 반영)
+            const monthlyCFNow = jobData ? (jobData.salary + totalCF - totalExpense) : 0;
             const maxCreditLoan = Math.max(0, Math.floor((monthlyCFNow * 10) / 1000) * 1000);
             // 대출 가능 여부: 월CF > 0 + 한도 >= 1000
             const canBorrow = monthlyCFNow > 0 && maxCreditLoan >= 1000;
@@ -4885,13 +4946,15 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                     {extraBuyStep === 2 && extraBuySelectedCard && (() => {
                       const cardDown = extractDown(extraBuySelectedCard);
                       const cardPrice = parseNum(extraBuySelectedCard.price);
-                      const cardLoan = (cardPrice > 0 && cardDown > 0) ? cardPrice - cardDown : 0;
+                      // 🆕 down이 $0이어도 loan 정상 계산
+                      const cardLoan = cardPrice > 0 ? cardPrice - cardDown : 0;
                       // 권리금 지불 반영 후 가용 현금
                       const cashAfterDeposit = cash - extraBuyDeposit;
                       // 착수금을 내려면 얼마가 더 필요한가
                       const shortageAfterDeposit = Math.max(0, cardDown - cashAfterDeposit - extraBuyExtraLoan);
                       // 추가 대출 한도 (기존 BankLoanUI 한도 계산식과 동일)
-                      const monthlyCFAfter = (jobData ? jobData.cashflow + totalCF - childTotal : 0);
+                      // 🆕 부채 상환 반영: salary - totalExpense (이자 제외) + totalCF
+                      const monthlyCFAfter = jobData ? (jobData.salary + totalCF - totalExpense + loanInterest) : 0;
                       const remainingCF = Math.max(0, monthlyCFAfter - loanInterest - Math.round(extraBuyExtraLoan * 0.1));
                       const maxExtraLoan = Math.floor(remainingCF / 0.1 / 1000) * 1000;
                       const canBuy = shortageAfterDeposit === 0;
@@ -5175,18 +5238,21 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
           version={version}
           turns={turnLog.length}
           gameSnapshot={(() => {
-            const jobData = JOBS.find(x => x.name === job);
-            // 🆕 게임 화면(재무제표)과 동일한 값 사용 (일관성 보장)
-            // 게임 코드 1946라인 정의: passiveIncome = totalCF (주식 포함)
-            const childTotal = jobData ? babies * (jobData.childCost || 0) : 0;
-            const passiveIncomeValue = totalCF;  // 게임 화면 "패시브 인컴" 값
-            const computedExpense = (jobData?.expense || 0) + childTotal + (loanInterest || 0);
-            const monthlyCashflow = jobData ? (jobData.cashflow + totalCF - childTotal - loanInterest) : 0;
+            const jobDataLocal = JOBS.find(x => x.name === job);
+            // 🆕 부채 상환 반영: gameState의 totalExpense 사용
+            // (gameState.totalExpense는 jobData.expense에서 상환된 부채의 payment를 차감)
+            const childTotalLocal = jobDataLocal ? babies * (jobDataLocal.childCost || 0) : 0;
+            const passiveIncomeValue = totalCF;
+            const computedExpense = (typeof totalExpense === "number")
+              ? totalExpense
+              : ((jobDataLocal?.expense || 0) + childTotalLocal + (loanInterest || 0));
+            // 월별 현금흐름 = salary + totalCF - totalExpense
+            const monthlyCashflow = jobDataLocal ? ((jobDataLocal.salary || 0) + totalCF - computedExpense) : 0;
             return {
-              job, jobData,
-              salary: jobData?.salary || 0,
+              job, jobData: jobDataLocal,
+              salary: jobDataLocal?.salary || 0,
               babies, assets, cash, loanInterest, bankLoan,
-              startingCF: jobData?.cf || 0,
+              startingCF: jobDataLocal?.cf || 0,
               finalCF: totalCF,
               finalAssets: assets,
               totalCF,
@@ -5194,8 +5260,8 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
               passiveIncome: passiveIncomeValue,
               totalExpense: computedExpense,
               monthlyCashflow,
-              childTotal,
-              totalIncome: (jobData?.salary || 0) + passiveIncomeValue,
+              childTotal: childTotalLocal,
+              totalIncome: (jobDataLocal?.salary || 0) + passiveIncomeValue,
               peRatio: computedExpense > 0 ? (passiveIncomeValue / computedExpense) : 0,
               // 🆕 페르소나 진단용 turnLog 추가
               turnLog,
