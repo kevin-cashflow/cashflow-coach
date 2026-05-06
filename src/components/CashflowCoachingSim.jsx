@@ -2165,7 +2165,10 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     if (!card) return 0;
     const price = parseNum(card.price);
     const down = extractDown(card);
-    return (price > 0 && down > 0) ? price - down : 0;
+    // 🆕 down이 $0이어도 loan은 정상 계산 (price - down)
+    // 게임 카드 중 일부는 down=$0, loan=price (100% 대출 매수)
+    // 예: "구 시가지의 3/2 집을 고속도로 관리 공단에서 내놓았다" 카드
+    return price > 0 ? price - down : 0;
   };
 
   const extractStockCost = (card, qty) => {
@@ -4796,7 +4799,8 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                               const down = extractDown(c);
                               const price = parseNum(c.price);
                               const cf = parseNumNeg(c.cf);
-                              const loan = (price > 0 && down > 0) ? price - down : 0;
+                              // 🆕 down이 $0이어도 loan은 정상 계산 (price - down = loan)
+                              const loan = price > 0 ? price - down : 0;
                               setExtraBuyName(c.sub || "");
                               // 🆕 권리금 기본값: 착수금(down)의 10% (협상의 출발점)
                               // down이 0이면 price의 10%, 둘 다 0이면 0
@@ -4832,7 +4836,8 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                               {(() => {
                                 const price = parseNum(extraBuySelectedCard.price);
                                 const down = extractDown(extraBuySelectedCard);
-                                const loan = (price > 0 && down > 0) ? price - down : 0;
+                                // 🆕 down이 $0이어도 loan 정상 계산
+                                const loan = price > 0 ? price - down : 0;
                                 return loan > 0 ? ` / 대출 $${fmtNum(loan)}` : "";
                               })()}
                             </p>
