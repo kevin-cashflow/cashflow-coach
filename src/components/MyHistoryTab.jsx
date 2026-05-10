@@ -464,10 +464,28 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
               if (!match) filteredOut++;
               return match;
             }
-            // 4순위: 완전 레거시 (어떤 식별자도 없음) → 일단 허용 + 로그
-            legacyAllowed++;
-            console.warn(`[MyHistoryTab] ⚠️ 식별자 없는 레거시 게임 허용: ${g.key} (playerId=${g.playerId})`);
-            return true;
+            // 4순위: 완전 레거시 (어떤 식별자도 없음)
+            // 🆕 다른 아이디 노출 방지: 레거시 게임은 닉네임이 일치하거나, 매우 오래된 경우만 허용
+            // 단, "본인 닉네임"이 명확히 일치하면 본인 것으로 판정 (이메일/userId가 없던 시절 데이터)
+            const myNickname = authUser?.user_metadata?.nickname || null;
+            const myEmailUser = authUser?.email ? authUser.email.split("@")[0] : null;
+            const gamePlayerName = g.playerName || g.payload?.playerName || null;
+            
+            // 닉네임이 명확히 일치하면 본인 것
+            if (gamePlayerName && (
+              gamePlayerName === myNickname ||
+              gamePlayerName === myEmailUser
+            )) {
+              legacyAllowed++;
+              console.log(`[MyHistoryTab] ℹ️ 레거시 게임 허용 (닉네임 일치): ${g.key} (${gamePlayerName})`);
+              return true;
+            }
+            
+            // 닉네임도 없거나 다르면 → 다른 사용자 게임일 가능성 → 차단
+            // 🚨 이전엔 무조건 허용했지만, 다른 아이디 노출 방지를 위해 차단
+            filteredOut++;
+            console.warn(`[MyHistoryTab] 🚫 레거시 게임 차단 (식별자/닉네임 불일치): ${g.key} (playerName=${gamePlayerName}, my=${myNickname}/${myEmailUser})`);
+            return false;
           })
         : preserved;
       if (filteredOut > 0) {
@@ -2204,7 +2222,8 @@ function DebriefResultModal({ modal, onClose }) {
 
         // 🆕 1단계: 공유 링크 생성 (Supabase에 저장)
         console.log("[MyHistoryTab 카카오 공유] 1단계: 공유 링크 생성 중...");
-        const shareUrl = await createShareLink({
+        // 🆕 createShareLink가 { url, error } 형식 반환 (2025-05)
+        const shareResult = await createShareLink({
           gameKey: game.key || game.id || null,
           version: game.version || null,
           job: game.job || "캐쉬플로우",
@@ -2217,6 +2236,10 @@ function DebriefResultModal({ modal, onClose }) {
           personaKey: game.debrief?.personaKey || null,
           personaName: game.debrief?.personaName || null,
         });
+        if (shareResult?.error) {
+          console.warn("[MyHistoryTab 카카오 공유] 링크 생성 실패:", shareResult.error);
+        }
+        const shareUrl = shareResult?.url || null;
 
         // 🔧 카카오 공유 URL 결정:
         //   1순위: 공유 링크 (수신자가 클릭 시 디브리핑 직접 보기)

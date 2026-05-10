@@ -48,6 +48,76 @@ import {
 } from "@/lib/gameStateEngine";
 
 // ═══════════════════════════════════════════════════
+// 🆕 (2025-05) 세션 안정화 헬퍼
+// ═══════════════════════════════════════════════════
+//
+// 문제 진단:
+//   1~2시간 게임 후 supabase.auth.getSession()이 5초 타임아웃을 11번 반복
+//   → 토큰 갱신 중 동시 요청이 큐에 쌓여 데드락 발생
+//
+// 해결:
+//   1. getSessionSafe: 2초 타임아웃 (이전 5초 → 너무 길어서 UX 악화)
+//   2. refreshLock: 진행 중인 갱신을 공유 (중복 갱신 방지)
+//   3. 실패 시 null 반환 (호출자가 폴백 처리)
+
+let _refreshPromise = null;  // 진행 중인 갱신 Promise (중복 방지)
+let _lastRefreshAt = 0;       // 마지막 갱신 시각 (1분 내 재호출 방지)
+
+async function getSessionSafe(timeoutMs = 2000) {
+  try {
+    const result = await Promise.race([
+      supabase.auth.getSession(),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error(`getSession 타임아웃 ${timeoutMs}ms`)), timeoutMs)
+      ),
+    ]);
+    return result?.data?.session || null;
+  } catch (e) {
+    console.warn("[getSessionSafe]", e.message);
+    return null;
+  }
+}
+
+async function refreshSessionSafe(timeoutMs = 5000) {
+  // 1분 내 재갱신 시도 방지 (스로틀)
+  const sinceLastRefresh = Date.now() - _lastRefreshAt;
+  if (sinceLastRefresh < 60000) {
+    console.log(`[refreshSessionSafe] 1분 내 재갱신 스킵 (${Math.round(sinceLastRefresh/1000)}초 전 갱신됨)`);
+    return await getSessionSafe(1000);
+  }
+  
+  // 진행 중인 갱신이 있으면 그걸 재사용
+  if (_refreshPromise) {
+    console.log("[refreshSessionSafe] 진행 중인 갱신 재사용");
+    return await _refreshPromise;
+  }
+  
+  _refreshPromise = (async () => {
+    try {
+      const result = await Promise.race([
+        supabase.auth.refreshSession(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error(`refreshSession 타임아웃 ${timeoutMs}ms`)), timeoutMs)
+        ),
+      ]);
+      if (result?.error) {
+        console.warn("[refreshSessionSafe] 갱신 실패:", result.error.message);
+        return null;
+      }
+      _lastRefreshAt = Date.now();
+      return result?.data?.session || null;
+    } catch (e) {
+      console.warn("[refreshSessionSafe]", e.message);
+      return null;
+    } finally {
+      _refreshPromise = null;
+    }
+  })();
+  
+  return await _refreshPromise;
+}
+
+// ═══════════════════════════════════════════════════
 // 🆕 공유 링크 생성 헬퍼 (POST /api/share/create)
 // ═══════════════════════════════════════════════════
 //
@@ -58,19 +128,39 @@ import {
 // shareData: { gameKey, version, job, turnCount, escaped, datePlayed,
 //              analysis, feedbackText, feedbackTier, personaKey, personaName }
 //
-// returns: 공유 URL (string) or null (실패 시)
+// returns: { url: string } or { url: null, error: string } (실패 시 사유 포함)
+//
+// 🆕 (2025-05) 1~2시간 후 공유 시 타임아웃/실패 빈발 → 다음 강화:
+//   1. 세션 만료 임박 시 자동 갱신
+//   2. 15초 타임아웃 (이전: 무한 대기)
+//   3. 401 발생 시 1회 자동 재시도 (refreshSession 후)
 export async function createShareLink(shareData) {
+  const SHARE_TIMEOUT_MS = 15000;
+  
   try {
-    // 현재 세션 토큰 + 사용자 메타데이터 조회
-    const { data: { session } } = await supabase.auth.getSession();
+    // ── 1. 세션 검증 + 만료 임박 시 자동 갱신 ──
+    // 🆕 getSessionSafe: 2초 타임아웃 (이전 무한대기 방지)
+    let session = await getSessionSafe(2000);
+    if (session?.expires_at) {
+      const remainMs = session.expires_at * 1000 - Date.now();
+      if (remainMs < 5 * 60 * 1000) {
+        console.log(`[createShareLink] ⏰ 세션 만료 임박 (${Math.round(remainMs / 60000)}분) → refreshSessionSafe`);
+        const refreshed = await refreshSessionSafe(5000);
+        if (refreshed) {
+          session = refreshed;
+          console.log("[createShareLink] ✅ 세션 갱신 완료");
+        }
+      }
+    }
+    
     const accessToken = session?.access_token;
     const user = session?.user;
     if (!accessToken) {
       console.warn("[createShareLink] 세션 없음 - 공유 링크 생성 불가");
-      return null;
+      return { url: null, error: "로그인이 필요합니다" };
     }
 
-    // 닉네임 자동 추출 (우선순위: shareData → user_metadata → email → 익명)
+    // ── 2. 닉네임 자동 추출 ──
     let nickname = shareData.nickname;
     if (!nickname || !nickname.trim()) {
       nickname = user?.user_metadata?.nickname
@@ -80,27 +170,69 @@ export async function createShareLink(shareData) {
         || "익명";
     }
 
-    const res = await fetch("/api/share/create", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({ ...shareData, nickname }),
-    });
+    // ── 3. API 호출 (타임아웃 + 자동 재시도) ──
+    const callApi = async (token) => {
+      const ctrl = new AbortController();
+      const timeoutId = setTimeout(() => ctrl.abort(), SHARE_TIMEOUT_MS);
+      try {
+        const res = await fetch("/api/share/create", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+          },
+          body: JSON.stringify({ ...shareData, nickname }),
+          signal: ctrl.signal,
+        });
+        return res;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    };
+
+    const startTime = Date.now();
+    let res;
+    try {
+      res = await callApi(accessToken);
+    } catch (fetchErr) {
+      if (fetchErr.name === "AbortError") {
+        console.warn(`[createShareLink] ⏱️ 타임아웃 (${SHARE_TIMEOUT_MS / 1000}초)`);
+        return { url: null, error: `서버 응답이 ${SHARE_TIMEOUT_MS / 1000}초 내에 오지 않음. 잠시 후 다시 시도하세요.` };
+      }
+      throw fetchErr;
+    }
+
+    // 401 = 인증 실패 → 세션 갱신 후 1회 재시도
+    if (res.status === 401) {
+      console.warn("[createShareLink] 401 인증 실패 → refreshSessionSafe 후 재시도");
+      const refreshed = await refreshSessionSafe(5000);
+      if (!refreshed?.access_token) {
+        console.warn("[createShareLink] 재인증 실패");
+        return { url: null, error: "로그인 세션이 만료되었습니다. 다시 로그인해주세요." };
+      }
+      try {
+        res = await callApi(refreshed.access_token);
+      } catch (retryErr) {
+        if (retryErr.name === "AbortError") {
+          return { url: null, error: "재시도 중 타임아웃 발생" };
+        }
+        throw retryErr;
+      }
+    }
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      console.warn("[createShareLink] API 실패:", err);
-      return null;
+      console.warn("[createShareLink] API 실패:", res.status, err);
+      return { url: null, error: err.error || `서버 오류 (${res.status})` };
     }
 
     const { url } = await res.json();
-    console.log("[createShareLink] ✅ 공유 URL 생성:", url);
-    return url;
+    const elapsed = Date.now() - startTime;
+    console.log(`[createShareLink] ✅ 공유 URL 생성 (${elapsed}ms):`, url);
+    return { url };
   } catch (e) {
     console.warn("[createShareLink] 예외:", e.message);
-    return null;
+    return { url: null, error: e.message || "알 수 없는 오류" };
   }
 }
 
@@ -185,12 +317,18 @@ export function ShareButtonGroup({ context = "Share", shareData, kakaoTemplate }
     setGenerating(true);
     try {
       console.log(`[${context}] 공유 링크 생성 중...`);
-      const url = await createShareLink(shareData);
+      // 🆕 createShareLink가 { url, error } 형식 반환
+      const result = await createShareLink(shareData);
+      const url = result?.url;
+      const errorMsg = result?.error;
       if (url) {
         setShareUrl(url);
         return url;
       } else {
-        // 폴백: 메인 도메인
+        // 폴백: 메인 도메인 (에러 메시지는 console에만, 사용자에겐 메인 URL 제공)
+        if (errorMsg) {
+          console.warn(`[${context}] 공유 링크 생성 실패: ${errorMsg} → 메인 도메인 폴백`);
+        }
         const fallback = "https://cashflow-coach.vercel.app";
         setShareUrl(fallback);
         return fallback;
@@ -535,7 +673,7 @@ const MARKETS = [
 ];
 
 const DOODADS = [
-  // 일반 두둣 (가나다순)
+  // ─── 일반 두둣 (가나다순) ───
   { desc:"가구 거래: 당근에서 6인용 테이블을 거래했다. $150 지불.", amount:"$150" },
   { desc:"가족 휴가! $2,000 지불.", amount:"$2,000" },
   { desc:"결혼 기념일. $500을 쓴다.", amount:"$500" },
@@ -550,40 +688,39 @@ const DOODADS = [
   { desc:"새 옷을 구입 했다. $250 지불.", amount:"$250" },
   { desc:"새 테니스 라켓 구입. $200 지불.", amount:"$200" },
   { desc:"새로운 운동화를 구매. $100 지불.", amount:"$100" },
-  { desc:"식품 조리기 구입. $150 지불.", amount:"$150" },
   { desc:"쇼핑 중독! 새 손목시계 구매. (당신은 이미 3개나 가지고 있다!!) $150 지불.", amount:"$150" },
   { desc:"쇼핑! 멋진 모조 보석 구입. $350 지불.", amount:"$350" },
+  { desc:"식품 조리기 구입. $150 지불.", amount:"$150" },
   { desc:"일시 해고 소문. 학원에서 기술을 익힌다. 등록금과 교재비 $220 지불.", amount:"$220" },
   { desc:"자동차 에어컨 고장. $700 지불.", amount:"$700" },
   { desc:"자동차 타이어 교체. $300 지불.", amount:"$300" },
   { desc:"저녁 외식. $100 지불.", amount:"$100" },
   { desc:"주정차 단속 지역에 주차. 범칙금 $100.", amount:"$100" },
-  { desc:"주정차 단속 지역에 주차. 범칙금 $100.", amount:"$100" },
   { desc:"지역 화가의 새 그림을 구매. $200 지불.", amount:"$200" },
   { desc:"집을 페인트칠 하였다! $600 지불.", amount:"$600" },
+  { desc:"취미로 프리다이빙을 배운다. $500 지불.", amount:"$500" },
   { desc:"치과 방문. $200 지불.", amount:"$200" },
-  { desc:"친구와 함께 브런치. $50 지불.", amount:"$50" },
   { desc:"친구와 커피 한잔. $30 지불.", amount:"$30" },
+  { desc:"친구와 함께 브런치. $50 지불.", amount:"$50" },
   { desc:"카지노에 가다! $500 잃었다...", amount:"$500" },
   { desc:"카푸치노 커피 기계를 구입. $350 지불.", amount:"$350" },
   { desc:"콘서트를 가다! 저녁, 티켓, 커피 $250 지불.", amount:"$250" },
-  { desc:"취미로 프리다이빙을 배운다. $500 지불.", amount:"$500" },
   { desc:"행운의 복권 구입. 꽝! $100 잃었다.", amount:"$100" },
   { desc:"홈씨어터 구축!! $500 지불.", amount:"$500" },
   { desc:"회계 감사. 이런! 국세청에 $750 낸다.", amount:"$750" },
 
-  // 자녀 조건부 (가나다순)
+  // ─── 자녀 조건부 (가나다순) ───
   { desc:"딸의 결혼식. 자녀가 있다면 $5,000 소요.", amount:"$5,000", condition:"자녀" },
   { desc:"생일 파티! 아이들을 놀이공원에 데려간다. 아이가 있다면 인원만큼 $100 지불.", amount:"인원×$100", condition:"자녀" },
   { desc:"아들의 대학 등록금. 아이가 있다면 $3,000 지불.", amount:"$3,000", condition:"자녀" },
   { desc:"아이들에게 장난감을 사준다. 아이당 $100 지불.", amount:"아이당$100", condition:"자녀" },
   { desc:"자녀의 치아 교정. 만약 당신에게 자녀가 있다면 $2,000 지불.", amount:"$2,000", condition:"자녀" },
 
-  // 부채 발생 (가나다순)
+  // ─── 부채 발생 (가나다순) ───
   { desc:"새 캠핑 카라반 구입! $1,000은 선불, $17,000은 은행 대출. 대출 이자는 매달 $340.", amount:"대출$17K", condition:"부채발생" },
   { desc:"일체형 세탁 건조기 구입! $5,000 신용카드로 지불. 부채에 $5,000, 이자로 $120 추가.", amount:"부채$5K", condition:"부채발생" },
 
-  // 특수 (양육비 감소)
+  // ─── 특수 (양육비 감소) ───
   { desc:"드디어 아이가 독립했다!! 아이 양육비에서 1명을 지우시오!!", amount:"양육비↓", special:"지출 감소" },
 ];
 
@@ -1002,18 +1139,23 @@ const buildCardOptionLabel = (c, maxDescLen = 35) => {
 };
 
 // ── MARKET 매칭 검증 테이블 (컴포넌트 외부, 렌더마다 재생성 방지) ──
+// ⚠️ 순서 중요: 더 구체적인 규칙(다가구/아파트/Starter)을 먼저 체크
+//   "다가구 주택 매수" 같은 카드가 "주택" 일반 규칙에 잡히지 않도록
 const SELL_RULES = [
-  { descRe: /콘도/, assetRe: /콘도/, msg: "보유 중인 콘도가 없습니다." },
-  { descRe: /주택.*3\/2|3\/2.*주택|주택.*매수|주택.*팔라|이자율 하락/, assetRe: /주택/, msg: "보유 중인 3/2 주택이 없습니다." },
+  // 🆕 가장 구체적인 규칙부터 (먼저 매칭되어야 함)
   { descRe: /다가구|가구당|노후 배관|배관 교체/, assetRe: /가구|다가구/, msg: "보유 중인 다가구 주택이 없습니다." },
   { descRe: /아파트.*단지|아파트.*매수|세대당/, assetRe: /아파트/, msg: "보유 중인 아파트 단지가 없습니다." },
+  { descRe: /Starter|Start House/, assetRe: /Starter|Start/, msg: "보유 중인 Starter House가 없습니다." },
+  { descRe: /콘도/, assetRe: /콘도/, msg: "보유 중인 콘도가 없습니다." },
   { descRe: /12,000평|24,000평|6,000평|땅/, assetRe: /땅|평/, msg: "보유 중인 땅이 없습니다." },
   { descRe: /동업.*파트너|지분/, assetRe: /동업|파트너/, msg: "보유 중인 동업 자산이 없습니다." },
   { descRe: /쇼핑몰/, assetRe: /쇼핑몰/, msg: "보유 중인 쇼핑몰이 없습니다." },
   { descRe: /세차장/, assetRe: /세차/, msg: "보유 중인 세차장이 없습니다." },
   { descRe: /B&B|모텔/, assetRe: /B&B|모텔/, msg: "보유 중인 B&B/모텔이 없습니다." },
-  { descRe: /Starter|Start House/, assetRe: /Starter|Start/, msg: "보유 중인 Starter House가 없습니다." },
   { descRe: /소프트웨어|상품.*회사|사업.*매수/, assetRe: /사업|부업/, msg: "보유 중인 사업체가 없습니다." },
+  // 🆕 주택 3/2는 "다가구"가 desc에 없을 때만 매칭 (위에서 다가구가 먼저 catch)
+  // 여기 도달했다는 건 다가구가 아니란 뜻이므로 주택 3/2 매칭으로 안전
+  { descRe: /주택.*3\/2|3\/2.*주택|주택.*매수|주택.*팔라|이자율 하락/, assetRe: /주택(?!.*가구)|3\/2/, msg: "보유 중인 3/2 주택이 없습니다." },
 ];
 
 // ── 액션 뱃지 스타일 맵 (삼항 체인 제거) ──
@@ -2210,8 +2352,21 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
   };
 
   const buyCost = getBuyCost();
+  // 🆕 (2025-05) 월급 통과 후 매수 케이스: 게임 룰상 월급은 매수보다 먼저 받음
+  // passedPaydays > 0이면 paydayAmount를 미리 cash에 가산해 매수 가능 판정
+  // 실제 turnLog 저장 시에도 paydayLogs가 entry 앞에 오므로 일관성 유지
+  const passedPaydayAmount = (passedPaydays > 0 && jobData)
+    ? passedPaydays * (jobData.salary + totalCF - totalExpense)
+    : 0;
+  const effectiveCash = cash + passedPaydayAmount;
   const cashCheck = (cellType === "OPPORTUNITY" && selectedCard && action === "buy") ? 
-    { enough: cash >= buyCost, shortage: Math.max(0, buyCost - cash), message: buyCost > 0 ? `현금 $${fmtNum(cash)} / 필요 $${fmtNum(buyCost)} → ${cash >= buyCost ? "구매 가능" : `$${fmtNum(buyCost - cash)} 부족`}` : "" } :
+    { 
+      enough: effectiveCash >= buyCost, 
+      shortage: Math.max(0, buyCost - effectiveCash), 
+      message: buyCost > 0 
+        ? `현금 $${fmtNum(cash)}${passedPaydayAmount > 0 ? ` (+월급통과 $${fmtNum(passedPaydayAmount)})` : ""} / 필요 $${fmtNum(buyCost)} → ${effectiveCash >= buyCost ? "구매 가능" : `$${fmtNum(buyCost - effectiveCash)} 부족`}` 
+        : "" 
+    } :
     { enough: true, shortage: 0, message: "" };
 
   const addTurn = () => {
@@ -3637,7 +3792,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                   </div>
                   {!cashCheck.enough && (
                     <BankLoanUI
-                      shortage={buyCost - cash}
+                      shortage={Math.max(0, buyCost - effectiveCash)}
                       bankLoan={bankLoan}
                       monthlyCF={jobData ? (jobData.salary + totalCF - totalExpense + loanInterest) : 0}
                       currentInterest={loanInterest}
@@ -5275,20 +5430,24 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
 
       {/* 🎉 탈출 선언 버튼 (Phase B) — 조건 만족 시 활성화 */}
       {job && !gameEnded && turnLog.length >= 1 && (() => {
-        const jobData = JOBS.find(x => x.name === job);
-        if (!jobData) return null;
+        const jobDataLocal = JOBS.find(x => x.name === job);
+        if (!jobDataLocal) return null;
         const passiveIncome = assets
           .filter(a => a.type !== "주식")
           .reduce((sum, a) => sum + (a.cf || 0), 0);
-        const totalExpense = jobData.expense + (babies * jobData.childCost) + loanInterest;
-        const canEscape = passiveIncome > totalExpense;
+        // 🆕 gameState의 totalExpense 사용 (부채 상환 반영)
+        // (이전엔 jobDataLocal.expense를 그대로 써서 부채 상환 후에도 totalExpense가 변경 안 됨)
+        const escapeExpense = (typeof totalExpense === "number")
+          ? totalExpense
+          : (jobDataLocal.expense + (babies * jobDataLocal.childCost) + loanInterest);
+        const canEscape = passiveIncome > escapeExpense;
         return (
           <div style={{ marginTop: 12 }}>
             <button 
               disabled={!canEscape}
               onClick={() => {
                 if (!canEscape) return;
-                if (window.confirm(`🎉 쥐경주 탈출을 선언하시겠습니까?\n\n패시브인컴: $${fmtNum(passiveIncome)}/월\n총지출: $${fmtNum(totalExpense)}/월\n\n탈출 후에는 게임이 종료됩니다.`)) {
+                if (window.confirm(`🎉 쥐경주 탈출을 선언하시겠습니까?\n\n패시브인컴: $${fmtNum(passiveIncome)}/월\n총지출: $${fmtNum(escapeExpense)}/월\n\n탈출 후에는 게임이 종료됩니다.`)) {
                   setGameEnded(true);
                 }
               }}
@@ -5299,8 +5458,8 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                 fontSize: 14, fontWeight: 800,
               }}>
               {canEscape 
-                ? `🎉 쥐경주 탈출 선언! (패시브 $${fmtNum(passiveIncome)} > 지출 $${fmtNum(totalExpense)})`
-                : `🔒 탈출 조건 미달 (패시브 $${fmtNum(passiveIncome)} / 지출 $${fmtNum(totalExpense)})`}
+                ? `🎉 쥐경주 탈출 선언! (패시브 $${fmtNum(passiveIncome)} > 지출 $${fmtNum(escapeExpense)})`
+                : `🔒 탈출 조건 미달 (패시브 $${fmtNum(passiveIncome)} / 지출 $${fmtNum(escapeExpense)})`}
             </button>
             {!canEscape && (
               <div style={{ fontSize: 10, color: "#71717a", marginTop: 4, textAlign: "center" }}>
@@ -6503,6 +6662,30 @@ export default function CoachingSimulator() {
             onSaveGame={async (gameData) => {
             try {
               const ts = Date.now();
+              
+              // 🆕 (2025-05) 1~2시간 세션 후 저장 실패 대응:
+              // 콘솔 진단: getSession이 5초 타임아웃 11번 반복 → Supabase 클라이언트 데드락
+              // 해결: getSessionSafe(2초 타임아웃) + refreshSessionSafe(중복 갱신 방지)
+              try {
+                const session = await getSessionSafe(2000);
+                if (session?.expires_at) {
+                  const remainMs = session.expires_at * 1000 - Date.now();
+                  if (remainMs < 5 * 60 * 1000) {
+                    console.log(`[onSaveGame] ⏰ 세션 만료 임박 (${Math.round(remainMs / 60000)}분) → refreshSessionSafe`);
+                    const refreshed = await refreshSessionSafe(5000);
+                    if (refreshed) {
+                      console.log("[onSaveGame] ✅ 세션 갱신 완료, 새 만료:", new Date(refreshed.expires_at * 1000).toLocaleTimeString());
+                    } else {
+                      console.warn("[onSaveGame] ⚠️ 세션 갱신 실패 → localStorage 폴백 예정");
+                    }
+                  }
+                } else {
+                  console.warn("[onSaveGame] ⚠️ 세션 정보 없음 (또는 getSession 타임아웃) → localStorage 폴백");
+                }
+              } catch (sessionErr) {
+                console.warn("[onSaveGame] 세션 검증 중 에러 (저장은 계속 진행):", sessionErr.message);
+              }
+              
               // 플레이어 있으면 사용, 없으면 "solo" 사용 (user_id 기반으로 저장)
               const playerId = currentPlayer?.id || "solo";
               // 🆕 닉네임 우선순위: currentPlayer.name > user_metadata.nickname > 이메일 username > "플레이어"
@@ -8224,7 +8407,8 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
     try {
       // 1. 공유 링크 생성
       console.log("[InlineDebrief 카카오 공유] 1단계: 공유 링크 생성 중...");
-      const shareUrl = await createShareLink({
+      // 🆕 createShareLink가 { url, error } 형식 반환
+      const shareResult = await createShareLink({
         gameKey: gameKey || null,
         version,
         job: gameSnapshot?.job || "캐쉬플로우",
@@ -8237,7 +8421,10 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
         personaKey: gameSnapshot?.personaKey || null,
         personaName: gameSnapshot?.personaName || null,
       });
-      const finalUrl = shareUrl || "https://cashflow-coach.vercel.app";
+      if (shareResult?.error) {
+        console.warn("[InlineDebrief 카카오 공유] 링크 생성 실패:", shareResult.error);
+      }
+      const finalUrl = shareResult?.url || "https://cashflow-coach.vercel.app";
 
       // 2. Kakao SDK 로드 (1회만)
       if (!window.Kakao) {
