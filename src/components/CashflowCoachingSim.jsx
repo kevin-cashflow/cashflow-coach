@@ -48,7 +48,302 @@ import {
 } from "@/lib/gameStateEngine";
 
 // ═══════════════════════════════════════════════════
-// 🆕 (2025-05) 세션 안정화 헬퍼
+// 🆕 (2025-05) 백그라운드 동기화 큐 (C 옵션 - 하이브리드)
+// ═══════════════════════════════════════════════════
+//
+// 목표: "서버 저장 실패했지만 브라우저에 임시 저장" 메시지를 사용자가 보지 않게 하기
+//
+// 동작:
+//   1. 턴 입력 시 → 즉시 로컬 저장 + 큐에 추가 (사용자 대기 0초)
+//   2. 백그라운드 워커가 5초 주기로 큐 처리
+//   3. 디브리핑 직전 → 큐 강제 플러시 (보장 모드)
+//   4. beforeunload → 미동기화 게임 경고
+//
+// 큐 구조:
+//   { key, payload, attempts, lastTryAt, lastError }
+//
+// localStorage: "cashflow:syncQueue" (JSON 배열)
+
+const SYNC_QUEUE_KEY = "cashflow:syncQueue";
+const SYNC_INTERVAL_MS = 5000;        // 5초 주기 워커
+const SYNC_MAX_ATTEMPTS = 5;          // 최대 재시도
+const SYNC_BACKOFF_MS = [1000, 3000, 10000, 30000, 60000];  // 지수 백오프
+
+let _syncWorkerInterval = null;       // 워커 ID (한 번만 시작)
+let _syncWorkerRunning = false;       // 동시 실행 방지
+const _syncListeners = new Set();     // 큐 상태 변경 리스너
+
+// 큐 상태 조회
+function getSyncQueue() {
+  try {
+    return JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function setSyncQueue(queue) {
+  try {
+    localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(queue));
+    _syncListeners.forEach(fn => { try { fn(queue); } catch {} });
+  } catch (e) {
+    console.warn("[syncQueue] localStorage 쓰기 실패:", e.message);
+  }
+}
+
+// 큐에 항목 추가 (또는 업데이트)
+function enqueueSync(key, payload) {
+  const queue = getSyncQueue();
+  const existing = queue.findIndex(item => item.key === key);
+  const entry = {
+    key,
+    payload: typeof payload === "string" ? payload : JSON.stringify(payload),
+    attempts: existing >= 0 ? queue[existing].attempts : 0,
+    lastTryAt: 0,
+    lastError: null,
+    enqueuedAt: Date.now(),
+  };
+  if (existing >= 0) {
+    // 같은 key 업데이트 (덮어쓰기)
+    queue[existing] = entry;
+  } else {
+    queue.push(entry);
+  }
+  setSyncQueue(queue);
+}
+
+// 큐에서 1개 처리 (Supabase 저장 시도)
+async function processSyncEntry(entry) {
+  if (!window.storage || typeof window.storage.set !== "function") {
+    return { ok: false, error: "storage 없음" };
+  }
+  try {
+    const result = await Promise.race([
+      window.storage.set(entry.key, entry.payload),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("타임아웃 10초")), 10000)
+      ),
+    ]);
+    if (result && !result._localOnly) {
+      return { ok: true };
+    }
+    return { ok: false, error: result?._reason || "_localOnly 응답" };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// 큐 워커 (5초마다 1번 자동 실행)
+async function runSyncWorker() {
+  if (_syncWorkerRunning) return;
+  _syncWorkerRunning = true;
+  try {
+    const queue = getSyncQueue();
+    if (queue.length === 0) return;
+
+    // 세션 살아있는지 확인 (없으면 워커 스킵)
+    const session = await getSessionSafe(1500);
+    if (!session) {
+      console.log("[syncWorker] 세션 없음 → 다음 사이클로 연기");
+      return;
+    }
+
+    let updated = false;
+    for (const entry of queue) {
+      // 백오프 적용 (마지막 시도가 너무 가까우면 스킵)
+      const backoff = SYNC_BACKOFF_MS[Math.min(entry.attempts, SYNC_BACKOFF_MS.length - 1)];
+      if (Date.now() - entry.lastTryAt < backoff) continue;
+
+      // 최대 재시도 초과
+      if (entry.attempts >= SYNC_MAX_ATTEMPTS) {
+        console.warn(`[syncWorker] 최대 재시도 초과: ${entry.key} (${entry.attempts}회)`);
+        continue;
+      }
+
+      entry.attempts++;
+      entry.lastTryAt = Date.now();
+      const result = await processSyncEntry(entry);
+
+      if (result.ok) {
+        console.log(`[syncWorker] ✅ 동기화 성공: ${entry.key} (${entry.attempts}회 시도)`);
+        // 큐에서 제거 (다음 setSyncQueue에서 filter)
+        entry._done = true;
+        updated = true;
+      } else {
+        entry.lastError = result.error;
+        console.log(`[syncWorker] ⏳ ${entry.key} 재시도 예약 (${entry.attempts}/${SYNC_MAX_ATTEMPTS}, 다음: ${SYNC_BACKOFF_MS[entry.attempts] || 60000}ms 후): ${result.error}`);
+        updated = true;
+      }
+    }
+
+    if (updated) {
+      const newQueue = queue.filter(e => !e._done);
+      setSyncQueue(newQueue);
+    }
+  } catch (e) {
+    console.warn("[syncWorker] 예외:", e.message);
+  } finally {
+    _syncWorkerRunning = false;
+  }
+}
+
+// 워커 시작 (한 번만 호출됨, 중복 방지)
+function startSyncWorker() {
+  if (typeof window === "undefined") return;
+  if (_syncWorkerInterval) return;
+  _syncWorkerInterval = setInterval(runSyncWorker, SYNC_INTERVAL_MS);
+  console.log(`[syncWorker] 🚀 백그라운드 동기화 시작 (${SYNC_INTERVAL_MS / 1000}초 주기)`);
+}
+
+// 강제 플러시 (디브리핑 직전): 큐의 모든 항목을 즉시 처리 + 결과 보고
+// returns: { success: boolean, processed: number, failed: number, errors: [] }
+async function flushSyncQueue({ maxWaitMs = 15000 } = {}) {
+  const queue = getSyncQueue();
+  if (queue.length === 0) {
+    return { success: true, processed: 0, failed: 0, errors: [] };
+  }
+
+  console.log(`[flushSync] 🔄 강제 플러시 시작 (큐: ${queue.length}개, 최대 ${maxWaitMs / 1000}초)`);
+  
+  // 세션 강제 갱신 시도
+  const session = await getSessionSafe(2000);
+  if (!session) {
+    console.warn("[flushSync] 세션 없음 → 갱신 시도");
+    const refreshed = await refreshSessionSafe(5000);
+    if (!refreshed) {
+      return { success: false, processed: 0, failed: queue.length, errors: ["세션 갱신 실패"] };
+    }
+  }
+
+  const startTime = Date.now();
+  const errors = [];
+  let processed = 0;
+  let failed = 0;
+  
+  const remainingQueue = [...queue];
+  for (const entry of remainingQueue) {
+    if (Date.now() - startTime > maxWaitMs) {
+      // 시간 초과 - 처리 안 된 항목 큐에 남김
+      break;
+    }
+    const result = await processSyncEntry(entry);
+    if (result.ok) {
+      processed++;
+      entry._done = true;
+    } else {
+      failed++;
+      errors.push(`${entry.key}: ${result.error}`);
+    }
+  }
+
+  // 큐 업데이트: 성공한 것만 제거
+  const newQueue = remainingQueue.filter(e => !e._done);
+  setSyncQueue(newQueue);
+
+  const success = failed === 0 && Date.now() - startTime <= maxWaitMs;
+  console.log(`[flushSync] ${success ? "✅" : "⚠️"} 완료: 성공 ${processed}, 실패 ${failed}, 소요 ${Date.now() - startTime}ms`);
+  return { success, processed, failed, errors };
+}
+
+// 큐 상태 구독 (React Hook용)
+function subscribeSyncQueue(listener) {
+  _syncListeners.add(listener);
+  return () => _syncListeners.delete(listener);
+}
+
+// ═══════════════════════════════════════════════════
+// 🆕 인앱 브라우저 경고 컴포넌트
+// ═══════════════════════════════════════════════════
+//
+// 카카오톡/페이스북/인스타그램 등의 인앱 브라우저는:
+//   1. localStorage가 세션 종료 시 휘발될 수 있음
+//   2. 1~2시간 진행한 게임 데이터가 사라지는 경우 있음
+//   3. Supabase 세션이 더 자주 만료
+//
+// 사용자에게 외부 브라우저(Chrome/Safari) 사용을 권장
+function InAppBrowserWarning() {
+  const [info, setInfo] = useState(null);
+  const [dismissed, setDismissed] = useState(false);
+  
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    
+    const ua = navigator.userAgent || "";
+    let browserName = null;
+    let isInApp = false;
+    
+    if (/KAKAOTALK/i.test(ua)) {
+      browserName = "카카오톡";
+      isInApp = true;
+    } else if (/FBAN|FBAV|FB_IAB/i.test(ua)) {
+      browserName = "페이스북";
+      isInApp = true;
+    } else if (/Instagram/i.test(ua)) {
+      browserName = "인스타그램";
+      isInApp = true;
+    } else if (/NAVER\(inapp/i.test(ua)) {
+      browserName = "네이버";
+      isInApp = true;
+    } else if (/Line\//i.test(ua)) {
+      browserName = "라인";
+      isInApp = true;
+    }
+    
+    if (isInApp) {
+      setInfo({ browserName });
+      // 사용자가 한 번 닫으면 24시간 안 보임
+      const dismissedAt = localStorage.getItem("cashflow:inAppWarningDismissed");
+      if (dismissedAt && Date.now() - parseInt(dismissedAt) < 24 * 60 * 60 * 1000) {
+        setDismissed(true);
+      }
+    }
+  }, []);
+  
+  if (!info || dismissed) return null;
+  
+  const handleDismiss = () => {
+    localStorage.setItem("cashflow:inAppWarningDismissed", String(Date.now()));
+    setDismissed(true);
+  };
+  
+  return (
+    <div style={{
+      padding: "12px 16px",
+      background: "linear-gradient(135deg, #f59e0b20, #f97316 20)",
+      border: "1px solid #f59e0b40",
+      borderRadius: 0,
+      position: "sticky",
+      top: 0,
+      zIndex: 100,
+    }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <div style={{ fontSize: 24 }}>⚠️</div>
+        <div style={{ flex: 1, fontSize: 13, lineHeight: 1.5 }}>
+          <div style={{ fontWeight: 700, color: "#fbbf24", marginBottom: 4 }}>
+            {info.browserName} 인앱 브라우저 사용 중 - 데이터 손실 위험!
+          </div>
+          <div style={{ color: "#d4d4d8", fontSize: 12 }}>
+            인앱 브라우저는 게임 데이터가 사라질 수 있습니다.
+            <br />
+            <strong style={{ color: "#fbbf24" }}>오른쪽 위 메뉴(⋮) → "다른 브라우저로 열기"</strong>로 Chrome/Safari에서 사용하세요.
+          </div>
+        </div>
+        <button onClick={handleDismiss} style={{
+          padding: "4px 8px",
+          background: "transparent",
+          border: "1px solid #71717a",
+          borderRadius: 6,
+          color: "#a1a1aa",
+          fontSize: 11,
+          cursor: "pointer",
+        }}>
+          확인
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════
 //
 // 문제 진단:
@@ -2967,9 +3262,33 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     );
   }, [turnLog, job, isContestMode, authUser]); // turnLog 변경 시마다
 
-  // 페이지 떠날 때 강제 저장
+  // 🆕 (2025-05) 백그라운드 동기화 워커 시작 + 턴 변경 시 큐에 자동 추가
+  // 사용자가 "저장" 버튼을 안 눌러도 매 턴마다 큐에 들어가서 자동 동기화됨
+  // → "서버 저장 실패" 메시지 자체가 안 나오게 함
   useEffect(() => {
-    const handleBeforeUnload = () => {
+    startSyncWorker();  // 한 번만 시작됨 (내부에서 중복 체크)
+  }, []);
+  
+  // 🆕 매 턴마다 백그라운드 큐에 자동 추가
+  // 단, 저장 버튼이 명시적으로 클릭된 후에만 (gameKey 존재할 때)
+  // 그렇지 않으면 모든 임시 세션이 큐에 쌓임
+  const currentGameKeyRef = useRef(null);
+  useEffect(() => {
+    if (!authUser || turnLog.length === 0) return;
+    if (!currentGameKeyRef.current) return;  // 아직 첫 저장 안 됨
+    
+    try {
+      const payload = buildGamePayload();
+      enqueueSync(currentGameKeyRef.current, payload);
+      console.log(`[autoSync] 📝 큐 업데이트: ${currentGameKeyRef.current} (턴 ${turnLog.length})`);
+    } catch (e) {
+      console.warn("[autoSync] 큐 추가 실패:", e.message);
+    }
+  }, [turnLog.length, authUser]);
+
+  // 페이지 떠날 때 강제 저장 + 미동기화 큐 경고
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
       if (job && turnLog.length > 0 && !gameEnded) {
         const gameStateToSave = {
           version, job, turnLog, currentTurn, boardPos, cash, totalCF,
@@ -2989,6 +3308,18 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
           }));
         } catch {}
       }
+      
+      // 🆕 미동기화 큐 있으면 사용자에게 경고
+      // (백그라운드 워커가 처리 중이라 잠시 기다리면 안전)
+      try {
+        const queue = getSyncQueue();
+        if (queue.length > 0) {
+          const msg = "아직 서버 동기화가 진행 중입니다. 잠시 기다려주세요.";
+          e.preventDefault();
+          e.returnValue = msg;
+          return msg;
+        }
+      } catch {}
     };
     
     window.addEventListener("beforeunload", handleBeforeUnload);
@@ -5514,34 +5845,33 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
               }
               const result = await onSaveGame(buildGamePayload());
 
-              // 저장 결과 세분화 판정
+              // 🆕 저장 결과 처리 (사용자에게 "실패" 단어를 보여주지 않음)
+              // 모든 경우에 큐에 자동 추가되어 백그라운드 동기화됨
               if (result === null) {
-                // 완전 실패
-                alert("⚠️ 게임 저장에 실패했습니다.\n네트워크 상태를 확인하고 다시 시도해주세요.\n\n※ 게임 데이터는 브라우저에 임시 저장되어 있습니다.");
+                // 진짜 실패 (localStorage조차 안 됨) - 매우 드문 케이스
+                alert(
+                  "⚠️ 저장 중 문제가 발생했어요.\n\n" +
+                  "잠시 후 다시 시도해주세요. 데이터는 유지됩니다."
+                );
                 return;
               }
 
+              // result.key 받았으면 백그라운드 동기화 큐에 등록 (모든 경우)
+              if (result?.key) {
+                currentGameKeyRef.current = result.key;
+                setSavedGameKey(result.key);
+                // 큐에 즉시 추가 (이후 매 턴마다 자동 업데이트됨)
+                try {
+                  enqueueSync(result.key, buildGamePayload());
+                } catch {}
+              }
+
               if (result && result.localOnly) {
-                // 서버(Supabase) 실패 + localStorage에만 저장됨
-                await new Promise(resolve => {
-                  // 사용자에게 명확히 알림 + 복구 방법 안내
-                  alert(
-                    "⚠️ 서버 저장은 실패했지만, 브라우저에 임시 저장되었습니다.\n\n" +
-                    "✅ 이 기기에서는 디브리핑 가능합니다.\n\n" +
-                    "🔧 서버 동기화를 다시 시도하려면:\n" +
-                    "  1. 프로필 탭의 '🔄 서버에 동기화 (재시도)' 버튼\n\n" +
-                    "🛡️ 만약 계속 실패한다면 (Supabase 락 문제):\n" +
-                    "  1. 브라우저 DevTools (F12) → Application → Storage\n" +
-                    "  2. 'Clear site data' 클릭\n" +
-                    "  3. 브라우저 완전 종료 후 재접속\n" +
-                    "  4. 재로그인 → 프로필 탭에서 동기화\n\n" +
-                    (result.error ? `(상세 오류: ${result.error})` : "")
-                  );
-                  resolve();
-                });
-                // localStorage에는 있으니 디브리핑 진행 허용
+                // 🆕 서버 동기화는 백그라운드에서 자동 진행 중
+                // 사용자에겐 "실패"라는 단어 대신 "동기화 중" 메시지
+                console.log("[게임 저장] localOnly - 백그라운드 동기화 큐에 등록됨");
+                // 별도 alert 없이 정상 진행 (백그라운드 워커가 5초마다 재시도)
                 try { await deleteGameSession(authUser?.id); } catch (_) {}
-                if (result.key) setSavedGameKey(result.key);
                 setGameSaved(true);
                 return;
               }
@@ -5744,9 +6074,69 @@ export default function CoachingSimulator() {
     }
   };
 
-  // 로그인 시 초기 통계 로드
+  // 로그인 시 초기 통계 로드 + 미저장 게임 자동 재동기화
   useEffect(() => {
-    if (authUser) loadUserStats();
+    if (!authUser) return;
+    loadUserStats();
+    
+    // 🆕 미저장 게임 자동 재시도 (Supabase 저장 실패한 게임들)
+    (async () => {
+      try {
+        const queueKey = "cashflow:pendingSyncQueue";
+        const queue = JSON.parse(localStorage.getItem(queueKey) || "[]");
+        if (queue.length === 0) return;
+        
+        console.log(`[자동 동기화] 📋 미저장 게임 ${queue.length}개 발견 → 자동 재시도`);
+        
+        // 세션 안정성 확인 (강제 갱신 시도)
+        const session = await getSessionSafe(2000);
+        if (!session) {
+          console.log("[자동 동기화] 세션 없음 → 다음 기회에 재시도");
+          return;
+        }
+        
+        if (!window.storage || typeof window.storage.set !== "function") {
+          console.warn("[자동 동기화] storage 없음 → 스킵");
+          return;
+        }
+        
+        const successful = [];
+        const failed = [];
+        for (const key of queue) {
+          try {
+            const payload = localStorage.getItem(key);
+            if (!payload) {
+              // localStorage에서도 사라진 게임 (정리 필요)
+              successful.push(key);
+              continue;
+            }
+            console.log(`[자동 동기화] 🔄 재시도: ${key}`);
+            const result = await Promise.race([
+              window.storage.set(key, payload),
+              new Promise((_, reject) => setTimeout(() => reject(new Error("타임아웃 10초")), 10000)),
+            ]);
+            if (result && !result._localOnly) {
+              console.log(`[자동 동기화] ✅ 성공: ${key}`);
+              successful.push(key);
+            } else {
+              console.warn(`[자동 동기화] ⚠️ 여전히 실패: ${key}`);
+              failed.push(key);
+            }
+          } catch (e) {
+            console.warn(`[자동 동기화] ❌ 에러: ${key}`, e.message);
+            failed.push(key);
+          }
+        }
+        
+        // 큐 업데이트 (실패한 것만 남김)
+        localStorage.setItem(queueKey, JSON.stringify(failed));
+        if (successful.length > 0) {
+          console.log(`[자동 동기화] 📊 결과: ${successful.length}개 성공, ${failed.length}개 실패 (다음에 재시도)`);
+        }
+      } catch (e) {
+        console.warn("[자동 동기화] 큐 처리 중 에러:", e.message);
+      }
+    })();
   }, [authUser]);
 
   // 게임 저장 후 승급 체크
@@ -6318,6 +6708,11 @@ export default function CoachingSimulator() {
   return (
     <div style={{ minHeight: "100vh", background: "#080810", color: "#d4d4d8", fontFamily: "'Pretendard Variable', 'Noto Sans KR', -apple-system, sans-serif" }}>
 
+      {/* 🆕 인앱 브라우저 경고 배너 — 데이터 손실 방지 */}
+      {/* 카카오톡/페이스북/인스타 등 인앱 브라우저는 localStorage가 휘발될 수 있고
+         세션 유지가 불안정해서 1~2시간 진행한 게임이 사라지는 경우가 있음 */}
+      <InAppBrowserWarning />
+
       {/* ═══ 게이트 비밀번호 팝업 (Phase B) ═══ */}
       {gateDialog && (
         <GatePasswordDialog
@@ -6765,16 +7160,49 @@ export default function CoachingSimulator() {
                 // storage v4: _localOnly 응답이면 Supabase는 실패했지만 localStorage는 성공
                 if (result && result._localOnly) {
                   console.warn(`[onSaveGame] ⚠️ Supabase 실패, localStorage만 저장 (${elapsed}ms): ${result._reason || "unknown"}`);
+                  // 🆕 미저장 게임 큐에 추가 (다음 진입 시 자동 재시도)
+                  try {
+                    const queueKey = "cashflow:pendingSyncQueue";
+                    const existing = JSON.parse(localStorage.getItem(queueKey) || "[]");
+                    if (!existing.includes(key)) {
+                      existing.push(key);
+                      localStorage.setItem(queueKey, JSON.stringify(existing));
+                      console.log(`[onSaveGame] 📋 미저장 큐 추가: ${key} (큐 크기: ${existing.length})`);
+                    }
+                  } catch (queueErr) {
+                    console.warn("[onSaveGame] 미저장 큐 기록 실패:", queueErr.message);
+                  }
                   return { key, localOnly: true, error: result._reason };
                 }
 
                 if (result) {
                   console.log(`[onSaveGame] ✅ Supabase 저장 완료 (${elapsed}ms)`);
+                  // 🆕 저장 성공 시 미저장 큐에서 제거
+                  try {
+                    const queueKey = "cashflow:pendingSyncQueue";
+                    const existing = JSON.parse(localStorage.getItem(queueKey) || "[]");
+                    const idx = existing.indexOf(key);
+                    if (idx >= 0) {
+                      existing.splice(idx, 1);
+                      localStorage.setItem(queueKey, JSON.stringify(existing));
+                      console.log(`[onSaveGame] 📋 미저장 큐에서 제거: ${key} (남은: ${existing.length})`);
+                    }
+                  } catch {}
                 }
               } catch (storageErr) {
                 const elapsed = Date.now() - saveStartTime;
                 console.error(`[onSaveGame] ❌ storage.set 타임아웃 (${elapsed}ms):`, storageErr.message);
                 console.warn("[onSaveGame] ℹ️ localStorage에는 1차 저장됨 (위 '1차 안전망' 로그 참조). 프로필 탭에서 '🔄 서버에 동기화' 버튼으로 재시도 가능");
+                // 🆕 타임아웃도 미저장 큐 추가
+                try {
+                  const queueKey = "cashflow:pendingSyncQueue";
+                  const existing = JSON.parse(localStorage.getItem(queueKey) || "[]");
+                  if (!existing.includes(key)) {
+                    existing.push(key);
+                    localStorage.setItem(queueKey, JSON.stringify(existing));
+                    console.log(`[onSaveGame] 📋 미저장 큐 추가 (타임아웃): ${key}`);
+                  }
+                } catch {}
                 return { key, localOnly: true, error: storageErr.message };
               }
 
@@ -8214,6 +8642,28 @@ function InlineDebriefSection({ gameKey, results, version, turns, gameSnapshot }
 
     setLoading(true);
     setError("");
+    
+    // 🆕 (2025-05) 디브리핑 시작 직전 - 백그라운드 큐 강제 플러시
+    // "동기화 보장 모드": 큐의 모든 항목이 Supabase에 저장되도록 강제 대기
+    // 실패해도 디브리핑은 진행 (localStorage에는 있음) - 다음 자동 재시도에 맡김
+    try {
+      const queueBefore = getSyncQueue();
+      if (queueBefore.length > 0) {
+        console.log(`[InlineDebrief] 🔄 디브리핑 시작 전 큐 플러시 시도 (${queueBefore.length}개)`);
+        setError("💾 데이터 동기화 중... (잠시만 기다려주세요)");
+        const flushResult = await flushSyncQueue({ maxWaitMs: 15000 });
+        setError("");  // 플러시 끝나면 메시지 클리어
+        if (flushResult.success) {
+          console.log(`[InlineDebrief] ✅ 큐 플러시 완료 (${flushResult.processed}개)`);
+        } else {
+          console.warn(`[InlineDebrief] ⚠️ 큐 일부 미동기화 (${flushResult.failed}개) - 백그라운드 워커가 계속 재시도`);
+          // 디브리핑은 진행 - 데이터는 localStorage에 있음
+        }
+      }
+    } catch (flushErr) {
+      console.warn("[InlineDebrief] 큐 플러시 중 에러 (계속 진행):", flushErr.message);
+    }
+    
     try {
       const simText = buildPromptText(results, version, turns);
       console.log(`[InlineDebrief] 📋 총평 runFullAnalysis 호출 시작 (gameKey=${gameKey}, startAge=${effectiveStartAge})`);
