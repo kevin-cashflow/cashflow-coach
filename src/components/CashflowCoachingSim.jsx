@@ -3118,6 +3118,9 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     setMarketCategory(null); setMarketSubtype(null);
     setExtraBuyCategory(null); setExtraBuySubtype(null); setExtraBuySelectedCard(null);
     setExtraBuyStep(1); setExtraBuyDeposit(0); setExtraBuyExtraLoan(0);
+    // 🆕 자동 저장 ref 리셋 (새 게임에서 자동 저장 작동)
+    currentGameKeyRef.current = null;
+    autoSaveAttemptRef.current = false;
   };
 
   // ═══════════════════════════════════════════════════
@@ -3285,6 +3288,49 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       console.warn("[autoSync] 큐 추가 실패:", e.message);
     }
   }, [turnLog.length, authUser]);
+
+  // 🆕 (2025-05) 자동 저장 시스템 - 사용자가 "저장" 버튼을 안 눌러도 안전하게
+  //
+  // 동작:
+  //   1. 첫 턴 입력 시점에 자동으로 onSaveGame 호출 → Supabase 1차 저장
+  //   2. 1차 저장 성공 후 currentGameKeyRef 설정 → 백그라운드 큐 작동
+  //   3. 이후 매 턴마다 큐 자동 업데이트 (위 useEffect)
+  //   4. 사용자는 "저장" 의식 안 해도 됨
+  //
+  // 조건:
+  //   - 로그인 상태 (authUser 있음)
+  //   - 게임 진행 중 (job 선택됨)
+  //   - 아직 자동 저장 안 됨 (currentGameKeyRef.current === null)
+  //   - 1턴 이상 진행됨
+  //   - onSaveGame 콜백 존재
+  const autoSaveAttemptRef = useRef(false);  // 자동 저장 시도 플래그 (중복 방지)
+  useEffect(() => {
+    if (!authUser) return;
+    if (!job) return;
+    if (currentGameKeyRef.current) return;  // 이미 저장됨
+    if (turnLog.length < 1) return;  // 1턴 미만은 의미 없음
+    if (autoSaveAttemptRef.current) return;  // 시도 중이면 스킵
+    if (typeof onSaveGame !== "function") return;
+    
+    autoSaveAttemptRef.current = true;
+    console.log(`[autoSave] 🚀 첫 자동 저장 시도 (턴 ${turnLog.length})`);
+    
+    (async () => {
+      try {
+        const result = await onSaveGame(buildGamePayload());
+        if (result?.key) {
+          currentGameKeyRef.current = result.key;
+          console.log(`[autoSave] ✅ 자동 저장 완료: ${result.key} ${result.localOnly ? "(로컬, 백그라운드 동기화 예정)" : "(Supabase 성공)"}`);
+        } else if (result === null) {
+          console.warn("[autoSave] ⚠️ 자동 저장 실패 - 다음 턴에 재시도");
+          autoSaveAttemptRef.current = false;  // 재시도 가능하게
+        }
+      } catch (e) {
+        console.warn("[autoSave] 자동 저장 중 예외:", e.message);
+        autoSaveAttemptRef.current = false;  // 재시도 가능하게
+      }
+    })();
+  }, [turnLog.length, authUser, job, onSaveGame]);
 
   // 페이지 떠날 때 강제 저장 + 미동기화 큐 경고
   useEffect(() => {
