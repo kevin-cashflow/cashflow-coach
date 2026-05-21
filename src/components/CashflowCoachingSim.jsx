@@ -3042,9 +3042,51 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
   }, []);
 
   const handleDeleteTurn = useCallback((index, isSub, turnNum) => {
-    const label = isSub ? "이 보조 행위를" : `T${turnNum} 턴을`;
-    if (window.confirm(`${label} 삭제하시겠습니까?\n\n⚠️ 기록(로그)만 삭제됩니다.\n현금·자산·대출 등 재무 상태는 자동 재계산됩니다.\n\n계속하시겠습니까?`)) {
-      setTurnLog(prev => prev.filter((_, idx) => idx !== index));
+    // 🆕 (2025-05) 삭제 후 즉시 재입력 안내 + currentTurn 자동 재계산
+    // 사용자가 잘못 입력한 턴(예: 5번에 3 대신 6 입력)을 삭제하면
+    // 자동으로 currentTurn이 재계산되어 같은 번호로 다시 입력 가능
+    const label = isSub ? "이 보조 행위" : `T${turnNum} 턴`;
+    const isMainTurn = !isSub && turnNum != null;
+    
+    const message = isMainTurn
+      ? `${label}을 삭제하시겠습니까?\n\n` +
+        `💡 잘못 입력한 턴을 고치는 방법:\n` +
+        `   1. 이 턴 삭제 → 같은 번호(T${turnNum})로 자동 되돌아감\n` +
+        `   2. 올바른 주사위/카드로 다시 입력하면 됨\n\n` +
+        `⚠️ 기록(로그)만 삭제됩니다.\n` +
+        `현금·자산·대출 등 재무 상태는 자동 재계산됩니다.\n\n` +
+        `계속하시겠습니까?`
+      : `${label}를 삭제하시겠습니까?\n\n` +
+        `⚠️ 기록(로그)만 삭제됩니다.\n` +
+        `현금·자산·대출 등 재무 상태는 자동 재계산됩니다.\n\n` +
+        `계속하시겠습니까?`;
+    
+    if (window.confirm(message)) {
+      setTurnLog(prev => {
+        const newLog = prev.filter((_, idx) => idx !== index);
+        
+        // 🆕 currentTurn 자동 재계산
+        // 메인 턴 entry 중 최대 turn 번호 + 1로 설정 → 다음 입력이 같은 번호로 들어감
+        // 예: T3, T4, T5 있을 때 T5 삭제 → currentTurn = 5 (다시 5번 입력 가능)
+        const mainTurns = newLog
+          .filter(t => t.turn != null && !["EXTRA_LOAN", "EXTRA_SPLIT", "EXTRA_WIPE", "EXTRA_BUY", "EXTRA_CASH", "DEBT_REPAY"].includes(t.cellType))
+          .map(t => t.turn);
+        const maxTurn = mainTurns.length > 0 ? Math.max(...mainTurns) : 0;
+        setCurrentTurn(maxTurn + 1);
+        
+        // 입력 필드도 초기화 (사용자가 같은 턴 다시 입력 가능하게)
+        if (isMainTurn) {
+          setDiceInput(""); setDiceConfirmed(false); setCellType("");
+          setSelectedCard(null); setAction(null); setShares("");
+          setSellPriceInput(0); setRightsPrice(0);
+          setPassedPaydays(0);
+          setCardCategory(null); setCardSubtype(null);
+          setMarketCategory(null); setMarketSubtype(null);
+          setViewTab("input");  // 입력 탭으로 자동 이동
+        }
+        
+        return newLog;
+      });
     }
   }, []);
 
