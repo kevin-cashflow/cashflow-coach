@@ -21,6 +21,284 @@ import {
 import { loadGameSession } from "@/lib/gameSession";
 
 /**
+ * 🆕 (2025-05) 저장 진단 패널
+ * 
+ * 사용자가 "저장이 안 됐다"고 할 때 직접 확인 가능한 도구
+ * - localStorage에 있는 게임 수
+ * - Supabase 동기화 큐에 대기 중인 게임 수
+ * - 수동 동기화 버튼
+ */
+function SaveDiagnosticPanel({ authUser, onSync }) {
+  const [info, setInfo] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const refresh = useCallback(() => {
+    if (typeof window === "undefined") return;
+    
+    try {
+      // localStorage의 game:* 키 카운트
+      const allKeys = Object.keys(localStorage);
+      const gameKeys = allKeys.filter(k => k.startsWith("game:"));
+      
+      // 동기화 큐 상태
+      let queueSize = 0;
+      let queueDetails = [];
+      try {
+        const queue = JSON.parse(localStorage.getItem("cashflow:syncQueue") || "[]");
+        queueSize = queue.length;
+        queueDetails = queue.map(e => ({
+          key: e.key,
+          attempts: e.attempts,
+          lastError: e.lastError,
+          enqueuedAt: e.enqueuedAt,
+        }));
+      } catch {}
+      
+      // 현재 게임 세션 (진행 중)
+      let activeSession = null;
+      try {
+        const sess = localStorage.getItem("cashflow_game_session");
+        if (sess) {
+          const parsed = JSON.parse(sess);
+          activeSession = {
+            turnCount: parsed.turnCount,
+            job: parsed.job,
+            savedAt: parsed.savedAt,
+          };
+        }
+      } catch {}
+      
+      setInfo({
+        localStorageGames: gameKeys.length,
+        gameKeys: gameKeys.slice(0, 10),  // 처음 10개만 표시
+        queueSize,
+        queueDetails: queueDetails.slice(0, 5),  // 처음 5개만
+        activeSession,
+        userId: authUser?.id,
+        email: authUser?.email,
+      });
+    } catch (e) {
+      console.warn("[SaveDiagnosticPanel] refresh 실패:", e);
+    }
+  }, [authUser]);
+
+  useEffect(() => {
+    refresh();
+    const interval = setInterval(refresh, 5000);  // 5초마다 갱신
+    return () => clearInterval(interval);
+  }, [refresh]);
+
+  // 수동으로 큐 강제 동기화 (사용자가 "지금 당장 동기화" 클릭)
+  const handleForceSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      // 큐 항목들 모두 강제 시도
+      const queue = JSON.parse(localStorage.getItem("cashflow:syncQueue") || "[]");
+      if (queue.length === 0) {
+        // 큐가 비어있어도 localStorage의 game:* 키들을 강제로 큐에 넣고 동기화
+        const allKeys = Object.keys(localStorage);
+        const gameKeys = allKeys.filter(k => k.startsWith("game:"));
+        if (gameKeys.length === 0) {
+          alert("동기화할 게임이 없습니다.");
+          return;
+        }
+        // localStorage에 있는 모든 게임을 큐에 강제 등록
+        const newQueue = gameKeys.map(key => ({
+          key,
+          payload: localStorage.getItem(key),
+          attempts: 0,
+          lastTryAt: 0,
+          lastError: null,
+          enqueuedAt: Date.now(),
+        }));
+        localStorage.setItem("cashflow:syncQueue", JSON.stringify(newQueue));
+        console.log(`[수동 동기화] 📋 ${gameKeys.length}개 게임을 큐에 강제 등록`);
+      }
+      
+      // window.storage가 있으면 직접 시도
+      if (window.storage && typeof window.storage.set === "function") {
+        const updatedQueue = JSON.parse(localStorage.getItem("cashflow:syncQueue") || "[]");
+        let success = 0;
+        let failed = 0;
+        const remainingQueue = [];
+        
+        for (const entry of updatedQueue) {
+          try {
+            const result = await Promise.race([
+              window.storage.set(entry.key, entry.payload),
+              new Promise((_, reject) => setTimeout(() => reject(new Error("타임아웃")), 10000)),
+            ]);
+            if (result && !result._localOnly) {
+              success++;
+            } else {
+              failed++;
+              remainingQueue.push(entry);
+            }
+          } catch (e) {
+            failed++;
+            remainingQueue.push(entry);
+          }
+        }
+        
+        localStorage.setItem("cashflow:syncQueue", JSON.stringify(remainingQueue));
+        alert(`동기화 결과:\n✅ 성공: ${success}개\n❌ 실패: ${failed}개`);
+        refresh();
+        if (onSync) onSync();  // 부모 컴포넌트 갱신
+      } else {
+        alert("저장소가 준비되지 않았습니다. 페이지를 새로고침 후 다시 시도해주세요.");
+      }
+    } catch (e) {
+      alert(`동기화 중 오류: ${e.message}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  if (!info) return null;
+
+  const hasIssue = info.queueSize > 0 || (info.localStorageGames > 0 && info.queueSize === 0);
+
+  return (
+    <div style={{
+      marginBottom: 16,
+      padding: 12,
+      background: hasIssue ? "#fbbf2410" : "#22c55e10",
+      border: `1px solid ${hasIssue ? "#fbbf2440" : "#22c55e40"}`,
+      borderRadius: 10,
+      fontSize: 12,
+    }}>
+      <div style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        cursor: "pointer",
+      }} onClick={() => setExpanded(!expanded)}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 14 }}>{hasIssue ? "⚠️" : "✅"}</span>
+          <span style={{ fontWeight: 700, color: "#fafafa" }}>
+            저장 상태 진단
+          </span>
+          <span style={{ color: "#a1a1aa", fontSize: 11 }}>
+            로컬 {info.localStorageGames}개 · 동기화 대기 {info.queueSize}개
+          </span>
+        </div>
+        <span style={{ color: "#71717a", fontSize: 10 }}>
+          {expanded ? "▲ 닫기" : "▼ 자세히"}
+        </span>
+      </div>
+
+      {expanded && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #3f3f46" }}>
+          {/* 사용자 정보 */}
+          <div style={{ marginBottom: 8, color: "#a1a1aa", fontSize: 11 }}>
+            👤 {info.email || "비로그인"}
+            {info.userId && <span style={{ color: "#52525b" }}> ({info.userId.substring(0, 8)}...)</span>}
+          </div>
+
+          {/* localStorage 상태 */}
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ color: "#fafafa", fontWeight: 600, marginBottom: 4 }}>
+              💾 브라우저 저장 ({info.localStorageGames}개 게임)
+            </div>
+            {info.localStorageGames === 0 ? (
+              <div style={{ color: "#fca5a5", fontSize: 11 }}>
+                ❌ 브라우저에 저장된 게임이 없음
+                <br />
+                → 게임이 진짜로 저장되지 않은 상태 (완전 손실)
+              </div>
+            ) : (
+              <div style={{ color: "#86efac", fontSize: 11 }}>
+                ✅ 게임 {info.localStorageGames}개가 브라우저에 안전하게 보관됨
+                <details style={{ marginTop: 4 }}>
+                  <summary style={{ cursor: "pointer", color: "#a1a1aa" }}>키 보기</summary>
+                  <div style={{ marginTop: 4, fontFamily: "monospace", fontSize: 10, color: "#71717a" }}>
+                    {info.gameKeys.map(k => <div key={k}>{k}</div>)}
+                  </div>
+                </details>
+              </div>
+            )}
+          </div>
+
+          {/* 동기화 큐 */}
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ color: "#fafafa", fontWeight: 600, marginBottom: 4 }}>
+              ☁️ 서버 동기화 대기 ({info.queueSize}개)
+            </div>
+            {info.queueSize === 0 ? (
+              <div style={{ color: "#86efac", fontSize: 11 }}>
+                ✅ 모두 동기화 완료
+              </div>
+            ) : (
+              <div style={{ color: "#fbbf24", fontSize: 11 }}>
+                ⏳ {info.queueSize}개 동기화 대기 중 (백그라운드에서 자동 시도)
+                <details style={{ marginTop: 4 }}>
+                  <summary style={{ cursor: "pointer", color: "#a1a1aa" }}>상세</summary>
+                  <div style={{ marginTop: 4, fontFamily: "monospace", fontSize: 10, color: "#71717a" }}>
+                    {info.queueDetails.map((d, i) => (
+                      <div key={i}>
+                        {d.key.substring(0, 30)}... (시도 {d.attempts}회{d.lastError ? `, 에러: ${d.lastError}` : ""})
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              </div>
+            )}
+          </div>
+
+          {/* 현재 진행 중인 게임 */}
+          {info.activeSession && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ color: "#fafafa", fontWeight: 600, marginBottom: 4 }}>
+                🎮 진행 중인 게임
+              </div>
+              <div style={{ color: "#93c5fd", fontSize: 11 }}>
+                {info.activeSession.job} · {info.activeSession.turnCount}턴 진행
+              </div>
+            </div>
+          )}
+
+          {/* 액션 버튼 */}
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <button
+              onClick={refresh}
+              style={{
+                padding: "6px 12px",
+                background: "#3f3f46",
+                border: "none",
+                borderRadius: 6,
+                color: "#fafafa",
+                fontSize: 11,
+                cursor: "pointer",
+              }}
+            >
+              🔄 새로고침
+            </button>
+            <button
+              onClick={handleForceSync}
+              disabled={syncing || info.localStorageGames === 0}
+              style={{
+                padding: "6px 12px",
+                background: syncing ? "#52525b" : "#3b82f6",
+                border: "none",
+                borderRadius: 6,
+                color: "#fff",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: syncing ? "not-allowed" : "pointer",
+              }}
+            >
+              {syncing ? "동기화 중..." : "☁️ 지금 동기화"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * 📊 내 이력 탭 (Phase B Day 4 — 게임 단위 통합)
  *
  * 변경 사항 (2026-04):
@@ -1375,6 +1653,9 @@ export default function MyHistoryTab({ authUser, embedded = false }) {
           </p>
         </div>
       )}
+
+      {/* 🆕 (2025-05) 저장 진단 패널 - 데이터 손실 디버깅용 */}
+      <SaveDiagnosticPanel authUser={authUser} onSync={() => loadGames()} />
 
       {loading && (
         <div style={{ textAlign: "center", padding: 40, color: "#71717a", fontSize: 13 }}>
