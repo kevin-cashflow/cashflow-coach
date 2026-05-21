@@ -2647,19 +2647,42 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
   };
 
   const buyCost = getBuyCost();
+  
+  // 🆕 (2025-05) 게임 룰: 같은 턴에 받은 대출의 이자는 다음 PAYDAY부터 차감
+  // 시나리오: 현금 $3,000, 착수금 $5,000 → $2,000 대출 → 즉시 -$200 이자 차감 → 또 부족 → 또 대출 (무한루프)
+  // 
+  // 해결: 이번 턴(currentTurn)에 발생한 EXTRA_LOAN의 이자를 양쪽 모두에서 보정:
+  //   1. totalExpense (월별 현금흐름 계산용) - 이자만큼 빼기
+  //   2. cash (매수 판정용) - 만약 gameStateEngine이 즉시 이자 차감한다면 그만큼 더하기
+  //
+  // gameStateEngine이 대출 시 cash에서 이자를 즉시 빼는지 확실하지 않으나,
+  // 안전하게 양쪽 모두 보정하여 사용자 경험 보장
+  const thisTurnNewLoanInterest = turnLog
+    .filter(t => t.cellType === "EXTRA_LOAN" && t.turn === currentTurn && t.action !== "repay")
+    .reduce((sum, t) => sum + Math.round((t.loanAmount || 0) * 0.1), 0);
+  
+  // 보정된 totalExpense: 이번 턴 새 대출 이자 제외 (다음 PAYDAY부터 차감되므로)
+  const adjustedTotalExpense = Math.max(0, totalExpense - thisTurnNewLoanInterest);
+  
   // 🆕 (2025-05) 월급 통과 후 매수 케이스: 게임 룰상 월급은 매수보다 먼저 받음
   // passedPaydays > 0이면 paydayAmount를 미리 cash에 가산해 매수 가능 판정
   // 실제 turnLog 저장 시에도 paydayLogs가 entry 앞에 오므로 일관성 유지
+  // 🆕 adjustedTotalExpense 사용 - 같은 턴 새 대출 이자는 다음 PAYDAY부터 차감
   const passedPaydayAmount = (passedPaydays > 0 && jobData)
-    ? passedPaydays * (jobData.salary + totalCF - totalExpense)
+    ? passedPaydays * (jobData.salary + totalCF - adjustedTotalExpense)
     : 0;
-  const effectiveCash = cash + passedPaydayAmount;
+  
+  // 🆕 cash 보정: 같은 턴 새 대출 이자가 cash에서 즉시 차감되었다면 다시 더해줌
+  // (gameStateEngine 동작에 따라 다를 수 있어, 안전하게 보정)
+  const adjustedCash = cash + thisTurnNewLoanInterest;
+  
+  const effectiveCash = adjustedCash + passedPaydayAmount;
   const cashCheck = (cellType === "OPPORTUNITY" && selectedCard && action === "buy") ? 
     { 
       enough: effectiveCash >= buyCost, 
       shortage: Math.max(0, buyCost - effectiveCash), 
       message: buyCost > 0 
-        ? `현금 $${fmtNum(cash)}${passedPaydayAmount > 0 ? ` (+월급통과 $${fmtNum(passedPaydayAmount)})` : ""} / 필요 $${fmtNum(buyCost)} → ${effectiveCash >= buyCost ? "구매 가능" : `$${fmtNum(buyCost - effectiveCash)} 부족`}` 
+        ? `현금 $${fmtNum(cash)}${thisTurnNewLoanInterest > 0 ? ` (이번 턴 이자 $${fmtNum(thisTurnNewLoanInterest)} 차감 면제)` : ""}${passedPaydayAmount > 0 ? ` (+월급통과 $${fmtNum(passedPaydayAmount)})` : ""} / 필요 $${fmtNum(buyCost)} → ${effectiveCash >= buyCost ? "구매 가능" : `$${fmtNum(buyCost - effectiveCash)} 부족`}` 
         : "" 
     } :
     { enough: true, shortage: 0, message: "" };
@@ -4171,7 +4194,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                     <BankLoanUI
                       shortage={Math.max(0, buyCost - effectiveCash)}
                       bankLoan={bankLoan}
-                      monthlyCF={jobData ? (jobData.salary + totalCF - totalExpense + loanInterest) : 0}
+                      monthlyCF={jobData ? (jobData.salary + totalCF - adjustedTotalExpense + loanInterest - thisTurnNewLoanInterest) : 0}
                       currentInterest={loanInterest}
                       onLoan={(amount) => {
                         const loanEntry = createExtraLoanTurn({
