@@ -66,8 +66,12 @@ import {
 
 const SYNC_QUEUE_KEY = "cashflow:syncQueue";
 const SYNC_INTERVAL_MS = 5000;        // 5초 주기 워커
-const SYNC_MAX_ATTEMPTS = 5;          // 최대 재시도
-const SYNC_BACKOFF_MS = [1000, 3000, 10000, 30000, 60000];  // 지수 백오프
+// 🆕 (2025-05) 무한 재시도에 가깝게 늘림 (이전 5회 → 100회)
+// 이유: 5번 실패 후 영구 중단되면 데이터 동기화 못 됨
+// 진짜 데이터 손실 방지하려면 계속 시도해야 함
+const SYNC_MAX_ATTEMPTS = 100;
+// 백오프: 1초, 3초, 10초, 30초, 60초, 그 이후는 5분 간격
+const SYNC_BACKOFF_MS = [1000, 3000, 10000, 30000, 60000, 300000];
 
 let _syncWorkerInterval = null;       // 워커 ID (한 번만 시작)
 let _syncWorkerRunning = false;       // 동시 실행 방지
@@ -92,15 +96,24 @@ function setSyncQueue(queue) {
 }
 
 // 큐에 항목 추가 (또는 업데이트)
+// 큐에 항목 추가 (또는 업데이트)
+// 🆕 (2025-05) 같은 key 업데이트 시 payload가 다르면 attempts 리셋
+// 이유: 새 데이터(매 턴 업데이트)는 이전 실패와 무관 → 다시 시도해야 함
+// 그렇지 않으면 한 번 5번 실패한 게임은 영원히 동기화 안 됨
 function enqueueSync(key, payload) {
   const queue = getSyncQueue();
   const existing = queue.findIndex(item => item.key === key);
+  const payloadStr = typeof payload === "string" ? payload : JSON.stringify(payload);
+  
+  // 🆕 새 payload면 attempts 리셋 (다시 시도해야 함)
+  const isNewPayload = existing < 0 || queue[existing].payload !== payloadStr;
+  
   const entry = {
     key,
-    payload: typeof payload === "string" ? payload : JSON.stringify(payload),
-    attempts: existing >= 0 ? queue[existing].attempts : 0,
-    lastTryAt: 0,
-    lastError: null,
+    payload: payloadStr,
+    attempts: isNewPayload ? 0 : queue[existing].attempts,
+    lastTryAt: isNewPayload ? 0 : queue[existing].lastTryAt,
+    lastError: isNewPayload ? null : queue[existing].lastError,
     enqueuedAt: Date.now(),
   };
   if (existing >= 0) {
@@ -141,6 +154,11 @@ async function runSyncWorker() {
     const queue = getSyncQueue();
     if (queue.length === 0) return;
 
+    // 🆕 큐 상태 진단 로그 (10턴마다 한 번 정도로 빈도 조절)
+    if (queue.length > 0 && Math.random() < 0.2) {  // 5번 중 1번만 로그
+      console.log(`[syncWorker] 📊 큐 상태: ${queue.length}개 대기 중 ${queue.map(e => `${e.key.substring(0, 20)}...(${e.attempts}회)`).join(", ")}`);
+    }
+
     // 세션 살아있는지 확인 (없으면 워커 스킵)
     const session = await getSessionSafe(1500);
     if (!session) {
@@ -156,8 +174,11 @@ async function runSyncWorker() {
 
       // 최대 재시도 초과
       if (entry.attempts >= SYNC_MAX_ATTEMPTS) {
-        console.warn(`[syncWorker] 최대 재시도 초과: ${entry.key} (${entry.attempts}회)`);
-        continue;
+        // 🆕 진짜로 영구 실패 - 그래도 1시간에 1번은 시도
+        if (Date.now() - entry.lastTryAt < 3600000) {
+          continue;
+        }
+        console.warn(`[syncWorker] 🔄 영구 실패 항목 1시간 후 재시도: ${entry.key}`);
       }
 
       entry.attempts++;
@@ -171,7 +192,8 @@ async function runSyncWorker() {
         updated = true;
       } else {
         entry.lastError = result.error;
-        console.log(`[syncWorker] ⏳ ${entry.key} 재시도 예약 (${entry.attempts}/${SYNC_MAX_ATTEMPTS}, 다음: ${SYNC_BACKOFF_MS[entry.attempts] || 60000}ms 후): ${result.error}`);
+        const nextBackoff = SYNC_BACKOFF_MS[Math.min(entry.attempts, SYNC_BACKOFF_MS.length - 1)];
+        console.log(`[syncWorker] ⏳ ${entry.key} 재시도 예약 (${entry.attempts}/${SYNC_MAX_ATTEMPTS}, 다음: ${nextBackoff}ms 후): ${result.error}`);
         updated = true;
       }
     }
@@ -196,6 +218,8 @@ function startSyncWorker() {
 }
 
 // 강제 플러시 (디브리핑 직전): 큐의 모든 항목을 즉시 처리 + 결과 보고
+// 🆕 (2025-05) 디브리핑 직전엔 attempts 무시하고 강제 재시도
+// 이유: 디브리핑은 중요한 순간이므로 백그라운드 실패 누적과 무관하게 시도해야 함
 // returns: { success: boolean, processed: number, failed: number, errors: [] }
 async function flushSyncQueue({ maxWaitMs = 15000 } = {}) {
   const queue = getSyncQueue();
@@ -204,6 +228,12 @@ async function flushSyncQueue({ maxWaitMs = 15000 } = {}) {
   }
 
   console.log(`[flushSync] 🔄 강제 플러시 시작 (큐: ${queue.length}개, 최대 ${maxWaitMs / 1000}초)`);
+  
+  // 🆕 강제 플러시 시 모든 항목의 attempts/lastTryAt 리셋 (백오프 무시)
+  queue.forEach(entry => {
+    entry.attempts = 0;
+    entry.lastTryAt = 0;
+  });
   
   // 세션 강제 갱신 시도
   const session = await getSessionSafe(2000);
