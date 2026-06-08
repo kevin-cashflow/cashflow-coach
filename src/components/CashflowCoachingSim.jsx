@@ -48,6 +48,24 @@ import {
 } from "@/lib/gameStateEngine";
 
 // ═══════════════════════════════════════════════════
+// 🆕 (2026-05) [PERF-1] 프로덕션 console.log 무력화
+// ═══════════════════════════════════════════════════
+//
+// 목적: 프로덕션 빌드에서 console.log 호출 비용 제거
+//   - 83개의 console.log가 매 호출마다 인자 직렬화 비용 발생
+//   - 특히 JSON.stringify가 포함된 로그는 대용량 객체 직렬화로 큰 비용
+//   - 개발 환경(npm run dev)에서는 그대로 작동 → 디버깅 영향 없음
+//   - console.warn, console.error는 운영 모니터링용으로 유지
+//
+// 적용 시점: 모듈 로드 시 1회 (브라우저에서만)
+// 영향 범위: 이 모듈이 로드되는 시점부터 전역 console.log 차단
+//           (다른 파일의 console.log도 함께 차단됨 — 의도된 동작)
+if (typeof window !== "undefined" && process.env.NODE_ENV === "production") {
+  // eslint-disable-next-line no-console
+  console.log = () => {};
+}
+
+// ═══════════════════════════════════════════════════
 // 🆕 (2025-05) 백그라운드 동기화 큐 (C 옵션 - 하이브리드)
 // ═══════════════════════════════════════════════════
 //
@@ -1251,6 +1269,51 @@ const RE_PLUMBING = /배관.*교체|노후 배관/;  // 배관 전용 (다가구
 const RE_NUM = /[^0-9]/g;
 const RE_NUM_NEG = /[^0-9-]/g;
 
+// 🆕 부채발생 카드 (선택 옵션 제공) — 세탁 건조기 / 카라반 2장만 우선 지원
+// 자녀 조건부 부채발생(중고차/대학) 및 부동산형(수영장/통나무집)은 제외
+const RE_DEBT_OPTION_CARD = /일체형 세탁 건조기|새 캠핑 카라반/;
+
+// 부채발생 카드의 현금/부채/이자 옵션을 파싱
+// 반환: { cashUpfront: 옵션B에서 무조건 나가는 선불금, debtAmount: 부채 추가액, monthlyInterest: 월 이자, fullCashAmount: 옵션A에서 일시불로 나가는 총액 }
+const parseDebtOptionCard = (card) => {
+  if (!card || !RE_DEBT_OPTION_CARD.test(card.desc || "")) return null;
+  const desc = card.desc;
+
+  // 세탁 건조기: "$5,000 신용카드로 지불. 부채에 $5,000, 이자로 $120 추가"
+  //   → 옵션A: 현금 $5,000 일시불 / 옵션B: 부채 +$5,000, 이자 +$120
+  if (/일체형 세탁 건조기/.test(desc)) {
+    const debtMatch  = desc.match(/부채에\s*\$([0-9,]+)/);
+    const interestMatch = desc.match(/이자로\s*\$([0-9,]+)/);
+    const debt     = debtMatch     ? parseInt(debtMatch[1].replace(/,/g, "")) : 0;
+    const interest = interestMatch ? parseInt(interestMatch[1].replace(/,/g, "")) : 0;
+    return {
+      cashUpfront: 0,         // 옵션B 선택 시 현금 0 (전액 신용카드)
+      debtAmount: debt,
+      monthlyInterest: interest,
+      fullCashAmount: debt,   // 옵션A 선택 시 $5,000 일시불
+    };
+  }
+
+  // 카라반: "$1,000은 선불, $17,000은 은행 대출. 대출 이자는 매달 $340"
+  //   → 옵션A: 현금 $18,000 일시불 / 옵션B: 현금 -$1,000 + 부채 +$17,000, 이자 +$340
+  if (/새 캠핑 카라반/.test(desc)) {
+    const upfrontMatch  = desc.match(/\$([0-9,]+)은?\s*선불/);
+    const loanMatch     = desc.match(/\$([0-9,]+)은?\s*은행 대출/);
+    const interestMatch = desc.match(/이자는?\s*매달\s*\$([0-9,]+)/);
+    const upfront  = upfrontMatch  ? parseInt(upfrontMatch[1].replace(/,/g, ""))  : 0;
+    const loan     = loanMatch     ? parseInt(loanMatch[1].replace(/,/g, ""))     : 0;
+    const interest = interestMatch ? parseInt(interestMatch[1].replace(/,/g, "")) : 0;
+    return {
+      cashUpfront: upfront,        // 옵션B 선택 시 $1,000 선불은 무조건
+      debtAmount: loan,
+      monthlyInterest: interest,
+      fullCashAmount: upfront + loan,  // 옵션A 선택 시 $18,000 일시불
+    };
+  }
+
+  return null;
+};
+
 // ── 컴포넌트 외부 유틸리티 함수 ──
 const fmtTime = (sec) => {
   const m = Math.floor(sec / 60);
@@ -1836,7 +1899,10 @@ const JOBS = [
    공용 로딩 스피너 (주사위 회전 애니메이션)
    사용처: 인증 로딩, 디브리핑 분석, AI 코칭, 게임 저장/복구 등
 ═══════════════════════════════════════════════════ */
-function DiceSpinner({ message = "로딩 중...", subMessage = null, size = "md", fullScreen = false }) {
+// 🆕 (2026-05) [PERF-3] DiceSpinner — memo로 감싸기
+// 모든 props가 원시값(message, subMessage, size, fullScreen)이라 얕은 비교만으로 안전
+// 효과: 로딩 중 부모 컴포넌트(AnalysisReport 등) 리렌더 시에도 스피너는 그대로 유지
+const DiceSpinner = memo(function DiceSpinner({ message = "로딩 중...", subMessage = null, size = "md", fullScreen = false }) {
   const iconSize = size === "lg" ? 48 : size === "sm" ? 20 : 32;
   const msgSize = size === "lg" ? 15 : size === "sm" ? 11 : 13;
   const content = (
@@ -1870,13 +1936,16 @@ function DiceSpinner({ message = "로딩 중...", subMessage = null, size = "md"
       {content}
     </div>
   );
-}
+});
 
 /* ═══════════════════════════════════════════════════
    은행 대출 UI 컴포넌트
    $1,000 단위, 월 10% 이자
+   🆕 (2026-05) [PERF-3] memo로 감싸기
+   원시 props(shortage/bankLoan/monthlyCF/currentInterest) + onLoan만 받음.
+   onLoan이 부모에서 useCallback으로 안정화되면 진짜 효과 발생.
 ═══════════════════════════════════════════════════ */
-function BankLoanUI({ shortage, bankLoan, monthlyCF, currentInterest, onLoan }) {
+const BankLoanUI = memo(function BankLoanUI({ shortage, bankLoan, monthlyCF, currentInterest, onLoan }) {
   // 대출 한도: 추가 이자가 남은 현금흐름을 초과하면 안됨
   // 남은 현금흐름 = monthlyCF - currentInterest
   // 추가 대출 × 10% ≤ 남은 현금흐름
@@ -1948,7 +2017,7 @@ function BankLoanUI({ shortage, bankLoan, monthlyCF, currentInterest, onLoan }) 
       )}
     </div>
   );
-}
+});
 
 /* ═══════════════════════════════════════════════════
    턴 row 컴포넌트 — React.memo로 리렌더 최소화
@@ -2070,9 +2139,81 @@ const TurnRow = memo(function TurnRow({ t, i, isSub, onEdit, onDelete }) {
 });
 
 /* ═══════════════════════════════════════════════════
-   턴 편집 모달 — 각 turn entry의 주요 필드를 수정
+   🆕 (2026-05) [PERF-2] 턴 로그 리스트 — memo로 감싼 별도 컴포넌트
+   ═══════════════════════════════════════════════════
+   목적:
+     PlayMode가 3,954줄 + useState 54개로, 주사위 입력 한 글자만 바뀌어도
+     기록 탭의 거대한 .map() 블록(턴 그룹×TurnRow)이 전부 리렌더됨.
+     이 컴포넌트로 분리해서 props가 안 바뀌면 통째로 렌더 스킵.
+
+   memo 동작 조건 (모두 충족):
+     - turnGroups: 부모에서 useMemo로 안정화 ✅
+     - onEditTurn / onDeleteTurn: 부모에서 useCallback으로 안정화 ✅
+     → 다른 state 변경(주사위 입력, 카드 선택 등)은 이 컴포넌트를 건드리지 않음
+
+   분리 효과: 게임 진행 중 입력창 타이핑 반응성 개선 (특히 턴 수 30+ 누적 시 큼)
 ═══════════════════════════════════════════════════ */
-function TurnEditModal({ turnIndex, turn, onSave, onClose }) {
+const TurnLogList = memo(function TurnLogList({ turnGroups, onEditTurn, onDeleteTurn }) {
+  // 내부 렌더 함수 — props 안정성에 영향받지 않도록 memo 내부에 위치
+  const renderTurnRow = (t, i, isSub) => (
+    <TurnRow
+      key={i}
+      t={t}
+      i={i}
+      isSub={isSub}
+      onEdit={onEditTurn}
+      onDelete={onDeleteTurn}
+    />
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {turnGroups.map((group, gIdx) => {
+        const headerLabel = group.main
+          ? `T${group.turnNum} 진행`
+          : `T${group.turnNum} 대기 중 보조 행위`;
+        return (
+          <div key={gIdx} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {/* ── 그룹 헤더 ── */}
+            <div style={{
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "4px 2px",
+              borderBottom: "1px solid #27272a",
+            }}>
+              <span style={{
+                fontSize: 11, fontWeight: 700, color: "#a1a1aa",
+                letterSpacing: "0.03em",
+              }}>
+                ┌ {headerLabel}
+              </span>
+              <span style={{ flex: 1, borderBottom: "1px dashed #27272a", marginTop: 2 }} />
+            </div>
+            {/* ── 메인 행 ── */}
+            {group.main && renderTurnRow(group.main.entry, group.main.idx, false)}
+            {/* ── 보조 행 묶음 ── */}
+            {group.subs.length > 0 && (
+              <div style={{
+                display: "flex", flexDirection: "column", gap: 4,
+                marginLeft: 16, paddingLeft: 10,
+                borderLeft: "2px solid #27272a",
+              }}>
+                {group.subs.map(s => renderTurnRow(s.entry, s.idx, true))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+
+/* ═══════════════════════════════════════════════════
+   턴 편집 모달 — 각 turn entry의 주요 필드를 수정
+   🆕 (2026-05) [PERF-3] memo로 감싸기
+   props: turnIndex(원시), turn(객체-참조비교), onSave/onClose(함수).
+   onSave/onClose가 부모에서 안정화되고 turn 객체가 같은 참조면 렌더 스킵.
+═══════════════════════════════════════════════════ */
+const TurnEditModal = memo(function TurnEditModal({ turnIndex, turn, onSave, onClose }) {
   // 편집 가능한 필드만 state로 관리. 미편집 필드는 원본 그대로 유지.
   const [transaction, setTransaction] = useState(turn.transaction || "");
   // 숫자 필드들 — 턴 타입별로 다르게 사용
@@ -2301,7 +2442,7 @@ function TurnEditModal({ turnIndex, turn, onSave, onClose }) {
       </div>
     </div>
   );
-}
+});
 
 /* ═══════════════════════════════════════════════════
    PlayMode 컴포넌트
@@ -2322,6 +2463,9 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
   const [shares, setShares] = useState("");
   const [sellPriceInput, setSellPriceInput] = useState(0);
   const [rightsPrice, setRightsPrice] = useState(0);
+  // 🆕 부채발생 두대드 카드(세탁기/카라반)의 결제 방식 선택: "cash" | "debt" | null
+  // 카드 선택 시 기본값 "debt"(카드 텍스트 그대로) — 사용자가 "cash"로 바꿀 수 있음
+  const [debtCardPayment, setDebtCardPayment] = useState(null);
   const [gameEnded, setGameEnded] = useState(false); // 쥐경주 탈출 시 true
   const [gameSaved, setGameSaved] = useState(false); // 게임 저장 완료 시 true (디브리핑 버튼 활성화 조건)
   const [savedGameKey, setSavedGameKey] = useState(null); // 🆕 저장된 게임 key (analysis 저장용)
@@ -2395,7 +2539,15 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     return () => clearInterval(timer);
   }, [job, startTime, timerOn]);
 
-  const jobData = job ? JOBS.find(j => j.name === job) : null;
+  // 🆕 (2026-05) [PERF-4-A] jobData useMemo화
+  // 이전: 매 렌더마다 JOBS(15개) 선형 탐색 + 새 참조 반환
+  //       → gameState useMemo의 [jobData] deps가 매번 새 참조 → computeGameState 매 렌더 재실행
+  // 이후: job 문자열이 안 바뀌면 같은 참조 반환 → gameState useMemo가 실제로 작동
+  // 효과: turnLog가 30+ 누적된 후반부일수록 큼 (computeGameState가 모든 턴을 재시뮬)
+  const jobData = useMemo(
+    () => (job ? JOBS.find(j => j.name === job) : null),
+    [job]
+  );
 
   // ═════════════════════════════════════════════════
   // 🎮 파생 재무 상태 (엔진 기반 재계산)
@@ -2732,6 +2884,7 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
     let transaction = "";
     let splitApplied = null; // 무상증자/감자: true=보유중적용, false=미보유해당없음, null=해당없음
     let soldAssetInfo = null; // MARKET 매각 시 실제 매각된 자산 정보 (AI 브리핑용)
+    let extraLoanEntry = null; // 🆕 부채발생 두대드 카드의 별도 대출 entry (옵션 B 선택 시)
 
     // ── OPPORTUNITY ──
     if (cellType === "OPPORTUNITY" && action === "buy" && selectedCard) {
@@ -2926,14 +3079,52 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       const isChildCard = RE_CHILD_DOODAD.test(selectedCard.desc || "");
       const amt = parseNum(selectedCard.amount);
       const actualAmt = isChildCard ? amt * babies : amt;
-      entry = createDoodadTurn({
-        turn, boardPos, dice, passedPaydays, card: selectedCard,
-        amount: amt, isChildCard,
-        time,
-      });
-      transaction = isChildCard
-        ? `DOODAD ${selectedCard.desc?.substring(0,15)} 자녀${babies}명×$${amt} = -$${fmtNum(actualAmt)}`
-        : `DOODAD -$${fmtNum(actualAmt)}`;
+
+      // 🆕 부채발생 카드 옵션 처리 (세탁기/카라반)
+      const debtOpt = parseDebtOptionCard(selectedCard);
+      if (debtOpt && debtCardPayment) {
+        if (debtCardPayment === "cash") {
+          // 옵션 A: 현금 일시불 — 단순 지출만 처리, 부채/이자 변동 없음
+          entry = createDoodadTurn({
+            turn, boardPos, dice, passedPaydays, card: selectedCard,
+            amount: debtOpt.fullCashAmount, isChildCard: false,
+            time,
+          });
+          transaction = `DOODAD ${selectedCard.desc?.substring(0,15)} 현금 일시불 -$${fmtNum(debtOpt.fullCashAmount)}`;
+        } else {
+          // 옵션 B: 신용카드/대출 — 선불금만 지출로, 부채/이자는 별도 대출 entry로 처리
+          // ⚠️ 이 카드의 이자는 카드 텍스트에 명시된 금액을 그대로 사용 (은행대출 10%/월과 별개)
+          entry = createDoodadTurn({
+            turn, boardPos, dice, passedPaydays, card: selectedCard,
+            amount: debtOpt.cashUpfront, isChildCard: false,
+            time,
+          });
+          const cashPart = debtOpt.cashUpfront > 0 ? `선불 -$${fmtNum(debtOpt.cashUpfront)} + ` : "";
+          transaction = `DOODAD ${selectedCard.desc?.substring(0,15)} ${cashPart}부채 +$${fmtNum(debtOpt.debtAmount)} (월이자 +$${fmtNum(debtOpt.monthlyInterest)})`;
+          // 별도 대출 entry 추가 — customInterest 필드로 카드 명시 이자율 전달
+          extraLoanEntry = createExtraLoanTurn({
+            turn, loanAction: "borrow",
+            loanAmount: debtOpt.debtAmount,
+            time,
+          });
+          extraLoanEntry.transaction = `└ ${selectedCard.desc?.substring(0,15)} 부채 +$${fmtNum(debtOpt.debtAmount)} (월 이자 +$${fmtNum(debtOpt.monthlyInterest)})`;
+          // 🆕 카드 명시 이자율 표시용 메타데이터
+          // ⚠️ 주의: gameStateEngine이 loanInterest를 (bankLoan × 10%)로 계산한다면
+          //         이 필드만으로는 부족할 수 있음. 그 경우 추가 패치 필요.
+          extraLoanEntry.customInterest = debtOpt.monthlyInterest;
+          extraLoanEntry.debtOriginCard = selectedCard.desc?.substring(0,20);
+        }
+      } else {
+        // 일반 DOODAD 처리 (기존 로직)
+        entry = createDoodadTurn({
+          turn, boardPos, dice, passedPaydays, card: selectedCard,
+          amount: amt, isChildCard,
+          time,
+        });
+        transaction = isChildCard
+          ? `DOODAD ${selectedCard.desc?.substring(0,15)} 자녀${babies}명×$${amt} = -$${fmtNum(actualAmt)}`
+          : `DOODAD -$${fmtNum(actualAmt)}`;
+      }
     }
     // ── PAYDAY (도착 칸) ──
     else if (cellType === "PAYDAY") {
@@ -3005,10 +3196,11 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       }
     }
 
-    setTurnLog(prev => [...prev, ...paydayLogs, entry]);
+    setTurnLog(prev => [...prev, ...paydayLogs, entry, ...(extraLoanEntry ? [extraLoanEntry] : [])]);
     setCurrentTurn(prev => prev + 1);
     setSelectedCard(null); setAction(null); setShares("");
     setSellPriceInput(0); setRightsPrice(0);
+    setDebtCardPayment(null); // 🆕 부채발생 옵션 리셋
     setDiceInput(""); setDiceConfirmed(false); setPassedPaydays(0); setCellType("");
     setDealType("deal1"); setViewTab("input");
     setCardCategory(null); setCardSubtype(null);
@@ -3091,46 +3283,60 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         `현금·자산·대출 등 재무 상태는 자동 재계산됩니다.\n\n` +
         `계속하시겠습니까?`;
     
-    if (window.confirm(message)) {
-      setTurnLog(prev => {
-        const newLog = prev.filter((_, idx) => idx !== index);
-        
-        // 🆕 currentTurn 자동 재계산
-        // 메인 턴 entry 중 최대 turn 번호 + 1로 설정 → 다음 입력이 같은 번호로 들어감
-        // 예: T3, T4, T5 있을 때 T5 삭제 → currentTurn = 5 (다시 5번 입력 가능)
-        const mainTurns = newLog
-          .filter(t => t.turn != null && !["EXTRA_LOAN", "EXTRA_SPLIT", "EXTRA_WIPE", "EXTRA_BUY", "EXTRA_CASH", "DEBT_REPAY"].includes(t.cellType))
-          .map(t => t.turn);
-        const maxTurn = mainTurns.length > 0 ? Math.max(...mainTurns) : 0;
-        setCurrentTurn(maxTurn + 1);
-        
-        // 입력 필드도 초기화 (사용자가 같은 턴 다시 입력 가능하게)
-        if (isMainTurn) {
-          setDiceInput(""); setDiceConfirmed(false); setCellType("");
-          setSelectedCard(null); setAction(null); setShares("");
-          setSellPriceInput(0); setRightsPrice(0);
-          setPassedPaydays(0);
-          setCardCategory(null); setCardSubtype(null);
-          setMarketCategory(null); setMarketSubtype(null);
-          setViewTab("input");  // 입력 탭으로 자동 이동
-        }
-        
-        return newLog;
-      });
-    }
-  }, []);
+    if (!window.confirm(message)) return;
 
-  // 턴 row 렌더 — memo된 TurnRow를 사용
-  const renderTurnRow = (t, i, isSub) => (
-    <TurnRow
-      key={i}
-      t={t}
-      i={i}
-      isSub={isSub}
-      onEdit={handleEditTurn}
-      onDelete={handleDeleteTurn}
-    />
-  );
+    // 🆕 (2026-05) [BUG-FIX] setTurnLog updater에서 setter 호출 분리
+    // 이전: setTurnLog(prev => { ...setBoardPos(...); setCurrentTurn(...); return newLog; })
+    //       → React Strict Mode에서 updater 두 번 실행 시 setter도 두 번 호출
+    //       → 보드 위치 갱신이 의도와 다르게 동작할 수 있었음 (특히 batching)
+    // 이후: turnLog 외 모든 계산을 updater 밖에서 한 번만 수행 후 setter 호출
+    
+    // 1) 삭제 후 새 로그 계산 (순수 함수, 부작용 없음)
+    const EXTRA_TYPES = ["EXTRA_LOAN", "EXTRA_SPLIT", "EXTRA_WIPE", "EXTRA_BUY", "EXTRA_CASH", "DEBT_REPAY"];
+    const newLog = turnLog.filter((_, idx) => idx !== index);
+    const mainEntries = newLog.filter(t => t.turn != null && !EXTRA_TYPES.includes(t.cellType));
+    const mainTurns = mainEntries.map(t => t.turn);
+    const maxTurn = mainTurns.length > 0 ? Math.max(...mainTurns) : 0;
+
+    // 2) turnLog 갱신 (순수 setter)
+    setTurnLog(newLog);
+
+    // 3) currentTurn 자동 재계산
+    // 메인 턴 entry 중 최대 turn 번호 + 1로 설정 → 다음 입력이 같은 번호로 들어감
+    // 예: T3, T4, T5 있을 때 T5 삭제 → currentTurn = 5 (다시 5번 입력 가능)
+    setCurrentTurn(maxTurn + 1);
+
+    // 4) boardPos 자동 재계산 (메인 턴 삭제 시)
+    // 마지막으로 남은 메인 턴의 boardPos(=그 턴 도착 칸)로 되돌림.
+    // 메인 턴이 0개면 0(시작 위치)로.
+    // 보조 행위(EXTRA_*) 삭제 시에는 보드 위치를 건드리지 않음.
+    if (isMainTurn) {
+      if (mainEntries.length === 0) {
+        setBoardPos(0);
+        setCellType("");
+      } else {
+        // 가장 마지막에 추가된 메인 턴의 boardPos를 새 위치로 사용
+        // 배열 순서가 시간순이므로 마지막 요소가 가장 최근 턴
+        const lastMain = mainEntries[mainEntries.length - 1];
+        const newPos = lastMain.boardPos || 0;
+        setBoardPos(newPos);
+        // 새 위치의 cellType은 비워둠 — 다음 주사위 확정 시 다시 설정됨
+        setCellType("");
+      }
+
+      // 5) 입력 필드도 초기화 (사용자가 같은 턴 다시 입력 가능하게)
+      setDiceInput(""); setDiceConfirmed(false);
+      setSelectedCard(null); setAction(null); setShares("");
+      setSellPriceInput(0); setRightsPrice(0);
+      setPassedPaydays(0);
+      setCardCategory(null); setCardSubtype(null);
+      setMarketCategory(null); setMarketSubtype(null);
+      setDebtCardPayment(null); // 🆕 부채발생 옵션도 리셋
+      setViewTab("input");  // 입력 탭으로 자동 이동
+    }
+  }, [turnLog]);
+
+  // 🆕 (2026-05) [PERF-2] renderTurnRow는 TurnLogList 컴포넌트 내부로 이전됨 (위 함수 정의 참고)
 
   // ── 게임 저장 페이로드 생성 (중복 제거) ──
   const buildGamePayload = () => {
@@ -4061,7 +4267,16 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
               <label style={{ fontSize: 11, color: "#71717a", display: "block", marginBottom: 4 }}>카드 선택</label>
               <select
                 value={selectedCard ? cardList.indexOf(selectedCard) : ""}
-                onChange={e => { const idx = parseInt(e.target.value); const c = idx >= 0 ? cardList[idx] : null; setSelectedCard(c); setShares(""); setSellPriceInput(c ? parseNum(c.price) : 0); setAction(c && isSplitCard(c) ? "split" : null); }}
+                onChange={e => {
+                  const idx = parseInt(e.target.value);
+                  const c = idx >= 0 ? cardList[idx] : null;
+                  setSelectedCard(c);
+                  setShares("");
+                  setSellPriceInput(c ? parseNum(c.price) : 0);
+                  setAction(c && isSplitCard(c) ? "split" : null);
+                  // 🆕 부채발생 카드면 기본값 "debt"(카드 텍스트 그대로), 아니면 null
+                  setDebtCardPayment(c && parseDebtOptionCard(c) ? "debt" : null);
+                }}
                 style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #27272a", background: "#18181b", color: "#e4e4e7", fontSize: 13, outline: "none", appearance: "auto" }}
               >
                 <option value="">카드를 선택하세요</option>
@@ -4148,6 +4363,56 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
                   </span>
                 </div>
               )}
+
+              {/* 🆕 DOODAD 부채발생 카드 — 결제 방식 선택 (세탁기/카라반) */}
+              {cellType === "DOODAD" && (() => {
+                const opt = parseDebtOptionCard(selectedCard);
+                if (!opt) return null;
+                const insufficientCash = cash < opt.fullCashAmount;
+                return (
+                  <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 8, background: "#1e1b4b40", border: "1px solid #6366f130" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#a5b4fc", marginBottom: 8 }}>💳 결제 방식을 선택하세요</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {/* 옵션 A: 현금 일시불 */}
+                      <button
+                        onClick={() => setDebtCardPayment("cash")}
+                        disabled={insufficientCash}
+                        style={{
+                          padding: "10px 12px", borderRadius: 8, cursor: insufficientCash ? "not-allowed" : "pointer",
+                          border: debtCardPayment === "cash" ? "2px solid #22c55e" : "1px solid #27272a",
+                          background: debtCardPayment === "cash" ? "#22c55e15" : "#18181b",
+                          textAlign: "left", opacity: insufficientCash ? 0.5 : 1,
+                        }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: debtCardPayment === "cash" ? "#86efac" : "#e4e4e7", marginBottom: 2 }}>
+                          💵 현금 일시불 (-${fmtNum(opt.fullCashAmount)})
+                        </div>
+                        <div style={{ fontSize: 10, color: "#71717a" }}>
+                          {insufficientCash
+                            ? `현금 부족 (현재 $${fmtNum(cash)}, 필요 $${fmtNum(opt.fullCashAmount)})`
+                            : "부채/이자 증가 없음 — 깨끗하게 지불"}
+                        </div>
+                      </button>
+                      {/* 옵션 B: 신용카드/대출 */}
+                      <button
+                        onClick={() => setDebtCardPayment("debt")}
+                        style={{
+                          padding: "10px 12px", borderRadius: 8, cursor: "pointer",
+                          border: debtCardPayment === "debt" ? "2px solid #ef4444" : "1px solid #27272a",
+                          background: debtCardPayment === "debt" ? "#ef444415" : "#18181b",
+                          textAlign: "left",
+                        }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: debtCardPayment === "debt" ? "#fca5a5" : "#e4e4e7", marginBottom: 2 }}>
+                          💳 신용카드/대출 사용
+                          {opt.cashUpfront > 0 && ` (선불 -$${fmtNum(opt.cashUpfront)})`}
+                        </div>
+                        <div style={{ fontSize: 10, color: "#71717a" }}>
+                          부채 +${fmtNum(opt.debtAmount)} · 월 이자 +${fmtNum(opt.monthlyInterest)} (카드 명시 이자율)
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
             );
           })()}
@@ -4560,12 +4825,18 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
             (cellType === "CHARITY" && action === "charity_yes" && cash < Math.round(((jobData?.salary || 0) + totalCF) * 0.1)) ||
             (cellType === "MARKET" && action === "sell" && !sellCheck.eligible) ||
             (!cashCheck.enough) ||
-            (cellType === "OPPORTUNITY" && action === "sell" && isStock(selectedCard) && (getOwnedShares(selectedCard) < (parseInt(shares) || 0) || getOwnedShares(selectedCard) === 0))
+            (cellType === "OPPORTUNITY" && action === "sell" && isStock(selectedCard) && (getOwnedShares(selectedCard) < (parseInt(shares) || 0) || getOwnedShares(selectedCard) === 0)) ||
+            // 🆕 부채발생 두대드 카드: 결제 옵션 미선택이거나, 현금 옵션인데 잔액 부족이면 비활성화
+            (cellType === "DOODAD" && parseDebtOptionCard(selectedCard) && (
+              !debtCardPayment ||
+              (debtCardPayment === "cash" && cash < parseDebtOptionCard(selectedCard).fullCashAmount) ||
+              (debtCardPayment === "debt" && cash < parseDebtOptionCard(selectedCard).cashUpfront)
+            ))
           } style={{
             width: "100%", padding: "14px", borderRadius: 12, border: "none", cursor: "pointer",
             background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", color: "#fff",
             fontSize: 14, fontWeight: 800,
-            opacity: !diceConfirmed || (["OPPORTUNITY","MARKET","DOODAD"].includes(cellType) && !selectedCard) || (cellType === "MARKET" && action === "sell" && !sellCheck.eligible) || !cashCheck.enough || (cellType === "OPPORTUNITY" && action === "sell" && isStock(selectedCard) && (getOwnedShares(selectedCard) < (parseInt(shares) || 0) || getOwnedShares(selectedCard) === 0)) ? 0.4 : 1,
+            opacity: !diceConfirmed || (["OPPORTUNITY","MARKET","DOODAD"].includes(cellType) && !selectedCard) || (cellType === "MARKET" && action === "sell" && !sellCheck.eligible) || !cashCheck.enough || (cellType === "OPPORTUNITY" && action === "sell" && isStock(selectedCard) && (getOwnedShares(selectedCard) < (parseInt(shares) || 0) || getOwnedShares(selectedCard) === 0)) || (cellType === "DOODAD" && parseDebtOptionCard(selectedCard) && (!debtCardPayment || (debtCardPayment === "cash" && cash < parseDebtOptionCard(selectedCard).fullCashAmount) || (debtCardPayment === "debt" && cash < parseDebtOptionCard(selectedCard).cashUpfront))) ? 0.4 : 1,
           }}>턴 {currentTurn} 기록 (칸 {boardPos})</button>
             </div>
             );
@@ -5762,44 +6033,14 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
       {viewTab === "history" && (
         <div style={{ marginBottom: 16 }}>
           {turnLog.length > 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {turnGroups.map((group, gIdx) => {
-                // 그룹 헤더 텍스트
-                const headerLabel = group.main
-                  ? `T${group.turnNum} 진행`
-                  : `T${group.turnNum} 대기 중 보조 행위`;
-                return (
-                  <div key={gIdx} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {/* ── 그룹 헤더 ── */}
-                    <div style={{
-                      display: "flex", alignItems: "center", gap: 8,
-                      padding: "4px 2px",
-                      borderBottom: "1px solid #27272a",
-                    }}>
-                      <span style={{
-                        fontSize: 11, fontWeight: 700, color: "#a1a1aa",
-                        letterSpacing: "0.03em",
-                      }}>
-                        ┌ {headerLabel}
-                      </span>
-                      <span style={{ flex: 1, borderBottom: "1px dashed #27272a", marginTop: 2 }} />
-                    </div>
-                    {/* ── 메인 행 ── */}
-                    {group.main && renderTurnRow(group.main.entry, group.main.idx, false)}
-                    {/* ── 보조 행 묶음 ── */}
-                    {group.subs.length > 0 && (
-                      <div style={{
-                        display: "flex", flexDirection: "column", gap: 4,
-                        marginLeft: 16, paddingLeft: 10,
-                        borderLeft: "2px solid #27272a",
-                      }}>
-                        {group.subs.map(s => renderTurnRow(s.entry, s.idx, true))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            // 🆕 (2026-05) [PERF-2] memo된 TurnLogList로 분리
+            // turnGroups(useMemo) + onEditTurn/onDeleteTurn(useCallback)이
+            // 안 바뀌면 통째로 렌더 스킵 → 입력창 타이핑 반응성 개선
+            <TurnLogList
+              turnGroups={turnGroups}
+              onEditTurn={handleEditTurn}
+              onDeleteTurn={handleDeleteTurn}
+            />
           ) : (
             <div style={{ textAlign: "center", padding: "30px 0", color: "#52525b", fontSize: 13 }}>아직 기록된 턴이 없습니다</div>
           )}
@@ -9366,43 +9607,49 @@ if (!analysisRaw) return null;
     return { cf, asset, note };
   };
 
-  // 통합 시간축 데이터
-  const unifiedRows = allTurns.map(turn => {
-    const b = getValueAtTurn(bp, turn);
-    const w = getValueAtTurn(wp, turn);
-    const bEvent = bp.find(p => p.turn === turn);
-    const wEvent = wp.find(p => p.turn === turn);
+  // 🆕 (2026-05) [PERF-4-B] unifiedRows 및 파생 계산 묶음을 useMemo로
+  // 이전: bestWorstTab(useState) 토글마다 unifiedRows.map + flatMap + Math.max(...) 전부 재실행
+  //       특히 unifiedRows의 각 row에서 bp.find/wp.find까지 호출 → O(allTurns × bp.length)
+  // 이후: [bp, wp, turns, startAge]가 안 바뀌면 통째로 재사용
+  // 효과: 디브리핑 화면에서 탭(현금흐름↔자산) 전환 반응성 향상
+  const { unifiedRows, maxCF, maxAsset, lastBest, lastWorst } = useMemo(() => {
+    // 통합 시간축 데이터
+    const rows = allTurns.map(turn => {
+      const b = getValueAtTurn(bp, turn);
+      const w = getValueAtTurn(wp, turn);
+      const bEvent = bp.find(p => p.turn === turn);
+      const wEvent = wp.find(p => p.turn === turn);
+      return {
+        turn,
+        age: ageAtTurnUI(turn),  // 🔧 올바른 공식으로 계산
+        bCF: b.cf,
+        bAsset: b.asset,
+        wCF: w.cf,
+        wAsset: w.asset,
+        bNote: bEvent?.note || "",
+        wNote: wEvent?.note || "",
+      };
+    });
+
+    // 🔧 max 값 계산 - bp/wp 모두 포함 (정합성)
+    const allCFValues = rows.flatMap(r => [Math.abs(r.bCF), Math.abs(r.wCF)]);
+    const allAssetValues = rows.flatMap(r => [Math.abs(r.bAsset), Math.abs(r.wAsset)]);
+    const mCF = Math.max(...allCFValues, 100);
+    const mAsset = Math.max(...allAssetValues, 1000);
+
+    // 최종 누적값
+    const lastRow = rows[rows.length - 1] || { bCF: 0, bAsset: 0, wCF: 0, wAsset: 0 };
+
     return {
-      turn,
-      age: ageAtTurnUI(turn),  // 🔧 올바른 공식으로 계산
-      bCF: b.cf,
-      bAsset: b.asset,
-      wCF: w.cf,
-      wAsset: w.asset,
-      bNote: bEvent?.note || "",
-      wNote: wEvent?.note || "",
+      unifiedRows: rows,
+      maxCF: mCF,
+      maxAsset: mAsset,
+      lastBest: { cf: lastRow.bCF, asset: lastRow.bAsset },
+      lastWorst: { cf: lastRow.wCF, asset: lastRow.wAsset },
     };
-  });
-
-  // 🔍 진단: bp/wp 데이터 상태 한 번만 로깅
-  if (typeof window !== "undefined" && !window.__lastAnalysisDebug) {
-    window.__lastAnalysisDebug = Date.now();
-    console.log("[AnalysisReport] bp:", bp);
-    console.log("[AnalysisReport] wp:", wp);
-    console.log("[AnalysisReport] unifiedRows:", unifiedRows);
-    setTimeout(() => { delete window.__lastAnalysisDebug; }, 2000);
-  }
-
-  // 🔧 max 값 계산 - bp/wp 모두 포함 (정합성)
-  const allCFValues = unifiedRows.flatMap(r => [Math.abs(r.bCF), Math.abs(r.wCF)]);
-  const allAssetValues = unifiedRows.flatMap(r => [Math.abs(r.bAsset), Math.abs(r.wAsset)]);
-  const maxCF = Math.max(...allCFValues, 100);
-  const maxAsset = Math.max(...allAssetValues, 1000);
-
-  // 최종 누적값
-  const lastRow = unifiedRows[unifiedRows.length - 1] || { bCF: 0, bAsset: 0, wCF: 0, wAsset: 0 };
-  const lastBest = { cf: lastRow.bCF, asset: lastRow.bAsset };
-  const lastWorst = { cf: lastRow.wCF, asset: lastRow.wAsset };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bp, wp, turns, startAge]);
+  // ↑ getValueAtTurn/ageAtTurnUI/allTurns는 매 렌더 재생성되지만 모두 같은 deps에서 파생되므로 deps에 [bp,wp,turns,startAge]면 충분
 
   return (
     <>

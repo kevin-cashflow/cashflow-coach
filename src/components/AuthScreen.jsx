@@ -51,7 +51,16 @@ export default function AuthScreen({ onGuestMode, onAuthSuccess }) {
     } catch (e) {
       console.error("Auth error:", e);
       const msg = e.message || "";
-      if (msg.includes("Invalid login credentials")) {
+      if (
+        msg.includes("Failed to fetch") ||
+        msg.includes("NetworkError") ||
+        msg.includes("타임아웃") ||
+        msg.includes("fetch")
+      ) {
+        setError(
+          "서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요. (문제가 계속되면 관리자에게 문의해주세요)"
+        );
+      } else if (msg.includes("Invalid login credentials")) {
         setError("이메일 또는 비밀번호가 일치하지 않습니다.");
       } else if (msg.includes("already registered") || msg.includes("User already")) {
         setError("이미 가입된 이메일입니다. 로그인을 시도해주세요.");
