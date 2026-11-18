@@ -1,16 +1,35 @@
-import { createClient } from "@supabase/supabase-js";
+import { authenticateAdmin } from "@/lib/apiAuth";
 
 /**
  * 코칭딜러 코드 발급 API (Admin 전용)
  * POST /api/coach/issue-code
- * Body: { targetEmail, credential, userId (Admin) }
- * Headers: Authorization: Bearer <user_token>
+ * Headers: Authorization: Bearer <supabase access_token>
+ * Body: { targetEmail, credential }   (userId는 더 이상 쓰지 않음 — 무시)
+ *
+ * 보안 (2026-11):
+ * - 권한 확인과 issued_by 기록은 본문 userId가 아니라 토큰의 실제 user.id를 사용한다.
+ *   (update-password / adjust-plays와 동일 방식)
  */
 export async function POST(request) {
   try {
-    const { targetEmail, credential, userId } = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch (_) {
+      return Response.json(
+        { success: false, error: "요청 본문이 올바른 JSON이 아닙니다." },
+        { status: 400 }
+      );
+    }
 
-    if (!targetEmail || !credential || !userId) {
+    const { targetEmail, credential } = body || {};
+
+    // ─── 인증 + 관리자 권한 (토큰 기준) ───
+    const auth = await authenticateAdmin(request);
+    if (auth.error) return auth.error;
+    const { user: requestingUser, supabaseAdmin } = auth;
+
+    if (!targetEmail || !credential) {
       return Response.json(
         { success: false, error: "필수 파라미터 누락" },
         { status: 400 }
@@ -32,54 +51,10 @@ export async function POST(request) {
       );
     }
 
-    // 사용자 토큰을 Authorization 헤더에서 추출
-    const authHeader = request.headers.get("authorization");
-    const userToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-
-    if (!userToken) {
-      return Response.json(
-        { success: false, error: "인증 토큰 없음. 다시 로그인해주세요." },
-        { status: 401 }
-      );
-    }
-
-    // 사용자 토큰으로 Supabase 클라이언트 생성 (RLS 작동)
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: { Authorization: `Bearer ${userToken}` },
-        },
-      }
-    );
-
-    // Admin 권한 검증
-    const { data: admin, error: adminErr } = await supabase
-      .from("admins")
-      .select("user_id")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    if (adminErr) {
-      console.error("admin 조회 에러:", adminErr);
-      return Response.json(
-        { success: false, error: `권한 확인 실패: ${adminErr.message}` },
-        { status: 500 }
-      );
-    }
-
-    if (!admin) {
-      return Response.json(
-        { success: false, error: "관리자 권한이 없습니다." },
-        { status: 403 }
-      );
-    }
-
     const targetUserId = null;
 
     // 중복 코드 방지
-    const { data: existing } = await supabase
+    const { data: existing } = await supabaseAdmin
       .from("coach_codes")
       .select("*")
       .eq("target_email", targetEmail)
@@ -103,7 +78,7 @@ export async function POST(request) {
     let code;
     for (let i = 0; i < 10; i++) {
       code = String(Math.floor(100000 + Math.random() * 900000));
-      const { data: dup } = await supabase
+      const { data: dup } = await supabaseAdmin
         .from("coach_codes")
         .select("id")
         .eq("code", code)
@@ -121,15 +96,15 @@ export async function POST(request) {
       );
     }
 
-    // 코드 삽입
-    const { data: inserted, error: insertError } = await supabase
+    // 코드 삽입 (발급자 = 토큰의 실제 사용자)
+    const { data: inserted, error: insertError } = await supabaseAdmin
       .from("coach_codes")
       .insert({
         code,
         target_email: targetEmail,
         target_user_id: targetUserId,
         credential,
-        issued_by: userId,
+        issued_by: requestingUser.id,
       })
       .select()
       .single();

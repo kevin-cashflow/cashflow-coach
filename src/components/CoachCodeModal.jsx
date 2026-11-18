@@ -168,7 +168,8 @@ export default function CoachCodeModal({ authUser, onSuccess, onClose }) {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${userToken}`,
         },
-        body: JSON.stringify({ code, userId: authUser?.id }),
+        // userId는 보내지 않는다 — 서버가 토큰의 실제 사용자에게 자격을 부여한다.
+        body: JSON.stringify({ code }),
       });
       const data = await res.json();
 

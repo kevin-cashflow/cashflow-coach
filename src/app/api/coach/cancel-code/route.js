@@ -1,58 +1,43 @@
-import { createClient } from "@supabase/supabase-js";
+import { authenticateAdmin } from "@/lib/apiAuth";
 
 /**
  * 코칭딜러 코드 취소 API (Admin 전용)
  * POST /api/coach/cancel-code
- * Body: { codeId, userId }
- * Headers: Authorization: Bearer <user_token>
+ * Headers: Authorization: Bearer <supabase access_token>
+ * Body: { codeId }   (userId는 더 이상 쓰지 않음 — 무시)
+ *
+ * 보안 (2026-11):
+ * - 권한 확인은 본문 userId가 아니라 토큰의 실제 user.id로 한다.
+ *   (update-password / adjust-plays / issue-code와 동일 방식)
  */
 export async function POST(request) {
   try {
-    const { codeId, userId } = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch (_) {
+      return Response.json(
+        { success: false, error: "요청 본문이 올바른 JSON이 아닙니다." },
+        { status: 400 }
+      );
+    }
 
-    if (!codeId || !userId) {
+    const { codeId } = body || {};
+
+    // ─── 인증 + 관리자 권한 (토큰 기준) ───
+    const auth = await authenticateAdmin(request);
+    if (auth.error) return auth.error;
+    const { supabaseAdmin } = auth;
+
+    if (!codeId) {
       return Response.json(
         { success: false, error: "필수 파라미터 누락" },
         { status: 400 }
       );
     }
 
-    const authHeader = request.headers.get("authorization");
-    const userToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-
-    if (!userToken) {
-      return Response.json(
-        { success: false, error: "인증 토큰 없음" },
-        { status: 401 }
-      );
-    }
-
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: { Authorization: `Bearer ${userToken}` },
-        },
-      }
-    );
-
-    // Admin 권한 검증
-    const { data: admin } = await supabase
-      .from("admins")
-      .select("user_id")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    if (!admin) {
-      return Response.json(
-        { success: false, error: "관리자 권한이 없습니다." },
-        { status: 403 }
-      );
-    }
-
     // 코드 조회
-    const { data: codeRow } = await supabase
+    const { data: codeRow } = await supabaseAdmin
       .from("coach_codes")
       .select("*")
       .eq("id", codeId)
@@ -80,7 +65,7 @@ export async function POST(request) {
     }
 
     // 취소 처리
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from("coach_codes")
       .update({
         cancelled_at: new Date().toISOString(),

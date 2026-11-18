@@ -1,10 +1,14 @@
-import { createClient } from "@supabase/supabase-js";
+import { authenticateUser } from "@/lib/apiAuth";
 
 /**
  * 코칭딜러 코드 등록 API (사용자가 코드로 자격 활성화)
  * POST /api/coach/redeem-code
- * Body: { code, userId }
- * Headers: Authorization: Bearer <user_token>
+ * Headers: Authorization: Bearer <supabase access_token>   (필수)
+ * Body: { code }   (userId는 더 이상 쓰지 않음 — 무시)
+ *
+ * 보안 (2026-11):
+ * - Authorization 토큰을 auth.getUser()로 반드시 검증하고, 자격 부여 대상·사용 기록은
+ *   본문 userId가 아니라 토큰의 실제 user.id를 쓴다. (타인 계정 도용/스푸핑 방지)
  *
  * 변경점(2026-04):
  *  - coach_codes.used_at/used_by 업데이트를 Service Role로 강제 실행하도록 변경.
@@ -13,9 +17,24 @@ import { createClient } from "@supabase/supabase-js";
  */
 export async function POST(request) {
   try {
-    const { code, userId } = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch (_) {
+      return Response.json(
+        { success: false, error: "요청 본문이 올바른 JSON이 아닙니다." },
+        { status: 400 }
+      );
+    }
 
-    if (!code || !userId) {
+    const { code } = body || {};
+
+    // ─── 인증: Authorization 헤더 토큰으로 실제 사용자 확인 ───
+    const auth = await authenticateUser(request);
+    if (auth.error) return auth.error;
+    const { user: requestingUser, supabaseUser, supabaseAdmin } = auth;
+
+    if (!code) {
       return Response.json(
         { success: false, error: "필수 파라미터 누락" },
         { status: 400 }
@@ -29,56 +48,25 @@ export async function POST(request) {
       );
     }
 
-    // 사용자 토큰을 Authorization 헤더에서 추출
-    const authHeader = request.headers.get("authorization");
-    const userToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-
-    if (!userToken) {
-      return Response.json(
-        { success: false, error: "인증 토큰 없음. 다시 로그인해주세요." },
-        { status: 401 }
-      );
-    }
-
-    // 사용자 토큰으로 Supabase 클라이언트 생성 (RLS 작동)
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: { Authorization: `Bearer ${userToken}` },
-        },
-      }
-    );
-
-    // Service Role 클라이언트 (RLS 우회 — coach_codes 업데이트용)
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY,
-      {
-        auth: { autoRefreshToken: false, persistSession: false },
-      }
-    );
-
     // 이미 자격 보유 중인지 확인
-    const { data: existing } = await supabase
+    const { data: existing } = await supabaseUser
       .from("coach_credentials")
       .select("credential")
-      .eq("user_id", userId)
+      .eq("user_id", requestingUser.id)
       .maybeSingle();
 
     if (existing) {
       return Response.json(
-        { 
-          success: false, 
-          error: `이미 ${existing.credential === "master" ? "🎓 마스터 강사" : "🎯 코칭딜러"} 자격을 보유하고 있습니다.` 
+        {
+          success: false,
+          error: `이미 ${existing.credential === "master" ? "🎓 마스터 강사" : "🎯 코칭딜러"} 자격을 보유하고 있습니다.`,
         },
         { status: 400 }
       );
     }
 
     // 코드 조회
-    const { data: codeRow, error: codeErr } = await supabase
+    const { data: codeRow, error: codeErr } = await supabaseAdmin
       .from("coach_codes")
       .select("*")
       .eq("code", code)
@@ -115,22 +103,22 @@ export async function POST(request) {
       );
     }
 
-    // target_user_id가 설정되어 있으면 매칭 확인
-    if (codeRow.target_user_id && codeRow.target_user_id !== userId) {
+    // target_user_id가 설정되어 있으면 매칭 확인 (토큰의 실제 사용자 기준)
+    if (codeRow.target_user_id && codeRow.target_user_id !== requestingUser.id) {
       return Response.json(
-        { 
-          success: false, 
-          error: "이 코드는 다른 계정으로 발급되었습니다." 
+        {
+          success: false,
+          error: "이 코드는 다른 계정으로 발급되었습니다.",
         },
         { status: 403 }
       );
     }
 
-    // 자격 부여 (RLS: auth.uid() = user_id 검증)
-    const { error: credErr } = await supabase
+    // 자격 부여 (RLS: auth.uid() = user_id 검증 — 토큰 사용자 본인 행만 생성)
+    const { error: credErr } = await supabaseUser
       .from("coach_credentials")
       .insert({
-        user_id: userId,
+        user_id: requestingUser.id,
         credential: codeRow.credential,
         activated_code_id: codeRow.id,
       });
@@ -149,7 +137,7 @@ export async function POST(request) {
       .from("coach_codes")
       .update({
         used_at: new Date().toISOString(),
-        used_by: userId,
+        used_by: requestingUser.id,
       })
       .eq("id", codeRow.id)
       .is("used_at", null); // race condition 방지: 아직 안 쓰인 레코드만
