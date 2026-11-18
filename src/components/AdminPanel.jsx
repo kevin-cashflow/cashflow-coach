@@ -302,10 +302,21 @@ export default function AdminPanel({ authUser, userIsAdmin }) {
       return;
     }
     try {
+      // 현재 사용자 세션 토큰 가져오기 (Bearer 인증용 — 서버가 토큰으로 어드민 여부를 직접 확인)
+      const { data: { session } } = await supabase.auth.getSession();
+      const userToken = session?.access_token;
+      if (!userToken) {
+        alert("로그인 세션이 만료되었습니다. 다시 로그인해주세요.");
+        return;
+      }
+
       const res = await fetch("/api/admin/update-password", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gateType, newPassword: newPw, userId: authUser?.id }),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${userToken}`,
+        },
+        body: JSON.stringify({ gateType, newPassword: newPw }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "실패");

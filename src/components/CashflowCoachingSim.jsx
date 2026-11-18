@@ -6088,8 +6088,8 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
         </div>
       )}
 
-      {/* 🆕 플레이 모드 인라인 디브리핑 (저장 후 활성화) */}
-      {gameSaved && turnLog.length >= 1 && (
+      {/* 🆕 플레이 모드 인라인 디브리핑 (저장 후 활성화 — 로그인 사용자만) */}
+      {gameSaved && turnLog.length >= 1 && (authUser ? (
         <InlineDebriefSection
           gameKey={savedGameKey}
           results={(() => {
@@ -6137,7 +6137,24 @@ function PlayMode({ version, currentPlayer, onSaveGame, onReviewPrompt, reviewCl
             };
           })()}
         />
-      )}
+      ) : (
+        <div style={{
+          marginTop: 20,
+          padding: 18,
+          borderRadius: 12,
+          background: "#18181b",
+          border: "1px solid #3f3f46",
+          textAlign: "center",
+        }}>
+          <div style={{ fontSize: 13, color: "#fbbf24", fontWeight: 800, marginBottom: 6 }}>
+            🔒 디브리핑 AI 분석은 로그인 후 이용할 수 있습니다
+          </div>
+          <div style={{ fontSize: 11, color: "#a1a1aa", lineHeight: 1.6 }}>
+            게스트 모드에서는 기록 저장과 AI 피드백이 지원되지 않습니다.<br />
+            로그인한 뒤 다시 진행하시면 이번 게임을 저장하고 디브리핑을 받을 수 있습니다.
+          </div>
+        </div>
+      ))}
 
       {/* 🚧 DebriefSection은 프로필 탭으로 이동됨 (위치 변경) — 컴포넌트 자체는 export 유지 */}
 
@@ -8484,6 +8501,43 @@ export const computeBestWorstPaths = (turnLogData, totalTurns, startAge = 20) =>
 
 
 // ═══════════════════════════════════════════════════
+// 🛡️ /api/feedback 인증 헬퍼 — 로그인한 Supabase 사용자만 AI 피드백을 호출할 수 있습니다.
+//   (무인증 크레딧 소진 경로 차단: 게스트/비로그인 세션이면 호출 전에 막고 안내)
+// ═══════════════════════════════════════════════════
+async function getFeedbackAuthHeaders() {
+  let token = null;
+  try {
+    const { data } = await supabase.auth.getSession();
+    token = data?.session?.access_token || null;
+  } catch (e) {
+    console.warn("[feedbackAuth] 세션 조회 실패:", e?.message);
+  }
+
+  if (!token) {
+    const err = new Error("AI 피드백은 로그인 후 이용할 수 있습니다. 로그인한 뒤 다시 시도해 주세요.");
+    err.code = "AUTH_REQUIRED";
+    err.status = 401;
+    throw err;
+  }
+
+  return {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${token}`,
+  };
+}
+
+// 🛡️ 서버 401 응답을 사용자에게 친절하게 안내
+export function feedbackAuthError(status) {
+  if (status === 401) {
+    const err = new Error("로그인이 필요합니다(세션 만료). 다시 로그인한 뒤 시도해 주세요.");
+    err.code = "AUTH_REQUIRED";
+    err.status = 401;
+    return err;
+  }
+  return null;
+}
+
+// ═══════════════════════════════════════════════════
 // 🎯 runFullAnalysis: 디브리핑 풀 분석 (export, 컴포넌트 외부에서 호출 가능)
 // ═══════════════════════════════════════════════════
 // 입력: simText (buildPromptText 결과), version, turns, results (turnLog)
@@ -8511,7 +8565,7 @@ export async function runFullAnalysis({ simText, version, turns, results, startA
   try {
       response = await fetch("/api/feedback", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await getFeedbackAuthHeaders(),
         signal: controller.signal,
         body: JSON.stringify({
           model: MODEL_SONNET,
@@ -8901,7 +8955,7 @@ RULES:
       if (!response.ok) {
         const errBody = await response.text().catch(() => "");
         console.error("API HTTP error:", response.status, errBody.substring(0, 300));
-        throw new Error(`API 오류 (${response.status}). 잠시 후 다시 시도해주세요.`);
+        throw feedbackAuthError(response.status) || new Error(`API 오류 (${response.status}). 잠시 후 다시 시도해주세요.`);
       }
 
       let data;
@@ -10786,7 +10840,7 @@ export async function generatePaidFeedback({ tier, version, turns, simText, extr
   try {
     response = await fetch("/api/feedback", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await getFeedbackAuthHeaders(),
       signal: controller.signal,
       body: JSON.stringify({
         model, max_tokens: maxTokens,
@@ -10808,7 +10862,7 @@ export async function generatePaidFeedback({ tier, version, turns, simText, extr
   clearTimeout(timeoutId);
   console.log(`[generatePaidFeedback] API 응답 수신 — status=${response.status}`);
   if (!response.ok) {
-    const err = new Error(`API 오류 (${response.status})`);
+    const err = feedbackAuthError(response.status) || new Error(`API 오류 (${response.status})`);
     err.status = response.status;
     throw err;
   }
@@ -13212,7 +13266,7 @@ function DebriefSection({ results, version, turns, deck, gameSnapshot }) {
       const response = await fetch("/api/feedback", {
         method: "POST",
         signal: controller.signal,
-        headers: { "Content-Type": "application/json" },
+        headers: await getFeedbackAuthHeaders(),
         body: JSON.stringify({
           model: MODEL_SONNET,
           max_tokens: 8192,
@@ -13591,7 +13645,7 @@ RULES:
       if (!response.ok) {
         const errBody = await response.text().catch(() => "");
         console.error("API HTTP error:", response.status, errBody.substring(0, 300));
-        setError(`API 오류 (${response.status}). 잠시 후 다시 시도해주세요.`);
+        setError(feedbackAuthError(response.status)?.message || `API 오류 (${response.status}). 잠시 후 다시 시도해주세요.`);
         setMode(null);
         return;
       }
